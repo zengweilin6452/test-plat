@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mobile-auto 查看器</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <span id="service">mobile-auto viewer</span>
+    <select id="device-select" title="选择设备"><option value="">默认设备</option></select>
+    <span id="device-state">设备:检测中…</span>
+    <span id="device-info" class="muted"></span>
+    <span id="lease-state"></span>
+    <span class="spacer"></span>
+    <button id="btn-inspect" type="button" title="冻结当前画面并采集 UI 树,进入检查模式">采集检查</button>
+    <button id="btn-live" type="button" class="hidden" title="解除冻结,恢复实时画面">恢复实时</button>
+    <label id="control-label"><input id="control-toggle" type="checkbox" /> 直接控制</label>
+    <button id="btn-key-back" type="button" disabled>返回</button>
+    <button id="btn-key-home" type="button" disabled>主屏</button>
+    <button id="btn-wake" type="button" disabled>亮屏</button>
+    <span id="control-note"></span>
+  </header>
+  <nav id="view-tabs" class="tabs">
+    <button class="tab active" data-view="debug" type="button">调试</button>
+    <button class="tab" data-view="evidence" type="button">证据</button>
+  </nav>
+  <main>
+    <section id="preview-pane">
+      <details id="occupancy-box">
+        <summary>设备占用与运行态</summary>
+        <table id="occupancy-table">
+          <thead><tr><th>设备</th><th>占用</th><th>运行中用例</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </details>
+      <div id="screen-head">
+        <span id="mode-badge">实时</span>
+        <span id="freshness"></span>
+        <span id="preview-time"></span>
+      </div>
+      <div id="stage">
+        <img id="preview" alt="设备画面" />
+        <div id="overlay"></div>
+        <span id="stale-badge" class="hidden">画面滞后</span>
+      </div>
+      <p id="stream-notice" class="hidden"></p>
+      <p id="freeze-notice" class="hidden"></p>
+      <p id="preview-message">实时模式:测试运行中画面不中断。点「采集检查」冻结画面与 UI 树进行拾取。</p>
+    </section>
+    <section id="inspect-pane">
+      <nav class="tabs">
+        <button class="tab active" data-tab="native" type="button">控件</button>
+        <button class="tab" data-tab="image" type="button">图像</button>
+      </nav>
+      <div id="tab-native">
+        <h2>元素信息 <small id="pick-point"></small></h2>
+        <table id="attr-table"><tbody></tbody></table>
+        <h2>定位候选 <small>重叠时自行选择</small></h2>
+        <ul id="candidate-list"><li class="empty">点击画面或树节点后列出候选。</li></ul>
+        <div id="validate-box">
+          <button id="btn-validate" type="button" disabled>验证选中定位</button>
+          <span id="validate-note"></span>
+        </div>
+        <div id="expression-box">
+          <code id="expression"></code>
+          <button id="btn-copy" type="button" disabled>复制表达式</button>
+        </div>
+      </div>
+      <div id="tab-image" class="hidden">
+        <h2>图像模板 <small>检查模式下框选区域</small></h2>
+        <p id="image-hint">先「采集检查」冻结画面,再在画面上按住拖动框选目标。</p>
+        <table id="region-table"><tbody></tbody></table>
+        <div id="image-fields">
+          <label>模板名 <input id="tpl-name" type="text" placeholder="demo/target.png" /></label>
+          <label>阈值 <input id="tpl-confidence" type="number" min="0.1" max="1" step="0.01" value="0.90" /></label>
+        </div>
+        <div id="image-actions">
+          <button id="btn-tpl-save" type="button" disabled>保存模板</button>
+          <button id="btn-tpl-validate" type="button" disabled>重新匹配验证</button>
+        </div>
+        <p id="tpl-result"></p>
+        <div id="expression-box">
+          <code id="image-expression"></code>
+          <button id="btn-image-copy" type="button" disabled>复制 IMAGE 定位</button>
+        </div>
+      </div>
+    </section>
+    <section id="tree-pane">
+      <h2>UI 层级树 <small id="tree-time"></small></h2>
+      <input id="tree-filter" type="text" placeholder="搜索:text/resource-id/class…" />
+      <p id="tree-meta">「采集检查」后显示;点击树节点联动选中。</p>
+      <ul id="tree"></ul>
+    </section>
+    <section id="evidence-pane">
+      <h2>失败证据 <small id="evidence-count"></small></h2>
+      <p id="evidence-hint">用例失败时经 --mobile-evidence 自动采集;此处只读浏览,不提供删除或修改。</p>
+      <div class="evidence-layout">
+        <ul id="evidence-list"></ul>
+        <div id="evidence-detail" class="hidden">
+          <img id="evidence-frame" alt="证据画面" class="hidden" />
+          <table id="evidence-attr"><tbody></tbody></table>
+          <ul id="evidence-files"></ul>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="/coords.js"></script>
+  <script src="/snapshot_freeze.js"></script>
+  <script src="/evidence.js"></script>
+  <script src="/runs.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

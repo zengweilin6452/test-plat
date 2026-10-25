@@ -1,0 +1,81 @@
+name: CI
+
+# 关键：vendor 回归与平台测试必须在【宿主等价环境】跑。
+# DSH 沙箱里 pytest 的 mkdir(mode=0o700) 与 pip 的临时文件都会被拒（WinError 5/13），
+# 所以 CI 是 P0 验收的唯一可靠执行点（docs/plan/development-plan.md §12.1）。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  vendor:
+    name: vendor 只读校验 + 回归
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: vendor 只读校验（sha256 逐字节）
+        run: python scripts/vendor_sync.py check
+      - name: 安装 vendor（可编辑）
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ./vendor/mobile_auto -e ./vendor/mobile_perf
+          python -m pip install pytest pytest-asyncio httpx
+      - name: mobile_auto unit + contract
+        run: python -m pytest vendor/mobile_auto/tests/unit vendor/mobile_auto/tests/contract -q
+      - name: mobile_perf unit + contract
+        run: python -m pytest vendor/mobile_perf/tests/unit vendor/mobile_perf/tests/contract -q
+
+  server:
+    name: 后端测试（需 PG）
+    runs-on: windows-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: testdock
+          POSTGRES_PASSWORD: testdock
+          POSTGRES_DB: testdock
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TESTDOCK_DATABASE_URL: postgresql+psycopg://testdock:testdock@127.0.0.1:5432/testdock
+      PYTHONPATH: ${{ github.workspace }}/vendor/mobile_auto/src;${{ github.workspace }}/vendor/mobile_perf/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 安装后端依赖
+        working-directory: server
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: alembic 升级（建 24 表）
+        working-directory: server
+        run: python -m alembic upgrade head
+      - name: 后端测试
+        working-directory: server
+        run: python -m pytest -q
+
+  web:
+    name: 前端构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 安装依赖并构建
+        working-directory: web
+        run: |
+          npm ci || npm install
+          npm run build
