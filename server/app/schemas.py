@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 RunState = Literal[
     "queued", "dispatching", "running", "finalizing", "completed", "errored", "cancelled"
@@ -86,3 +86,268 @@ class OverviewOut(BaseModel):
 
 class GenericObject(BaseModel):
     model_config = ConfigDict(extra="allow")
+
+# ---------------------------------------------------------------------------
+# P4：性能指标 / 三态门禁 / 基线（追加，不改动上面既有模型）
+# ---------------------------------------------------------------------------
+
+GateVerdict = Literal["passed", "failed", "not_tested"]
+GateMode = Literal["original", "reanalysis"]
+ReasonCode = Literal[
+    "profile_mismatch",
+    "sample_count_below_minimum",
+    "metric_missing",
+    "device_degraded",
+    "gate_policy_missing",
+    "run_incomplete",
+]
+
+
+class MetricOut(BaseModel):
+    """单个指标。**缺失指标 value 为 None + missing_reason，绝不写 0.0**。"""
+
+    model_config = ConfigDict(extra="allow")
+    id: Any | None = None
+    component_id: Any | None = None
+    key: str
+    metric_version: str | None = None
+    unit: str = ""
+    scope: str | None = None
+    window_key: str | None = None
+    statistic: Literal["median", "p95", "mean", "min", "max"]
+    sample_count: int
+    value: float | None = None
+    supported: bool = True
+    missing_reason: str | None = None
+    missing_reason_text: str | None = None
+
+
+class RunMetricsOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    run_id: Any
+    state: str
+    outcome: str | None = None
+    reason_code: str | None = None
+    device_profile: str | None = None
+    device_profile_raw: Any | None = None
+    device_profile_error: str | None = None
+    components: list[dict[str, Any]] = []
+    metric_total: int = 0
+    measured_total: int = 0
+    missing_total: int = 0
+
+
+class BaselineOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: Any
+    project_id: Any | None = None
+    application_id: Any | None = None
+    environment_id: Any | None = None
+    suite_version_id: Any | None = None
+    profile_id: Any | None = None
+    profile: str | None = None
+    profile_raw: str | None = None
+    profile_error: str | None = None
+    source_component_id: Any | None = None
+    source_run_id: Any | None = None
+    name: str
+    version: int
+    created_at: datetime | None = None
+    metrics: list[dict[str, Any]] = []
+
+
+class GatePolicyOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: Any
+    project_id: Any | None = None
+    application_id: Any | None = None
+    application_name: str | None = None
+    name: str
+    version: int
+    rules: dict[str, Any] = {}
+    thresholds: dict[str, Any] = {}
+    min_samples: int | None = None
+    rules_sha256: str | None = None
+    rules_error: str | None = None
+    created_at: datetime | None = None
+
+
+class GateEvaluationOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    evaluation_id: Any
+    mode: GateMode
+    verdict: GateVerdict
+    reason: ReasonCode | None = None
+    reason_text: str | None = None
+    checks: list[dict[str, Any]] = []
+    policy_id: Any | None = None
+    policy_version: int | None = None
+    baseline_id: Any | None = None
+    request_key: str | None = None
+    created_at: datetime | None = None
+
+
+
+# --------------------------------------------------------------------------- #
+# P2 追加：任务 / 修订 / 套件的请求模型
+# --------------------------------------------------------------------------- #
+# 只在文件尾部追加，不重排既有内容（顺序：P1 只读模型 -> P2 写模型）。
+# 校验口径来自 docs/plan/api-design.md：name 1-60；package_name 正则且 <=120；
+# app_version <=40；文档用 module 一词，DB 里对应 task_revisions.test_type。
+# --------------------------------------------------------------------------- #
+
+TRACK_CLIENT = "web-client"
+
+#: 平台枚举（与 applications.platform 的 CHECK 一致，按字母序方便前端渲染）
+Platform = Literal["android", "ios", "web"]
+#: DB 里叫 test_type，文档里叫 module，取值一致
+TestType = Literal["ui", "performance", "joint"]
+
+_PACKAGE_NAME_RE = r"^[a-zA-Z]\w*(\.[a-zA-Z]\w*)+$"
+
+
+class TaskCreateIn(BaseModel):
+    """POST /tasks 请求体。
+
+    build_id / suite_version_id 都允许为空：先建草稿、后补齐是主要流程
+    （readiness='draft' 的 DB CHECK 只要求非 validated 时可以为空）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=60)
+    test_type: TestType
+    platform: Platform
+    application_id: str = Field(min_length=1)
+    #: 可选：不传则由服务端按 application_id 反查
+    project_id: str | None = None
+    build_id: str | None = None
+    suite_version_id: str | None = None
+    #: task_revisions.environment_id 是 NOT NULL，但不属于业务概念；
+    #: 不传时回落到该项目下最早创建的 environment。
+    environment_id: str | None = None
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskPatchIn(BaseModel):
+    """PATCH /tasks 请求体。
+
+    lock_version 必填：这是乐观锁的 CAS 条件，缺了就无法区分"读后写"与"盲写"。
+    其余字段为 None 表示"不改"（区分不了显式置空，需要清空时用 null 语义的字段除外，
+    本阶段没有需要清空的字段，因此刻意不做 undefined 区分）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    lock_version: int = Field(ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=60)
+    test_type: TestType | None = None
+    platform: Platform | None = None
+    build_id: str | None = None
+    suite_version_id: str | None = None
+    environment_id: str | None = None
+    #: None = 沿用旧 config；非 None = 整份替换（修订是快照，不做深合并）
+    config: dict[str, Any] | None = None
+
+
+class TaskValidateIn(BaseModel):
+    """POST /tasks/{id}/validate 请求体（当前无需参数，占位以保持接口可扩展）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SuiteDiscoverIn(BaseModel):
+    """POST /suites/{id}/discover 请求体。
+
+    suite_root 是宿主路径。test_suites 表没有"配置"列（0001 真源），
+    manifest 又只存在于 suite_versions 上，所以路径只能由请求体给出；
+    后续若要固化到 suite 上，需要 0002 加列，本阶段不做。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    suite_root: str = Field(min_length=1)
+    #: 可选覆盖；缺省 suite:<id> 与 "local"（两列在 DB 里都是 NOT NULL）
+    source_ref: str | None = None
+    source_commit: str | None = None
+
+
+class RevisionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    task_id: str
+    revision: int
+    test_type: str
+    readiness: str
+    build_id: str | None = None
+    suite_version_id: str | None = None
+    environment_id: str | None = None
+    config: dict[str, Any] = Field(default_factory=dict)
+    created_by: str | None = None
+    created_at: datetime | None = None
+
+
+class SuiteVersionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    suite_id: str
+    version: int
+    source_ref: str
+    source_commit: str
+    case_count: int = 0
+    case_keys: list[str] = Field(default_factory=list)
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime | None = None
+
+
+# --------------------------------------------------------------------------- #
+# P2 追加：GET /tasks/{id}/revisions 的**冻结**契约
+# --------------------------------------------------------------------------- #
+# 为什么要单独定义一份"字段全部写死"的模型：前端时间线已经按这组字段渲染路由响应，
+# 如果服务端改成可选字段 + 前端破折号兜底，字段名一漂移就会静默变成 "—"。
+# 因此这里：
+#   1. 字段名、类型、是否必填全部显式写死（不用 from_attributes 的宽松猜测）；
+#   2. 多余字段一律 forbid（服务端多给字段 = 契约变了，必须同时改前端）；
+#   3. service 层用 model_validate 自检，保证"模型"与"实际返回"永远不会漂移。
+# 注意 environment_id / build_id / suite_version_id 是**可空但必填**：
+# 键必须出现（NULL 是合法值），这样前端可以无条件读取而不做键存在性判断。
+
+
+class TaskRevisionRecord(BaseModel):
+    """一条任务修订（不可变快照）。GET /tasks/{id}/revisions 的 items 元素。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: 修订 id（UUID 文本）
+    id: str
+    #: 所属任务 id，前端用它做时间线的归属校验
+    task_id: str
+    #: 修订序号，从 1 开始单调递增；列表按它倒序
+    revision: int
+    #: 测试类型：ui / performance / joint
+    test_type: TestType
+    #: 就绪状态：draft / validated
+    readiness: Literal["draft", "validated"]
+    #: 关联构建；未绑定为 null（键一定存在）
+    build_id: str | None
+    #: 关联套件版本；未绑定为 null（键一定存在）
+    suite_version_id: str | None
+    #: 执行环境；DB 里 NOT NULL，但保留可空以兼容历史数据
+    environment_id: str | None
+    #: 配置快照（整份替换语义，不做深合并）
+    config: dict[str, Any]
+    #: 产生该修订的 actor
+    created_by: str
+    #: 创建时间（ISO8601 字符串）
+    created_at: datetime
+
+
+class TaskRevisionListOut(BaseModel):
+    """GET /tasks/{id}/revisions 的响应体：items 按 revision 倒序。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[TaskRevisionRecord]
+    total: int

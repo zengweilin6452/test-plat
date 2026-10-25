@@ -44,4 +44,53 @@ class Settings(BaseSettings):
         return self.runtime_dir / "tmp"
 
 
+    # ----------------------------------------------------------------- #
+    # P3 追加：运行生命周期 / runner 子进程 / 内部协议
+    # ----------------------------------------------------------------- #
+    @property
+    def repo_root(self) -> Path:
+        """仓库根（runner 的 cwd 与 PYTHONPATH 都以它为基准）。"""
+        return REPO_ROOT
+
+    @property
+    def control_token_path(self) -> Path:
+        """内部协议令牌文件（§8.3）：API 启动时生成，runner 通过 --control-token 读取。"""
+        return self.data_dir / "control.token"
+
+
+# --------------------------------------------------------------------------- #
+# P3 追加：后台调度开关 / 假 runner 开关
+# --------------------------------------------------------------------------- #
+#: TESTDOCK_SCHEDULER=0 时 API 不启动 dispatcher / reconciler 后台循环。
+#: 单元测试用（domain 层测试不需要一个偷跑的后台循环去抢库里的 queued run）。
+#: 默认开启：P3 验收要求 POST /runs 之后真的被派发。
+SCHEDULER_ENV = "TESTDOCK_SCHEDULER"
+
+#: TESTDOCK_FAKE_RUNNER=1 时 runner 走假执行（不需要真机/ADB）。
+#: 这是 P3 集成测试能在无真机环境下全绿的前提，也是演示通道。
+FAKE_RUNNER_ENV = "TESTDOCK_FAKE_RUNNER"
+
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _truthy(value: str | None, *, default: bool = False) -> bool:
+    if value is None or value == "":
+        return default
+    return value.strip().lower() in _TRUTHY
+
+
+def scheduler_enabled() -> bool:
+    """后台调度是否启用（默认启用）。"""
+    import os
+
+    return _truthy(os.environ.get(SCHEDULER_ENV), default=True)
+
+
+def fake_runner_enabled() -> bool:
+    """是否使用假 runner（默认关闭）。"""
+    import os
+
+    return _truthy(os.environ.get(FAKE_RUNNER_ENV))
+
+
 settings = Settings()
