@@ -1,0 +1,59 @@
+"""把 spawn.spawn_runner 包成一个"测试可替换"的接缝。
+
+为什么需要这一层：
+  dispatcher 需要在**集成测试里**验证"派发"这件事本身（领租约 + dispatching +
+  写事件），而不是每次都真的起一个子进程。测试用 `use_spawner()` 换掉真实 spawn，
+  生产路径永远是 spawn_runner。这是依赖注入，不是 monkey patch。
+"""
+
+from __future__ import annotations
+
+from typing import Any, Awaitable, Callable, Mapping, Protocol
+
+from . import spawn as spawn_mod
+
+
+class Spawner(Protocol):
+    def __call__(
+        self,
+        *,
+        run_id: str,
+        config: Mapping[str, Any],
+        lease: Mapping[str, Any],
+        control_url: str | None = None,
+        control_token: str | None = None,
+        start_tail: bool = True,
+    ) -> Awaitable[int]: ...
+
+
+_spawner: Spawner = spawn_mod.spawn_runner
+
+
+def use_spawner(spawner: Spawner | None) -> None:
+    """替换/恢复 spawner（测试用；传 None 恢复真实实现）。"""
+    global _spawner
+    _spawner = spawner or spawn_mod.spawn_runner
+
+
+def current_spawner() -> Spawner:
+    return _spawner
+
+
+async def spawn(
+    *,
+    run_id: str,
+    config: Mapping[str, Any],
+    lease: Mapping[str, Any],
+    control_url: str | None = None,
+    control_token: str | None = None,
+) -> int:
+    return await _spawner(
+        run_id=run_id,
+        config=config,
+        lease=lease,
+        control_url=control_url,
+        control_token=control_token,
+    )
+
+
+__all__ = ["Spawner", "current_spawner", "spawn", "use_spawner"]
