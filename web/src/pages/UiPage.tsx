@@ -7,9 +7,9 @@
  * 硬约束：断言结果与失败现场都来自后端，接口未接入时只显示空态。
  */
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError } from '../api/client'
-import { fetchRuns } from '../api/endpoints'
+import { fetchRuns, fetchTasks } from '../api/endpoints'
 import { StatusBadge } from '../components/Badge'
 import { Button } from '../components/Button'
 import { LinkButton } from '../components/Button'
@@ -18,12 +18,15 @@ import { ContextBar, PlannedNotice, PrimaryAction, Toolbar } from '../components
 import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
 import { Table, type Column } from '../components/Table'
+import { TaskDrawer } from '../components/TaskDrawer'
+import { TaskWizard } from '../components/TaskWizard'
+import { useToast } from '../components/Toast'
 import { Tabs, type TabItem } from '../components/Tabs'
 import { MODULE_NAMES, TARGET_CATALOG, isImplementedPlatform } from '../constants'
 import { displayStatus } from '../lib/display'
 import { fmtDateTime } from '../lib/fmt'
 import { useTargetScope } from '../store/scope'
-import type { RunRecord } from '../types'
+import type { CreateTaskResponse, Platform, RunRecord, TaskRecord } from '../types'
 
 type UiTab = 'runs' | 'suites' | 'cases'
 
@@ -37,13 +40,46 @@ export function UiPage() {
   const { targetScope, setTargetScope } = useTargetScope()
   const [tab, setTab] = useState<UiTab>('runs')
   const [keyword, setKeyword] = useState('')
+  const [wizardOpen, setWizardOpen] = useState(false)
+  const [activeTask, setActiveTask] = useState<TaskRecord | null>(null)
   const planned = !isImplementedPlatform(targetScope)
+  const queryClient = useQueryClient()
+  const toast = useToast()
 
   const runsQuery = useQuery({
     queryKey: ['runs', 'ui', targetScope],
     queryFn: ({ signal }) => fetchRuns(targetScope, 100, signal),
     retry: false,
   })
+
+  // 任务抽屉需要任务对象，而运行记录只带 task_id：按 id 反查任务列表（只读、失败不影响本页表格）
+  const tasksQuery = useQuery({
+    queryKey: ['tasks', 'by-id'],
+    queryFn: ({ signal }) => fetchTasks(undefined, undefined, signal),
+    retry: false,
+  })
+  const taskById = useMemo(() => {
+    const map = new Map<string, TaskRecord>()
+    for (const task of tasksQuery.data?.items ?? []) map.set(task.id, task)
+    return map
+  }, [tasksQuery.data])
+
+  function openTaskOfRun(run: RunRecord) {
+    const task = run.task_id ? taskById.get(run.task_id) : undefined
+    if (task) {
+      setActiveTask(task)
+      return
+    }
+    // 找不到对应任务时不伪造一条：明确告诉用户任务详情接口/数据缺失
+    toast.show(run.task_id ? '任务 ' + run.task_id + ' 不在当前任务列表中，无法打开详情' : '该运行没有关联任务')
+  }
+
+  function handleCreated(created: CreateTaskResponse) {
+    toast.show('任务已创建：' + created.display_id + '（编号 ' + created.id + '）')
+    setWizardOpen(false)
+    void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    void queryClient.invalidateQueries({ queryKey: ['runs'] })
+  }
 
   const error = runsQuery.isError ? describeError(runsQuery.error) : null
   const uiRuns = useMemo(() => {
@@ -94,9 +130,9 @@ export function UiPage() {
       key: 'action',
       header: '操作',
       align: 'right',
-      render: () => (
-        <LinkButton onClick={() => undefined}>
-          查看报告<span aria-hidden="true">›</span>
+      render: (run) => (
+        <LinkButton onClick={() => openTaskOfRun(run)}>
+          任务详情<span aria-hidden="true">›</span>
         </LinkButton>
       ),
     },
@@ -107,7 +143,7 @@ export function UiPage() {
       <PageHeading
         title="UI 自动化"
         description="用例、套件与执行记录：断言结果可追溯到报告与现场证据"
-        actions={<PrimaryAction label="新建用例" icon="plus" />}
+        actions={<PrimaryAction label="新建任务" icon="plus" onClick={() => setWizardOpen(true)} />}
       />
       <ContextBar
         scope={targetScope}
@@ -168,6 +204,7 @@ export function UiPage() {
                 rows={uiRuns}
                 rowKey={(run) => run.id}
                 ariaLabel="UI 自动化执行记录"
+                onRowClick={openTaskOfRun}
                 footer={<span>共 {uiRuns.length} 条 UI 运行 · 类型 {MODULE_NAMES.ui}</span>}
               />
             )}
@@ -180,6 +217,14 @@ export function UiPage() {
           />
         )}
       </Panel>
+
+      <TaskWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onCreated={handleCreated}
+        initialPlatform={targetScope === 'all' ? 'android' : (targetScope as Platform)}
+      />
+      <TaskDrawer open={Boolean(activeTask)} task={activeTask} onClose={() => setActiveTask(null)} />
     </>
   )
 }

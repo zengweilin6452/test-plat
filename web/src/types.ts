@@ -269,3 +269,97 @@ export interface TasksResponse {
   items: TaskRecord[]
   total: number
 }
+
+
+/** ---- 以下为 P2 新建任务向导 / 任务详情抽屉新增的类型（契约见 docs/plan/api-design.md §2.3，后端由同事并行实现）---- */
+
+/**
+ * POST /api/v1/tasks 的请求体（api-design.md §2.3 请求样例）。
+ *
+ * 只发后端契约里声明的字段，不塞前端自造字段：
+ * - android 端 package_name 必填；web / ios 端应用标识走 URL / Bundle ID（由目标应用决定），
+ *   因此 package_name 可省略，不在这里伪造一个包名。
+ * - duration_s 只有 module != 'ui' 才发（api-design.md：module != ui 必填）。
+ */
+export interface CreateTaskRequest {
+  /** 幂等键 UUIDv4（api-design.md §1.3） */
+  request_key: string
+  project_id?: string
+  application_id?: string
+  /** 1–60 字符 */
+  name: string
+  module: TestModule
+  platform: Platform
+  /** Android 包名：^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$，≤120 */
+  package_name?: string | null
+  /** 应用版本，≤40 */
+  app_version?: string | null
+  suite_id?: string | null
+  scenario?: string | null
+  device?: { resource_id: string; allow_busy_queue: boolean } | null
+  perf?: { duration_s: number; items: string[]; extra_items?: string[] } | null
+  ui?: null
+}
+
+/** POST /api/v1/tasks 的响应（201） */
+export interface CreateTaskResponse {
+  id: string
+  display_id: string
+  lifecycle: TaskLifecycle
+  revision: {
+    id: string
+    readiness: TaskReadiness
+    lock_version: number
+  }
+}
+
+/**
+ * GET /api/v1/tasks/{id}/revisions 的一行。
+ *
+ * 后端字段名尚未冻结，这里按 api-design.md 的命名习惯（snake_case）声明，
+ * 同时把 P2 可能出现的等价写法标为可选 —— 渲染时用 asRevisionView 归一，
+ * 缺失字段显示破折号，绝不猜值。
+ */
+export interface TaskRevisionRecord {
+  id: string
+  /** 修订号（revision 或 revision_no） */
+  revision: number | null
+  readiness: TaskReadiness | null
+  test_type: TestModule | null
+  created_at: string | null
+  created_by?: string | null
+  build_id?: string | null
+  suite_version_id?: string | null
+  environment_id?: string | null
+  /** 脱敏配置快照 */
+  config?: Record<string, unknown> | null
+  /** 该修订是否已绑定运行（绑定后不可修改，api-design.md §1.3） */
+  bound_run_id?: string | null
+  note?: string | null
+}
+
+/** GET /api/v1/tasks/{id}/revisions 响应（列表） */
+export interface TaskRevisionsResponse {
+  items: TaskRevisionRecord[]
+  total?: number
+}
+
+/**
+ * POST /api/v1/tasks/{id}/validate 的响应。
+ * 422 readiness_incomplete 时返回 { code, message, details: { missing: [...] } }，
+ * details 里的缺失项由后端给出，前端只展示不推导。
+ */
+export interface TaskValidateResponse {
+  id: string
+  lifecycle?: TaskLifecycle
+  readiness: TaskReadiness
+  revision?: { id: string; readiness: TaskReadiness; lock_version: number } | null
+}
+
+/** 422 readiness_incomplete 的 details（字段名可能是 missing / missing_checks / items） */
+export interface ReadinessIncompleteDetails {
+  missing?: unknown
+  missing_checks?: unknown
+  items?: unknown
+  [key: string]: unknown
+}

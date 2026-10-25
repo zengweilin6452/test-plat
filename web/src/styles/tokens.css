@@ -524,3 +524,118 @@ dialog.drawer { margin: 0 0 0 auto; width: min(570px, 100vw); height: 100dvh; ma
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- P2 新增：新建任务向导 / 任务详情抽屉（只追加，不改上方既有规则） ---- */
+
+/* 三步向导的步骤指示 */
+.wizard-steps {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-10);
+  flex-wrap: wrap;
+}
+.wizard-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 5px var(--space-5);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-3xs);
+  background: var(--paper);
+  color: var(--muted-strong);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.wizard-step[aria-current="step"] {
+  border-color: var(--blue);
+  color: var(--blue);
+  background: var(--blue-light);
+  font-weight: var(--fw-semi);
+}
+.wizard-step b {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: var(--radius-pill);
+  background: #eef1f7;
+  color: var(--muted-strong);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semi);
+}
+.wizard-step[aria-current="step"] b { background: var(--blue); color: #fff; }
+.wizard-arrow { color: #c4ccd9; font-size: var(--fs-xs); }
+
+/* 表单字段：标签 + 控件 + 字段下方错误提示 */
+.form-grid { display: grid; gap: var(--space-7); }
+.form-grid.two { grid-template-columns: 1fr 1fr; }
+.field { display: grid; gap: var(--space-2); min-width: 0; }
+.field > label,
+.field > .field-label {
+  font-size: var(--fs-xs);
+  color: #64718a;
+  font-weight: var(--fw-medium);
+}
+.field input,
+.field select,
+.field textarea { width: 100%; }
+.field .field-hint { font-size: var(--fs-2xs); color: var(--muted-faint); }
+.field-error {
+  font-size: var(--fs-2xs);
+  color: var(--red);
+  line-height: 1.7;
+}
+.field-error ul { margin: 0; padding-left: var(--space-6); }
+.field input[aria-invalid="true"],
+.field select[aria-invalid="true"],
+.field textarea[aria-invalid="true"] { border-color: #e0a7ae; background: #fffafb; }
+
+/* 模块 / 设备可选卡 */
+.choice-grid { display: grid; gap: var(--space-4); }
+.choice-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.choice-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.choice {
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  border-radius: var(--radius-sm);
+  padding: var(--space-5) var(--space-6);
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.choice:hover:not(:disabled) { border-color: #a9b9ee; }
+.choice[aria-pressed="true"] { border-color: #8ba2f2; background: #f8faff; }
+.choice strong { font-size: var(--fs-sm); color: var(--ink-soft); font-weight: var(--fw-semi); }
+.choice small { font-size: var(--fs-2xs); color: var(--muted); }
+.choice .choice-meta { font-size: var(--fs-2xs); color: var(--muted-faint); }
+
+/* 确认页汇总列表 */
+.summary-dl {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: var(--space-4) var(--space-6);
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+.summary-dl dt { color: #8c96a7; }
+.summary-dl dd { margin: 0; overflow-wrap: anywhere; }
+
+/* 抽屉分区 */
+.drawer-section + .drawer-section { margin-top: var(--space-11); }
+.drawer-section > h3 { font-size: var(--fs-sm); margin-bottom: var(--space-5); color: var(--ink-soft); }
+.rev-list { display: grid; gap: var(--space-4); }
+.rev-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: var(--space-5) var(--space-6);
+  font-size: var(--fs-xs);
+  background: var(--paper);
+}
+.rev-row.latest { border-color: #8ba2f2; background: #f8faff; }
+.rev-row .rev-no { font-family: var(--font-mono); color: var(--blue); }
+.rev-row .rev-meta { color: var(--muted-faint); font-size: var(--fs-2xs); margin-top: 2px; }

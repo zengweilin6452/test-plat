@@ -7,7 +7,7 @@
  * 硬约束：state 与 outcome 分开呈现；outcome 为空时不显示通过/未通过。
  */
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import { fetchTasks } from '../api/endpoints'
 import { StatusBadge } from '../components/Badge'
@@ -17,21 +17,38 @@ import { ContextBar, PrimaryAction, Toolbar } from '../components/PageBits'
 import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
 import { Table, type Column } from '../components/Table'
+import { TaskDrawer } from '../components/TaskDrawer'
+import { TaskWizard } from '../components/TaskWizard'
+import { useToast } from '../components/Toast'
 import { MODULE_NAMES, TARGET_CATALOG } from '../constants'
 import { displayStatus, displayTaskStatus } from '../lib/display'
 import { DASH, fmtDateTime } from '../lib/fmt'
 import { useTargetScope } from '../store/scope'
-import type { TaskRecord } from '../types'
+import type { CreateTaskResponse, Platform, TaskRecord } from '../types'
 
 export function TasksPage() {
   const { targetScope, setTargetScope } = useTargetScope()
   const [keyword, setKeyword] = useState('')
+  const [wizardOpen, setWizardOpen] = useState(false)
+  const [activeTask, setActiveTask] = useState<TaskRecord | null>(null)
+  const queryClient = useQueryClient()
+  const toast = useToast()
 
   const tasksQuery = useQuery({
     queryKey: ['tasks', keyword],
     queryFn: ({ signal }) => fetchTasks(undefined, keyword || undefined, signal),
     retry: false,
   })
+
+  /**
+   * 创建成功：Toast 提示（带后端给的编号）→ 关闭向导 → refetch 任务列表。
+   * 不在这里乐观插入行 —— 列表口径以后端为准。
+   */
+  function handleCreated(created: CreateTaskResponse) {
+    toast.show('任务已创建：' + created.display_id + '（编号 ' + created.id + '）')
+    setWizardOpen(false)
+    void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+  }
 
   const error = tasksQuery.isError ? describeError(tasksQuery.error) : null
   const all = tasksQuery.data?.items ?? []
@@ -100,7 +117,7 @@ export function TasksPage() {
       header: '操作',
       align: 'right',
       render: (task) => (
-        <LinkButton onClick={() => undefined}>
+        <LinkButton onClick={() => setActiveTask(task)}>
           {task.run ? '查看执行' : '查看配置'}
           <span aria-hidden="true">›</span>
         </LinkButton>
@@ -113,7 +130,7 @@ export function TasksPage() {
       <PageHeading
         title="任务中心"
         description="全部测试任务的配置、执行与结果入口"
-        actions={<PrimaryAction label="新建任务" icon="plus" />}
+        actions={<PrimaryAction label="新建任务" icon="plus" onClick={() => setWizardOpen(true)} />}
       />
       <ContextBar
         scope={targetScope}
@@ -153,6 +170,7 @@ export function TasksPage() {
             rows={rows}
             rowKey={(task) => task.id}
             ariaLabel="任务列表"
+            onRowClick={(task) => setActiveTask(task)}
             footer={<span>共 {rows.length} 个任务 · 当前筛选 {targetScope === 'all' ? '全部目标端' : TARGET_CATALOG[targetScope].label}</span>}
           />
         )}
@@ -161,6 +179,14 @@ export function TasksPage() {
       <div className="mt muted small">
         运行编号与任务编号由后端生成：草稿 {DASH} 无运行，提交后产生 RUN- 编号。
       </div>
+
+      <TaskWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onCreated={handleCreated}
+        initialPlatform={targetScope === 'all' ? 'android' : (targetScope as Platform)}
+      />
+      <TaskDrawer open={Boolean(activeTask)} task={activeTask} onClose={() => setActiveTask(null)} />
     </>
   )
 }
