@@ -53,6 +53,10 @@ SOURCES = {
         "include": [
             "src/mobile_perf",
             "dist/solopi",
+            # mobile_perf/adb.py: BUNDLED_ADB_REL_PATH = SoloPi/platform-tools/adb.exe
+            "SoloPi/platform-tools",
+            # mobile_perf/solo.py: HARNESS_ENTRY_REL_PATH = SoloPi/solopi-skill/scripts/harness/src/solopi_harness/solopi_ai.py
+            "SoloPi/solopi-skill/scripts/harness",
             "tests/unit",
             "tests/contract",
             "tests/fixtures",
@@ -64,6 +68,24 @@ SOURCES = {
         "exclude_globs": {"*.pyc", "*.pyo"},
     },
 }
+
+# 面向库/记录：目录递归包含嵌套 .pytest_cache、__pycache__ 这类"缓存目录里的文件"，
+# 单纯比对 parts 与 exclude_dirs 会漏（例如 tools/adb/.pytest_cache/...）。
+_EXCLUDE_DIR_NAMES = {"__pycache__", ".pytest_cache", ".ruff_cache", "__MACOSX"}
+
+
+def _prune_cache_dirs(target: str) -> int:
+    """删除复制进 vendor 的缓存目录，返回删除的目录数。
+
+    必须在生成 lock 之前调用，否则缓存文件名随机（pytest-cache-files-xxxx），
+    lock 无法稳定，check 必然失败。
+    """
+    removed = 0
+    for path in sorted((VENDOR_DIR / target).rglob("*"), reverse=True):
+        if path.is_dir() and path.name in _EXCLUDE_DIR_NAMES:
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+    return removed
 
 
 def _sha256(path: Path) -> str:
@@ -143,6 +165,9 @@ def cmd_sync() -> int:
             files[key] = {"sha256": digest, "size": dst.stat().st_size}
             count += 1
             total_bytes += dst.stat().st_size
+        pruned = _prune_cache_dirs(target)
+        if pruned:
+            print(f"[sync] {name}: 剪除 {pruned} 个缓存目录")
         sources_meta[name] = {
             "root": str(root),
             "target": target,

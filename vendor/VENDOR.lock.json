@@ -26,12 +26,14 @@
     "mobile_perf": {
       "root": "D:\\workspace\\claudecode-test\\moblie-xn",
       "target": "mobile_perf",
-      "git_head": "c6bdaa49370e94bd5cbdde11c58e28c68ea70515",
-      "files": 68,
-      "bytes": 9743389,
+      "git_head": "0a92a5f747bd2675254d020597f656aad703f234",
+      "files": 213,
+      "bytes": 29007470,
       "include": [
         "src/mobile_perf",
         "dist/solopi",
+        "SoloPi/platform-tools",
+        "SoloPi/solopi-skill/scripts/harness",
         "tests/unit",
         "tests/contract",
         "tests/fixtures",
@@ -522,6 +524,566 @@
       "sha256": "13296da3b3ea3d962b30a4c8f65f72e76e66b4c967a33ca01e0e1c1fecc988c8",
       "size": 6283
     },
+    "mobile_perf/SoloPi/platform-tools/AdbWinApi.dll": {
+      "sha256": "c1d653030b4bde65d3e07e4d0b0979e17be56df1436cdd15528630f27808050d",
+      "size": 108184
+    },
+    "mobile_perf/SoloPi/platform-tools/AdbWinUsbApi.dll": {
+      "sha256": "0710e894d9b40f71a670c13c694079d564c92c1279da382cfe4850983aaebe1b",
+      "size": 73368
+    },
+    "mobile_perf/SoloPi/platform-tools/NOTICE.txt": {
+      "sha256": "38ec8c6f5b7799c223ffeab1f9e81c2d5fc67b5e56d6424f649630ca1ee1a811",
+      "size": 1154131
+    },
+    "mobile_perf/SoloPi/platform-tools/adb.exe": {
+      "sha256": "b4a6b455702684652cccf7b46258b29e653538904359a58fd4931cf3ef286b3f",
+      "size": 8273560
+    },
+    "mobile_perf/SoloPi/platform-tools/etc1tool.exe": {
+      "sha256": "ee9bb89bb770badcfeb12bb9a3c4095682fb2ea0105487f9f16e440c582064a3",
+      "size": 451224
+    },
+    "mobile_perf/SoloPi/platform-tools/fastboot.exe": {
+      "sha256": "b2d9cbff4ce9ae7eb448cfc831bafc867935f50f5be38f8f81057fd7eb3b8d86",
+      "size": 2429080
+    },
+    "mobile_perf/SoloPi/platform-tools/hprof-conv.exe": {
+      "sha256": "70cfef266dd9d94922679be159901cec3218561be946347e6e4a7577fc81dede",
+      "size": 52888
+    },
+    "mobile_perf/SoloPi/platform-tools/libwinpthread-1.dll": {
+      "sha256": "f2044c755e39efc5d47f47c5a942178dd6d79dc8945bb182dc8753d10e2a4269",
+      "size": 243016
+    },
+    "mobile_perf/SoloPi/platform-tools/make_f2fs.exe": {
+      "sha256": "a1d8e18474636972e4ebaf2617ac17c880e76642fad7fa3e51ae5cd3c1fe5d17",
+      "size": 473752
+    },
+    "mobile_perf/SoloPi/platform-tools/make_f2fs_casefold.exe": {
+      "sha256": "9ac076516c2a1f620df24e148660becf3e7d4102b46ddda66970d35c59db2962",
+      "size": 473752
+    },
+    "mobile_perf/SoloPi/platform-tools/mke2fs.conf": {
+      "sha256": "ad58a58dcdd24d85055814ca9cac67db89d4e67c434e96774bdce0d0a007d067",
+      "size": 1157
+    },
+    "mobile_perf/SoloPi/platform-tools/mke2fs.exe": {
+      "sha256": "308304852b1f1a1449e9d9115332ab908b8a54b99f460ed1df5d109decef5be7",
+      "size": 763544
+    },
+    "mobile_perf/SoloPi/platform-tools/source.properties": {
+      "sha256": "2dccd788c0234d8cf7f7457377e57f57527a86a629c6ed54feb8af0f549dac38",
+      "size": 38
+    },
+    "mobile_perf/SoloPi/platform-tools/sqlite3.exe": {
+      "sha256": "234d9e6c475c6e9ba07498a1ad96a6a32840fbfdc74e50277e1a94cbac48abdc",
+      "size": 3031704
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/.gitignore": {
+      "sha256": "7866783cddbc117a1790475632d439f9bb7cdab4f2bfab3772b130c59289a7ed",
+      "size": 58
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/README.md": {
+      "sha256": "fadf97c4a29c197326b73c7171cc75aff4bf7246450ed632c20a1921e45f5021",
+      "size": 2176
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/executorch-counter-policy/README.md": {
+      "sha256": "61bbe9f78f63eecb6ef632a2e51ab049f8a08e1813bbb8bcf66afd864830191e",
+      "size": 652
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/executorch-counter-policy/manifest.json": {
+      "sha256": "e4c1fd1a203f2f2c5314546e3393a8d226cb7da12342c7e3cbfea3454a3a4331",
+      "size": 1397
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/executorch-counter-policy/manifest.sig": {
+      "sha256": "31c797e7b20f5ce845ff7cb04154876fd7624480f6624eb7ae9d8427761f4f23",
+      "size": 256
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/executorch-counter-policy/model.pte": {
+      "sha256": "e6dcfc0a685450c409a2ea924730742b86987c8432a754744604715601c3bf23",
+      "size": 728
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/DATASET.md": {
+      "sha256": "ca7232ef6fecde32eeb6965792806333221adce721434596273f74caa921eec6",
+      "size": 9134
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/README.md": {
+      "sha256": "faa701d80c727842f8a69c5d016098d8ec26bc9c24b66ebcb0c0d6586c20f54e",
+      "size": 7514
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/VISUAL.md": {
+      "sha256": "690b54bc5325a0b6f6854178194daf128cb9c6fe8562e018470461b62e351b40",
+      "size": 5886
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-more/README.md": {
+      "sha256": "9f80d4bbba8f1c95bf00a7341ccf8ed099564ad44961810f2249526f2b32d92f",
+      "size": 4506
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-more/inputs-manifest.json": {
+      "sha256": "e8e7450cb30beb970e784a6a878eaa2ed7158fc32832927ff13a5a8954816331",
+      "size": 406
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-more/requirement.json": {
+      "sha256": "844113635d4a04a39a17f02a36b33f57d12ff978eb970475b30abd864258aeaf",
+      "size": 3317
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/README.md": {
+      "sha256": "bb7a4ee0b29914ba25e6a79ef36911fb9b4dc7dd15eb82d81ab4bba8197eeea9",
+      "size": 11602
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/home-direct/policy.json": {
+      "sha256": "1614038b01c47ddc3c18ce95ea357a21d24946b9db9774f9c093145934a48073",
+      "size": 1555
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/home-direct/requirement.json": {
+      "sha256": "f6a8db72803806b57ab74eac4a9eecf02ccfc376cd0e84df908ac9713926db20",
+      "size": 3626
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/home-paraphrase-1/policy.json": {
+      "sha256": "1614038b01c47ddc3c18ce95ea357a21d24946b9db9774f9c093145934a48073",
+      "size": 1555
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/home-paraphrase-1/requirement.json": {
+      "sha256": "97475c9e4206c01e7d53858cfef3423457b57460d7d586d19dd17ae80efce0e4",
+      "size": 3659
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/home-paraphrase-2/policy.json": {
+      "sha256": "1614038b01c47ddc3c18ce95ea357a21d24946b9db9774f9c093145934a48073",
+      "size": 1555
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/home-paraphrase-2/requirement.json": {
+      "sha256": "071fa86eceb2adfa556c76200ac0e040ad977bd24a9a7314ef4269a43f0064b0",
+      "size": 3659
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/inputs-manifest.json": {
+      "sha256": "2b04d9acf7721f89cfa12f72f5a119896f0539f7c84c5c664a8074b3ac48296d",
+      "size": 2653
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/settings-direct/policy.json": {
+      "sha256": "208e5572d6c0ac949db22d89a0b1d34077661c8f271559acdb87156cf3473b25",
+      "size": 1534
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/settings-direct/requirement.json": {
+      "sha256": "3cae71c9513e4a305bebd5324a22cc7bc9739c3b2c9c80b142ba31f429d54bc2",
+      "size": 4109
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/settings-paraphrase-1/policy.json": {
+      "sha256": "208e5572d6c0ac949db22d89a0b1d34077661c8f271559acdb87156cf3473b25",
+      "size": 1534
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/settings-paraphrase-1/requirement.json": {
+      "sha256": "d754ad0640b0e8d50397689bdc89ae2081d2551913006e33a7c4d4e6a1499620",
+      "size": 4139
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/settings-paraphrase-2/policy.json": {
+      "sha256": "208e5572d6c0ac949db22d89a0b1d34077661c8f271559acdb87156cf3473b25",
+      "size": 1534
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/settings-paraphrase-2/requirement.json": {
+      "sha256": "e53c154189e81a3f9cfa61433f60a1a1d2a7913f54c182455accf66cadcc3e62",
+      "size": 4136
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/settings-paraphrase2-wrong-oracle/control-provenance.json": {
+      "sha256": "9a0cfe5976bf1e89c8c2809f86c778cd05bd08af5c63f5f4a487b67319a066c1",
+      "size": 690
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/settings-paraphrase2-wrong-oracle/policy.json": {
+      "sha256": "208e5572d6c0ac949db22d89a0b1d34077661c8f271559acdb87156cf3473b25",
+      "size": 1534
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/settings-paraphrase2-wrong-oracle/requirement.json": {
+      "sha256": "c889d9f8f9db210e0b04c25d2c8dde2dc7986cd19082fe401c42094675ed21d6",
+      "size": 4201
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/settings-wrong-oracle/policy.json": {
+      "sha256": "208e5572d6c0ac949db22d89a0b1d34077661c8f271559acdb87156cf3473b25",
+      "size": 1534
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-multichoice/settings-wrong-oracle/requirement.json": {
+      "sha256": "b173d49dee1d1aa1d7b4533865ea16c741eb33a9e87b3a2b3b8207c241096976",
+      "size": 4153
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-scenarios/more-services/README.md": {
+      "sha256": "fdbbb184e69076ede9b56bb52393d5279c7bb017ee10d77d77b74df55aef4f8b",
+      "size": 766
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-scenarios/more-services/policy.json": {
+      "sha256": "742ce41d83618df3c76d63de5c81f664b6f3c9c8861537fb9e9aa5c9410d46a8",
+      "size": 3253
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-scenarios/more-services/requirement.json": {
+      "sha256": "f182c7ca3ab3b6143be2f1dd0aae644b390b077178f1f636c15271af3719214c",
+      "size": 3797
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-scenarios/search-input-roundtrip/README.md": {
+      "sha256": "d0dd07c54c34581f218bfe98350488b3e1f5e9219f706bed23e9ba37a0ae3a60",
+      "size": 1697
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-scenarios/search-input-roundtrip/policy.json": {
+      "sha256": "378c5c80c34f8d7d70a2112e8df50780111ade802701128e6001ad0821a354b7",
+      "size": 3215
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-scenarios/search-input-roundtrip/requirement.json": {
+      "sha256": "c88ba8ebd8d4c8dec7eb130a0e252669378869d850c9eeb191e7d0bfbd2c99d7",
+      "size": 5006
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/README.md": {
+      "sha256": "1ec11bb8436afcea5f8868c1d6fc80771379223ec4b52409877c67f3cef70c32",
+      "size": 9701
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/blocked/policy.json": {
+      "sha256": "250d090d4bac76076cde25ef6cb762b73a7f609a3102c101619289490f7ac0ee",
+      "size": 1246
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/blocked/requirement.json": {
+      "sha256": "6add9a72fc156759adcc8e70a28c8f6f194a288192894e402263d63f92387618",
+      "size": 2932
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/inputs-manifest.json": {
+      "sha256": "baa821f2d352aac2c6189542e6de55af9445aa4f97d6a990cb00f5642ac1e9b9",
+      "size": 1681
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/normal/policy.json": {
+      "sha256": "5f4c48e7eab7cadc2939aeb073847fa62e53867dfad6c5c352be011e68090cfd",
+      "size": 1200
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/normal/requirement.json": {
+      "sha256": "0e6ae77d6e927ed8e35198beba873b25ab65ff8f576032a0ae923376d83b0ce1",
+      "size": 3304
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/prompt-v2/README.md": {
+      "sha256": "103a65f226e50fcd3918285b3d7a3150bf73c9e6afec9d8c83d900b54eee36ee",
+      "size": 5076
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/prompt-v2/blocked/policy.json": {
+      "sha256": "f0673b0f670eeaa0d30dc7661cb2edb25766de03d0e5fb6ca4452b2b4146cf73",
+      "size": 1133
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/prompt-v2/blocked/requirement.json": {
+      "sha256": "a1b2d1c8a26d418ec259e14c404c6ad7b0b68e4a9e804634b563135119027bc9",
+      "size": 2857
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/prompt-v2/inputs-manifest.json": {
+      "sha256": "91f6bc07cf5aa82b380533e4dedd58ac126eebfa04f19c1ef7fd7331606fb2cb",
+      "size": 3634
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/prompt-v2/normal/policy.json": {
+      "sha256": "2cb0892335587e9a86ff5202bfcca7f5ec316f1c2ecb397c383869b61a14ab6f",
+      "size": 1087
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/prompt-v2/normal/requirement.json": {
+      "sha256": "83b735f60e518d0fc45bfcb78b90d22ae7c613e73906bc917a0dfda19f6d122b",
+      "size": 3229
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/prompt-v2/wrong-oracle/policy.json": {
+      "sha256": "2cb0892335587e9a86ff5202bfcca7f5ec316f1c2ecb397c383869b61a14ab6f",
+      "size": 1087
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/prompt-v2/wrong-oracle/requirement.json": {
+      "sha256": "a280e3a5ce2eea62a7e9286b03470888123f8668d5cf99f0a3d2c73604915bf9",
+      "size": 3380
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/wrong-oracle/policy.json": {
+      "sha256": "5f4c48e7eab7cadc2939aeb073847fa62e53867dfad6c5c352be011e68090cfd",
+      "size": 1200
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/alipay-search/wrong-oracle/requirement.json": {
+      "sha256": "547676e73d6f759e018a8ce7c5635e48eadc41db3edc7e27ccf2d0e115e95f40",
+      "size": 3455
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/android-demo/.gitignore": {
+      "sha256": "c3e4859e2483569c4ed9b36aebbd74a03781ece2fe9f534051eb0d52fff02fa5",
+      "size": 37
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/android-demo/AndroidManifest.xml": {
+      "sha256": "cf32148e05ef04cdf1d39b86f015c202f651869fe1c7076723e5be360cffb71e",
+      "size": 743
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/android-demo/README.md": {
+      "sha256": "5eb8faf0c24a42338af84e2229660c3fadf58bec510040f617e6ac94abb55d42",
+      "size": 4798
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/android-demo/build.py": {
+      "sha256": "7a73c37e11e65df4e242f2bdd5799da718dcb7636126e4ae798d2ce4a7bd4765",
+      "size": 4586
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/android-demo/res/values/ids.xml": {
+      "sha256": "0719dc0822291ee7b64fe2484ec57143e1043ad6fea37a5dbea1bd5e771fbc84",
+      "size": 701
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/android-demo/res/values/styles.xml": {
+      "sha256": "ff67bfabeb0e39037f87aded7c2d5b04a47c55a030cdafe943672230695f1c76",
+      "size": 659
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/android-demo/src/com/solopi/fastpath/demo/MainActivity.java": {
+      "sha256": "108344e1761f221a08b7d767e0436970e401a959cc3be8b8c924f6265f0306ae",
+      "size": 10380
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/benchmark_forest.py": {
+      "sha256": "b72ddceda833a032c74a5328af0fd3417e2a9433b6a99a414f2d08cdf1dd73c9",
+      "size": 12025
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/evaluate_dataset.py": {
+      "sha256": "bb60ce07747e76699a67966c2b541f9004a98be586a9a2f5cb4f9a90ac53dffb",
+      "size": 2557
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/evaluate_laya_choices.py": {
+      "sha256": "d527f6b4d02b8e9e6801642d0f64e83e58090d50689d44a93d72c8daf80e1d6f",
+      "size": 4952
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/evaluate_laya_vision.py": {
+      "sha256": "7d3bf5a838fb09be2387f0604d61b0ebc153cc339594d5d57f46e489badf8113",
+      "size": 6094
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/evaluate_no_match.py": {
+      "sha256": "f409fd90bd44d7c7655da5231f22d7e4c2a4e311f778e34e09068535413f7d53",
+      "size": 4626
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/evaluate_offline.py": {
+      "sha256": "9128c5b751599af5d24e9bd0a8d794e41edd873498b83635f31a7b1781efc550",
+      "size": 4130
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/goalpath-alipay/README.md": {
+      "sha256": "e5e11296fa4ac44fe545ea7e61ee3605f18de6066338c818d2c0a0cf5788aee8",
+      "size": 9739
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/goalpath-alipay/education-browse/policy.json": {
+      "sha256": "4292758bfe95f6c406a1e555b895e989e26c234141a9f17ac298f578d565e109",
+      "size": 3613
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/goalpath-alipay/education-browse/requirement.json": {
+      "sha256": "bc684fae3065dab7985c907c00ec742311f93bc0f9227dfa48fae65d790d9d16",
+      "size": 4063
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/goalpath-alipay/negative-oracle/policy.json": {
+      "sha256": "361b4d5373fb78925b98cddfba0327af1a264febfea93f0fbbaa91b8f21706dc",
+      "size": 3479
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/goalpath-alipay/negative-oracle/requirement.json": {
+      "sha256": "d51f9dbf6db6780e9bd6cf22963d07813fe80b09502b2e743921ac5bec914fb6",
+      "size": 4166
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/goalpath-alipay/replace-query/policy.json": {
+      "sha256": "83fee3c30df8b0612a4845a6459005035ae430e8b56a98e3697fb6d775e15d74",
+      "size": 2740
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/goalpath-alipay/replace-query/requirement.json": {
+      "sha256": "766cf77cdca315e737da165b0b89bbb2fcd8c24b212c77c776c31fe74e41d6e6",
+      "size": 5602
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/goalpath-alipay/search-draft/policy.json": {
+      "sha256": "361b4d5373fb78925b98cddfba0327af1a264febfea93f0fbbaa91b8f21706dc",
+      "size": 3479
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/goalpath-alipay/search-draft/requirement.json": {
+      "sha256": "ed8161294adeb2d775bcbb469bbd4511c339107b56f672dc0a85dbd960455467",
+      "size": 4151
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/goalpath-alipay/service-search-draft/policy.json": {
+      "sha256": "0901762ed9f8bdccd272add73894026f4d07ca9e664ae9d04b6fcb53c287fcd5",
+      "size": 3581
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/goalpath-alipay/service-search-draft/requirement.json": {
+      "sha256": "f67abe37601f6e3565cf66b6802b8c92fa49e335b80dbd93dc91ee40775c8c33",
+      "size": 4982
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/prepare_demo.py": {
+      "sha256": "37e23de149e0434ec51f84bfcb3279456d726a37ddc9bdef669255fe09ea63fa",
+      "size": 7781
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/requirements-mlx-lock.txt": {
+      "sha256": "0c4f574e5c0d8f7b84bb7a0c2043616ad19f8b99ed5abd1a2b8eb8b3b3712eb8",
+      "size": 317
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/requirements-visual-lock.txt": {
+      "sha256": "814773199192f7dd4a4bbf658577ecf115d62830f413a0d0a28c0b46ac589573",
+      "size": 674
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/examples/fastpath/visual_choice.py": {
+      "sha256": "c82beb480035d4f1c82d61c605008cadffcbfe2d6d577d1037849ee83a428906",
+      "size": 14901
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/fixtures/managed/android-agent-matrix.json": {
+      "sha256": "cf8ebc5d3783c50ce0eb5bb066afa9582519fbb733d90076e930c13304787747",
+      "size": 183
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/fixtures/model/counter-offline-requirement.json": {
+      "sha256": "ba7d559a1a5297d7119e90fb2eb8b2f379bf6fa143e51ff54ac867d518bd9dce",
+      "size": 3254
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/fixtures/model/counter-policy-corpus.json": {
+      "sha256": "30c99a79f900d6cd9411b41ca9fd87601aa5a468ab9b416b623659bc59e670d3",
+      "size": 393
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/fixtures/model/counter-policy-evaluation.json": {
+      "sha256": "aa73b43ce2a257a4ec70a14c2d175207ab9dba40cf149da0ba66d751534c6125",
+      "size": 416
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/fixtures/verification/counter-agent-decisions.json": {
+      "sha256": "028e7fe19e42e052475bba85e833eb199c99ebb82a7d5c1a691daa2af68fef02",
+      "size": 813
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/fixtures/verification/counter-outcome-matrix.json": {
+      "sha256": "8c002e4ceeaa7575cede688fc5cf5a38ede007f9578a489a7744a10a6f4efffa",
+      "size": 8939
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/fixtures/verification/counter-success.json": {
+      "sha256": "0f5b5baa5dc74656567b091999fddea0c64d7750612d0ed9cc90667ef0586b25",
+      "size": 3953
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/pyproject.toml": {
+      "sha256": "dd9e298a4d61ac5b4b8c01bc2699a9ff0b120d2a8912b4341401d8783f1502fb",
+      "size": 452
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/solopi-ai": {
+      "sha256": "06a1c0c2dfd1e093b8f33cecad46ea34f10bbe4605a2885bccd069fcbdf07f84",
+      "size": 150
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/__init__.py": {
+      "sha256": "56aed3f64585cb20f1f8111dc867ad39f808372138e2206e5ea3db52d583487a",
+      "size": 46
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/__main__.py": {
+      "sha256": "da2b908cf29c1eafb908b9ed933a741053cecf4616858f7305414536a51f5840",
+      "size": 86
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/fastpath.py": {
+      "sha256": "e5c2fe5ba69ed602b1cf0482092746f8a4012c683581e0a25122a025aa782e63",
+      "size": 22441
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/fastpath_evaluation.py": {
+      "sha256": "ec9fa77b43b385b94d4c2da2ef28900d551c3d8ec9638ac6e6c807adb80450ca",
+      "size": 26315
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/fastpath_runtime.py": {
+      "sha256": "9f280153495eea72d63af180febfebf46e2733d305c87c17a673e400452816b8",
+      "size": 2769
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/goalpath.py": {
+      "sha256": "e218c10135bc46f3e994385bcf9e964dccee20a6a3af61a6eadce47d180a8af5",
+      "size": 38188
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/goalpath_runtime.py": {
+      "sha256": "94487f3ec9afc34afc5f5d02dccdd26f77c4c165cdbd027bb0623e0a2678037a",
+      "size": 12508
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/managed_execution.py": {
+      "sha256": "874fad3382e810dc35984e3c3c8d9a08ef458f32615d57e4fefed89e50d414c3",
+      "size": 75779
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/model_deployment.py": {
+      "sha256": "aea2e7c530de830a72a0f3651f8004c91c1c934bc108e1dd0794a3fae7868bb3",
+      "size": 34897
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/resources/keys/solopi-poc-2026-public.pem": {
+      "sha256": "476622fefcedc4c87e59a93255b0fada12e5938ef6c44cc14e7735809c1774a8",
+      "size": 451
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/resources/workflows/alipay-education/policy.json": {
+      "sha256": "4292758bfe95f6c406a1e555b895e989e26c234141a9f17ac298f578d565e109",
+      "size": 3613
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/resources/workflows/alipay-education/requirement.json": {
+      "sha256": "5c916e0b358aec5a17b9eb6b73f1bca1236747915870a7eb4e5abdc8e4680e18",
+      "size": 3996
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/resources/workflows/alipay-more-services/policy.json": {
+      "sha256": "742ce41d83618df3c76d63de5c81f664b6f3c9c8861537fb9e9aa5c9410d46a8",
+      "size": 3253
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/resources/workflows/alipay-more-services/requirement.json": {
+      "sha256": "750f43af1eb2ae3d3d70af80e1fd7fc0266ded7993d2a32ae7cf5e3d77134db4",
+      "size": 4196
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/resources/workflows/alipay-settings/policy.json": {
+      "sha256": "208e5572d6c0ac949db22d89a0b1d34077661c8f271559acdb87156cf3473b25",
+      "size": 1534
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/resources/workflows/alipay-settings/requirement.json": {
+      "sha256": "4197faf0c8cd294ed48d6a21c3d16a0c671f86afd015f265fa5451f5243bb063",
+      "size": 4837
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/solopi_ai.py": {
+      "sha256": "e6719273b05ada694bfa5da5ab1250188b6e70b24f90611f0e2b07a86ca7d512",
+      "size": 455154
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/timing.py": {
+      "sha256": "ad0a20075ce604e11fdf322a115c5e3ee0a2e96c0506351ce863ced0fa1c6f3c",
+      "size": 7481
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/verification_engine.py": {
+      "sha256": "00e626e87f260ab195daa72e66f1874567aa40610e0060c2ffa6cc4c68ae0a50",
+      "size": 68198
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/src/solopi_harness/workflows.py": {
+      "sha256": "eaf0e8a0721b84a35716c5688dc113dab4bbf36b8fb59238ee6fd3d845d84ee1",
+      "size": 17893
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_fastpath.py": {
+      "sha256": "e1c7af76f98408c848bb47ba033be1b936040eeeda6dc4653fb50d991171e0f0",
+      "size": 32407
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_fastpath_cli.py": {
+      "sha256": "a40f6f1a71a1604d67b4bfca4a7e7f788a1e8972919b846c14b200cdd5010468",
+      "size": 14757
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_fastpath_evaluation.py": {
+      "sha256": "77e3a4962d1ae206c7b76730ab79d282ab06df6385af536983b1a49775dac709",
+      "size": 19896
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_fastpath_runtime.py": {
+      "sha256": "f0ba2e4e4dd43ec5f5fcc199e6cf10627ad9139a591488bd956a0a5c4cc88561",
+      "size": 3107
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_fastpath_timing.py": {
+      "sha256": "554bbf3925a51e499c39f260dc2e9d1fad784751d43e1c08bdd9c8f2c73736be",
+      "size": 11474
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_goalpath.py": {
+      "sha256": "f99ef002a13864029f978b45ad678115e10650620fb1e7479334f3b49d58513a",
+      "size": 33475
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_goalpath_cli.py": {
+      "sha256": "d05d50069e6c5c5e7d4ef8a17491a404df769c933696eeea49e7cfecbeba847d",
+      "size": 9081
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_harness_http_transport.py": {
+      "sha256": "9e4d201ffe54424b207406da54ea1388e880e965526276cb14cc992257b8d6b4",
+      "size": 6314
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_host_execution.py": {
+      "sha256": "e11dd0eb8152f180f7734d0255b9cdc0c14cd2fec0f9f70fa688715ed2271a3f",
+      "size": 12870
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_managed_execution.py": {
+      "sha256": "bcf9f927655d1ba008f112ea5573cf42a84609baf4561c2a2589e58ad7f95bbd",
+      "size": 16797
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_model_deployment.py": {
+      "sha256": "f10b37b6df6f6650476717d52780cee476045b5013446bbd1430270ff7a68305",
+      "size": 16156
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_solopi_ai.py": {
+      "sha256": "545a51f5e63cc8df9765229ff8aa9ce5b16c5fb55fe464055741d25580c3c38a",
+      "size": 305552
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_verification_engine.py": {
+      "sha256": "a64a6aff06219e1cd2c3c2deddcc04f7cfb4b9a3424b238485743dc0d9da5817",
+      "size": 23646
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_verification_transport.py": {
+      "sha256": "46114622683d1217bb4b22675583e86d1663bbd6071462f8ca660b7c3a2dab80",
+      "size": 17923
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_visual_choice.py": {
+      "sha256": "bf3a3d7acc1fa3a885db84a963eb797e1dcbe387f744b38c253980459541a8cd",
+      "size": 7324
+    },
+    "mobile_perf/SoloPi/solopi-skill/scripts/harness/tests/test_workflows.py": {
+      "sha256": "61845b7719f76268a7371097e948afd90530e954d6f4bdc630df05679348e615",
+      "size": 15896
+    },
     "mobile_perf/dist/solopi/SoloPi-selfbuild-debug.apk": {
       "sha256": "17e73fbaceaa9045d20fe66969ed2523eb6cae71efc9e2f7539f805cf5d1e516",
       "size": 7990796
@@ -547,8 +1109,8 @@
       "size": 1030900
     },
     "mobile_perf/src/mobile_perf/cli.py": {
-      "sha256": "c913975335269f51ce331ddab1ef90da71456b67ad94c02ad4f8b721c6a5ad84",
-      "size": 16040
+      "sha256": "636c16afd60349b6242a2bbd910130447da7cb8ec0e1ab94abe4f306cccdeaea",
+      "size": 16797
     },
     "mobile_perf/src/mobile_perf/collector.py": {
       "sha256": "69b8e43fc119a8e6c88f7e41704b1c6bf4d28b786615c29895ff168c0b8c96c5",
@@ -557,6 +1119,10 @@
     "mobile_perf/src/mobile_perf/dialog.py": {
       "sha256": "bf9bb006851d4422c7bd9f7e168c7c7850746f85d4c4f4d4687918daee321b1a",
       "size": 2881
+    },
+    "mobile_perf/src/mobile_perf/frameinfo.py": {
+      "sha256": "e03d2b0a03088e80f7381c3b836137e7be00e81ae03e7a0f736253728cda70b2",
+      "size": 12638
     },
     "mobile_perf/src/mobile_perf/gate.py": {
       "sha256": "399b1c27392db180d79b9a7665cd293fa42f4006a7a3d9e19bec802c19f25dea",
@@ -575,8 +1141,8 @@
       "size": 20513
     },
     "mobile_perf/src/mobile_perf/kit.py": {
-      "sha256": "075afdde27403cfadbb2fb3f36eb0bd3998b712019e5f87fc88d6ecba3a2d1c8",
-      "size": 50433
+      "sha256": "4b98913f76d917ef52659b895ade9ad52efc3556fbbccd2f9ece0680ecb1b5bb",
+      "size": 54723
     },
     "mobile_perf/src/mobile_perf/leak.py": {
       "sha256": "fa3fd19c2914ee05e4fc19263e769f50bbbaa15a01c19576f763b08eb1122222",
@@ -587,16 +1153,24 @@
       "size": 15985
     },
     "mobile_perf/src/mobile_perf/metrics.py": {
-      "sha256": "2dcdffaf9c7e5e2366b0c938655b3df90110bb93f7df6e3ff217430b8ee709d7",
-      "size": 10957
+      "sha256": "c5dab009ab68aa5a9cfc34f12f2bee640ba778cc74c20a623f97b5991adb8c5f",
+      "size": 12309
+    },
+    "mobile_perf/src/mobile_perf/netprof.py": {
+      "sha256": "8d417c6e3dfeeb6fc6aecd74d9b5c74805b3df2381cba8283dadec58fbcaa619",
+      "size": 26281
+    },
+    "mobile_perf/src/mobile_perf/netproxy_addon.py": {
+      "sha256": "2fa77be619796befce57f0ef24c2a600b495b3d6ea5cf666c263cb233adf93af",
+      "size": 5759
     },
     "mobile_perf/src/mobile_perf/pytest_plugin.py": {
       "sha256": "1933999ae87aa9aabe44f32dfa257ff31dec824db1db4defa0de5dd5aa2b4551",
       "size": 11187
     },
     "mobile_perf/src/mobile_perf/report.py": {
-      "sha256": "40c355fd40484acc83850dddd2999ad6cd8cfafeca40dd3a99528f740ef22764",
-      "size": 26293
+      "sha256": "ded3141ffb1a8d0fc73d6c0c9f7c75b92c62a94ea27fc55224149dede52824e9",
+      "size": 28939
     },
     "mobile_perf/src/mobile_perf/session.py": {
       "sha256": "4cbc2315b1c38dc7363dfa24637aed4a4b24ad74795d08c3de481c26da93d167",
@@ -711,8 +1285,8 @@
       "size": 2656
     },
     "mobile_perf/tests/unit/test_cli.py": {
-      "sha256": "88cf845a66ec63b755c3a585612e25eca6f11e590e75dd5192fdbeb273991cde",
-      "size": 25191
+      "sha256": "b234f3d915c950a8033fb848b776bafd95cdbb86ec5509817f74b6e86f23a929",
+      "size": 25351
     },
     "mobile_perf/tests/unit/test_collector.py": {
       "sha256": "2b466e84b0c4e7c4605540a20cb90c35abff824875912163ef43895568dd535e",
@@ -721,6 +1295,10 @@
     "mobile_perf/tests/unit/test_dialog.py": {
       "sha256": "21fff98c6581bb462dd935408c1693a45b959f5e2d4aa7c9450e8160de77dfed",
       "size": 4101
+    },
+    "mobile_perf/tests/unit/test_frameinfo.py": {
+      "sha256": "9987af79d066c366fa9a807eb445c36d0829e0889c68b5a396f9f80c996471bb",
+      "size": 10831
     },
     "mobile_perf/tests/unit/test_gate.py": {
       "sha256": "a5d975ec8c2162097190030800e04bf78ea80ee999982ff973c7ae2dd99a070c",
@@ -743,8 +1321,8 @@
       "size": 42106
     },
     "mobile_perf/tests/unit/test_kit_collect.py": {
-      "sha256": "1430273abd167921cf3fe892176c813429eae5a6b2bf17e0010cb80931caf2ee",
-      "size": 12030
+      "sha256": "cbd7372c34325d0e04c7ba4ee3cfb61cdaceabe61a9bbab2909e6298d0ec37cd",
+      "size": 17285
     },
     "mobile_perf/tests/unit/test_kit_logwatch.py": {
       "sha256": "f6c0685e8a502ae845ebb21550a65250f62f160b2df426ba42ab59a1a56ce810",
@@ -759,16 +1337,20 @@
       "size": 12923
     },
     "mobile_perf/tests/unit/test_metrics.py": {
-      "sha256": "8d4a4c8825fa725109aeecb9a4cfea76781cd9e44704d135fa0e5d1111c0dc17",
-      "size": 5374
+      "sha256": "f613e0cb64faf99160f7260e0c5bba6bb759789d2021c41e161304a6a6f2e78a",
+      "size": 5609
+    },
+    "mobile_perf/tests/unit/test_netprof.py": {
+      "sha256": "dd456ba911ccb87df52690c8f685f0810e4788e196e29e7dacbef08626bb52e0",
+      "size": 25027
     },
     "mobile_perf/tests/unit/test_pytest_plugin.py": {
       "sha256": "a6e2d0b541b7ba880b8a06179d848ebb2d9be2a251ad0956a7907e7687c0dcbc",
       "size": 10980
     },
     "mobile_perf/tests/unit/test_report.py": {
-      "sha256": "fa32c62fcbfac9ef862d037117e852e6de5e2d8d122348da958c78525036550a",
-      "size": 15495
+      "sha256": "1e82b7d21ac7f87f2dff9bb54ef540074f32fca706fd91ca8fb722fd83866735",
+      "size": 17600
     },
     "mobile_perf/tests/unit/test_session.py": {
       "sha256": "3040314cf47f77022138039c41895ed2aa9653c1fcbf4622b91d59f5df7152a1",
