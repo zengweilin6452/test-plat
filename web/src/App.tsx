@@ -1,4 +1,14 @@
-// P0 骨架：路由占位。P1 起替换为 9 页真实实现（docs/plan/frontend-spec.md）。
+/**
+ * 应用根组件：外壳（侧栏 + 顶栏）+ 路由出口。
+ * 数据 Provider（QueryClientProvider）在 main.tsx 里提供。
+ */
+import { AppShell } from './components/layout/AppShell'
+import { AppRoutes } from './routes'
+
 export default function App() {
-  return <div style={{ padding: 24 }}>TestDock 前端骨架（P0）</div>
+  return (
+    <AppShell>
+      <AppRoutes />
+    </AppShell>
+  )
 }

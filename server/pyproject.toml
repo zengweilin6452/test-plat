@@ -34,6 +34,9 @@ testdock-api = "app.main:main"
 packages = ["app", "testdock_runner"]
 
 [tool.pytest.ini_options]
+markers = [
+    "integration: needs a real PostgreSQL (alembic upgrade head applied)",
+]
 testpaths = ["tests"]
 addopts = "-q"
 asyncio_mode = "auto"
