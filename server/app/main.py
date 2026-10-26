@@ -21,7 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from .config import scheduler_enabled, settings
 from .errors import ApiError
 from .ws import hub as _hub
-from .routers import applications, overview, resources, runs, suites, tasks
+from .routers import applications, debug as debug_router, overview, resources, runs, suites, tasks
 from .routers import analyses, baselines, gate_policies
 
 
@@ -174,6 +174,17 @@ async def _validation_error_handler(
 app.include_router(analyses.router, prefix=API_PREFIX)
 app.include_router(baselines.router, prefix=API_PREFIX)
 app.include_router(gate_policies.router, prefix=API_PREFIX)
+app.include_router(debug_router.router, prefix=API_PREFIX)
+
+
+# --------------------------------------------------------------------------- #
+# P6 追加：数据设计页静态 schema 文档 + 审计事件只读查询
+# --------------------------------------------------------------------------- #
+from .routers import audit as audit_router  # noqa: E402
+from .routers import schema as schema_router  # noqa: E402
+
+app.include_router(schema_router.router, prefix=API_PREFIX)
+app.include_router(audit_router.router, prefix=API_PREFIX)
 
 
 # --------------------------------------------------------------------------- #

@@ -59,7 +59,7 @@ _PICK_SQL = text(
        AND er.id NOT IN (
              SELECT rl.resource_id FROM resource_leases rl WHERE rl.released_at IS NULL
            )
-       AND (:resource_id IS NULL OR er.id = CAST(:resource_id AS uuid))
+       AND (CAST(:resource_id AS uuid) IS NULL OR er.id = CAST(:resource_id AS uuid))
      ORDER BY er.id
        FOR UPDATE SKIP LOCKED
      LIMIT 1
@@ -240,7 +240,7 @@ async def extend_lease(
                SET expires_at = now() + make_interval(secs => :lease_seconds)
              WHERE run_id = :run_id
                AND released_at IS NULL
-               AND (:token IS NULL OR fencing_token = CAST(:token AS bigint))
+               AND (CAST(:token AS bigint) IS NULL OR fencing_token = CAST(:token AS bigint))
             """
         ),
         {
@@ -273,7 +273,7 @@ async def release_lease(
                        release_reason = :reason
                  WHERE run_id = :run_id
                    AND released_at IS NULL
-                   AND (:token IS NULL OR fencing_token = CAST(:token AS bigint))
+                   AND (CAST(:token AS bigint) IS NULL OR fencing_token = CAST(:token AS bigint))
                 RETURNING id, resource_id, run_id, fencing_token, released_at,
                           release_reason
                 """
@@ -305,6 +305,159 @@ async def release_lease(
     return dict(existing) if existing else None
 
 
+
+
+# --------------------------------------------------------------------------- #
+# P5：调试会话租约（resource_leases.debug_session_id 通道）
+# --------------------------------------------------------------------------- #
+# 复用 run 租约的"DB 行锁是唯一真源"纪律：debug 会话同样必须持有 resource_leases
+# 行（run_id XOR debug_session_id 的 CHECK 决定了它走另一列），部分唯一索引
+# leases_one_live_resource 保证了"一台设备同时只有一个活动租约"——无论 run 还是
+# debug。领取仍然走 _PICK_SQL（FOR UPDATE SKIP LOCKED + status='ready'），
+# 只是锁定目标是指定 resource_id；被占用（包括被 run 占用）返回 None。
+
+_ACQUIRE_DEBUG_LEASE_SQL = text(
+    """
+    INSERT INTO resource_leases (
+        id, project_id, resource_id, debug_session_id, fencing_token, holder_id,
+        expires_at
+    ) VALUES (
+        :id, :project_id, :resource_id, :debug_session_id, :fencing_token, :holder_id,
+        now() + make_interval(secs => :lease_seconds)
+    )
+    RETURNING id, project_id, resource_id, run_id, debug_session_id, fencing_token,
+              holder_id, expires_at, released_at, release_reason, created_at
+    """
+)
+
+
+async def live_lease_for_debug(
+    session: AsyncSession, debug_session_id: str | uuid.UUID
+) -> dict[str, Any] | None:
+    """当前调试会话的活动租约（未释放）。"""
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT rl.id, rl.project_id, rl.resource_id, rl.debug_session_id,
+                       rl.fencing_token, rl.holder_id, rl.expires_at, rl.released_at,
+                       er.resource_key
+                  FROM resource_leases rl
+                  JOIN execution_resources er ON er.id = rl.resource_id
+                 WHERE rl.debug_session_id = :sid
+                   AND rl.released_at IS NULL
+                 ORDER BY rl.created_at DESC
+                 LIMIT 1
+                """
+            ),
+            {"sid": str(debug_session_id)},
+        )
+    ).mappings().first()
+    return dict(row) if row else None
+
+
+async def acquire_lease_for_debug(
+    session: AsyncSession,
+    *,
+    project_id: str | uuid.UUID,
+    debug_session_id: str | uuid.UUID,
+    resource_id: str | uuid.UUID,
+    holder_id: str,
+    lease_seconds: int = DEFAULT_LEASE_SECONDS,
+) -> Lease | None:
+    """在调用方事务里为调试会话领取**指定**设备的租约。
+
+    返回 None 表示设备当前不可领（不存在 / 非 ready / 已有活动租约）。
+    """
+    picked = (
+        await session.execute(
+            _PICK_SQL,
+            {"project_id": str(project_id), "resource_id": str(resource_id)},
+        )
+    ).mappings().first()
+    if picked is None:
+        return None
+
+    rid = str(picked["id"])
+    fence = (await session.execute(_BUMP_FENCE_SQL, {"resource_id": rid})).scalar_one()
+
+    row = (
+        await session.execute(
+            _ACQUIRE_DEBUG_LEASE_SQL,
+            {
+                "id": str(uuid.uuid4()),
+                "project_id": str(project_id),
+                "resource_id": rid,
+                "debug_session_id": str(debug_session_id),
+                "fencing_token": int(fence),
+                "holder_id": holder_id,
+                "lease_seconds": int(lease_seconds),
+            },
+        )
+    ).mappings().first()
+
+    return Lease(
+        id=str(row["id"]),
+        project_id=str(row["project_id"]),
+        resource_id=str(row["resource_id"]),
+        run_id=None,
+        fencing_token=int(row["fencing_token"]),
+        holder_id=row["holder_id"],
+        expires_at=row["expires_at"],
+        serial=picked["resource_key"],
+        platform=picked["platform"],
+    )
+
+
+async def release_lease_for_debug(
+    session: AsyncSession,
+    *,
+    debug_session_id: str | uuid.UUID,
+    reason: str,
+    token: int | None = None,
+) -> dict[str, Any] | None:
+    """标记调试会话的 DB 租约为已释放（幂等，语义同 release_lease）。"""
+    row = (
+        await session.execute(
+            text(
+                """
+                UPDATE resource_leases
+                   SET released_at = now(),
+                       release_reason = :reason
+                 WHERE debug_session_id = :sid
+                   AND released_at IS NULL
+                   AND (CAST(:token AS bigint) IS NULL OR fencing_token = CAST(:token AS bigint))
+                RETURNING id, resource_id, debug_session_id, fencing_token, released_at,
+                          release_reason
+                """
+            ),
+            {
+                "sid": str(debug_session_id),
+                "reason": reason,
+                "token": int(token) if token is not None else None,
+            },
+        )
+    ).mappings().first()
+    if row is not None:
+        return dict(row)
+    existing = (
+        await session.execute(
+            text(
+                """
+                SELECT id, resource_id, debug_session_id, fencing_token, released_at,
+                       release_reason
+                  FROM resource_leases
+                 WHERE debug_session_id = :sid
+                 ORDER BY created_at DESC
+                 LIMIT 1
+                """
+            ),
+            {"sid": str(debug_session_id)},
+        )
+    ).mappings().first()
+    return dict(existing) if existing else None
+
+
 async def release_stale_leases(
     session: AsyncSession, *, stale_seconds: int
 ) -> list[dict[str, Any]]:
@@ -331,9 +484,12 @@ __all__ = [
     "DEFAULT_LEASE_SECONDS",
     "Lease",
     "acquire_lease",
+    "acquire_lease_for_debug",
     "extend_lease",
+    "live_lease_for_debug",
     "live_lease_for_run",
     "release_lease",
+    "release_lease_for_debug",
     "release_stale_leases",
     "verify_fence",
 ]

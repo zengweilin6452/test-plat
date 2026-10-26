@@ -316,4 +316,53 @@ async def fail_run(
     return {"ok": True, "state": result.state, "outcome": result.outcome}
 
 
+
+# --------------------------------------------------------------------------- #
+# P5：调试会话 runner 回报（viewer 端口就绪）
+# --------------------------------------------------------------------------- #
+@router.post("/debug-sessions/{session_id}/ready", dependencies=[Depends(require_control_token)])
+async def debug_session_ready(
+    session_id: str,
+    body: dict = Body(default_factory=dict),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """runner 报告 vendor viewer 已在 127.0.0.1:<port> 监听。
+
+    幂等：只有 state=opening 的会话会被转成 active（重复回报直接 already=true）。
+    端口写进 debug_sessions.viewer_port —— 等等，0001 迁移没有这一列；端口由
+    routers.debug 的进程内 _READY_PORTS 表持有（单进程部署下足够，与
+    spawn._PROCESSES 同一信任级别）。
+    """
+    port = body.get("port")
+    if not isinstance(port, int) or port <= 0:
+        raise validation_error("port 必须是正整数")
+    row = (
+        await session.execute(
+            text(
+                "SELECT id, state FROM debug_sessions WHERE id = CAST(:sid AS uuid)"
+            ),
+            {"sid": str(session_id)},
+        )
+    ).mappings().first()
+    if row is None:
+        raise not_found("debug_session", str(session_id))
+    if row["state"] == "active":
+        return {"ok": True, "already": True, "state": "active"}
+    if row["state"] != "opening":
+        # 已关闭/丢失的会话不再接受回报
+        return {"ok": False, "state": row["state"]}
+    await session.execute(
+        text(
+            "UPDATE debug_sessions SET state = 'active'"
+            " WHERE id = CAST(:sid AS uuid) AND state = 'opening'"
+        ),
+        {"sid": str(session_id)},
+    )
+    from .debug import register_viewer_port
+
+    register_viewer_port(str(session_id), int(port))
+    await session.commit()
+    return {"ok": True, "state": "active"}
+
+
 __all__ = ["router", "require_control_token", "CONTROL_TOKEN_HEADER"]
