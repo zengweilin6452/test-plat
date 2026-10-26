@@ -639,3 +639,9 @@ dialog.drawer { margin: 0 0 0 auto; width: min(570px, 100vw); height: 100dvh; ma
 .rev-row.latest { border-color: #8ba2f2; background: #f8faff; }
 .rev-row .rev-no { font-family: var(--font-mono); color: var(--blue); }
 .rev-row .rev-meta { color: var(--muted-faint); font-size: var(--fs-2xs); margin-top: 2px; }
+
+/* ── DebugDrawer（P5 调试抽屉）────────────────────────── */
+.debug-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(220px, 1fr); gap: var(--space-6); align-items: start; }
+.debug-canvas { width: 100%; background: #101418; border: 1px solid var(--line); border-radius: var(--radius-sm); display: block; }
+.debug-tree { max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-4); }
+@media (max-width: 960px) { .debug-grid { grid-template-columns: 1fr; } }

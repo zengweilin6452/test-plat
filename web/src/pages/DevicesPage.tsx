@@ -7,9 +7,11 @@
  *  2. 操作系统与分辨率来自 resource_profiles.spec(jsonb)，档案缺失时为 null → 显示破折号。
  * 状态枚举按 schema.sql execution_resources.status：ready / offline / unauthorized / draining。
  */
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import { fetchResources } from '../api/endpoints'
+import { DebugDrawer, type DebugTarget } from '../components/DebugDrawer'
 import { ResourceStatusBadge, Badge } from '../components/Badge'
 import { Button } from '../components/Button'
 import { PageHeading, Panel, PanelHead } from '../components/Card'
@@ -25,6 +27,7 @@ import type { ResourceRecord } from '../types'
 
 export function DevicesPage() {
   const { targetScope, setTargetScope } = useTargetScope()
+  const [debugTarget, setDebugTarget] = useState<DebugTarget | null>(null)
 
   const resourcesQuery = useQuery({
     queryKey: ['resources'],
@@ -41,6 +44,15 @@ export function DevicesPage() {
   const unavailableCount = rows.filter(
     (item) => item.status === 'offline' || item.status === 'unauthorized',
   ).length
+
+  function openDebug(row: ResourceRecord) {
+    const hint = row.lease
+      ? row.lease.run_id
+        ? '运行 ' + row.lease.run_id.slice(0, 8) + ' 占用中'
+        : '调试会话占用中'
+      : null
+    setDebugTarget({ serial: row.resource_key ?? row.resource_key, label: row.name, leaseHint: hint })
+  }
 
   const columns: Column<ResourceRecord>[] = [
     {
@@ -97,6 +109,28 @@ export function DevicesPage() {
           {row.lease?.run_id ? 'run ' + row.lease.run_id.slice(0, 8) : row.lease?.debug_session_id ? '调试会话' : DASH}
         </span>
       ),
+    },
+    {
+      key: 'debug',
+      header: '操作',
+      align: 'right',
+      render: (row) => {
+        const busy = row.busy || row.status !== 'ready'
+        return (
+          <Button
+            size="small"
+            disabled={busy}
+            title={
+              busy
+                ? '资源不可用或被占用' + (row.lease?.run_id ? '（run ' + row.lease.run_id.slice(0, 8) + '）' : row.lease?.debug_session_id ? '（调试会话）' : '')
+                : undefined
+            }
+            onClick={() => openDebug(row)}
+          >
+            打开调试
+          </Button>
+        )
+      },
     },
   ]
 
@@ -165,6 +199,12 @@ export function DevicesPage() {
           />
         )}
       </Panel>
+
+      <DebugDrawer
+        open={Boolean(debugTarget)}
+        target={debugTarget}
+        onClose={() => setDebugTarget(null)}
+      />
     </>
   )
 }

@@ -26,7 +26,7 @@ export function Topbar({ current, onToggleMenu }: TopbarProps) {
       <div className="flex">
         <span className="prototype-tag">
           <i />
-          P2 · 任务创建与执行已接入
+          P6 · 调试与交付就绪
         </span>
         <span className="topbar-date">{fmtToday()}</span>
       </div>
