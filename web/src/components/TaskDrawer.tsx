@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import { fetchTaskRevisions, validateTask } from '../api/endpoints'
-import { MODULE_NAMES, TARGET_CATALOG } from '../constants'
+import { moduleName, TARGET_CATALOG } from '../constants'
 import { displayStatus, displayTaskStatus } from '../lib/display'
 import { DASH, fmtDateTime } from '../lib/fmt'
 import type {
@@ -157,9 +157,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
       title={task ? task.name : '任务详情'}
       description={
         task
-          ? `${task.display_id} · ${TARGET_CATALOG[task.platform]?.label ?? task.platform} · ${
-              task.test_type ? MODULE_NAMES[task.test_type] : '未指定类型'
-            }`
+          ? `${task.display_id} · ${TARGET_CATALOG[task.platform]?.label ?? task.platform} · ${moduleName(task.test_type)}`
           : undefined
       }
       footer={footer}
@@ -262,9 +260,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
               </dd>
               <dt>测试类型</dt>
               <dd>
-                {(latestRevision?.test_type ?? task.test_type)
-                  ? MODULE_NAMES[(latestRevision?.test_type ?? task.test_type) as keyof typeof MODULE_NAMES]
-                  : '未指定类型'}
+                {moduleName(latestRevision?.test_type ?? task.test_type)}
               </dd>
               <dt>修订号</dt>
               <dd className="mono">
@@ -313,7 +309,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
                       <div className="flex" style={{ gap: 8 }}>
                         <ReadinessBadge readiness={revision.readiness} />
                         <span className="muted small">
-                          {revision.test_type ? MODULE_NAMES[revision.test_type] : '未指定类型'}
+                          {moduleName(revision.test_type)}
                         </span>
                         {index === 0 ? <span className="muted small">最新</span> : null}
                       </div>

@@ -16,7 +16,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { describeError } from '../api/client'
-import { createTask, fetchResources } from '../api/endpoints'
+import { createTask, fetchApplications, fetchResources } from '../api/endpoints'
 import { MODULE_NAMES, TARGET_CATALOG } from '../constants'
 import { DASH } from '../lib/fmt'
 import type {
@@ -56,6 +56,7 @@ export interface WizardForm {
   platform: Platform
   module: TestModule
   name: string
+  applicationId: string
   /** Android 包名 / Web 站点地址 */
   identifier: string
   appVersion: string
@@ -68,6 +69,7 @@ export const INITIAL_FORM: WizardForm = {
   platform: 'android',
   module: 'ui',
   name: '',
+  applicationId: '',
   identifier: '',
   appVersion: '',
   scenario: '',
@@ -87,6 +89,7 @@ const MODULES: TestModule[] = ['ui', 'perf', 'joint']
  */
 export function validateStep1(form: WizardForm): WizardErrors {
   const errors: WizardErrors = {}
+  if (!form.applicationId) errors.applicationId = '请选择已登记应用。'
   const name = form.name.trim()
   if (!name) {
     errors.name = '请填写任务名称。'
@@ -175,30 +178,30 @@ function newRequestKey(): string {
 }
 
 /** 组装 POST /tasks 请求体：只发契约字段，不塞前端自造字段 */
-export function buildCreateTaskRequest(form: WizardForm, requestKey: string): CreateTaskRequest {
-  const android = form.platform === 'android'
-  const body: CreateTaskRequest = {
-    request_key: requestKey,
+export function buildCreateTaskRequest(form: WizardForm): CreateTaskRequest {
+  return {
     name: form.name.trim(),
-    module: form.module,
+    test_type: form.module === 'perf' ? 'performance' : form.module,
     platform: form.platform,
-    // Android 才有包名概念；Web / iOS 的标识来自已登记的应用，不在这里伪造
-    package_name: android ? form.identifier.trim() : null,
-    app_version: form.appVersion.trim() || null,
-    scenario: form.scenario.trim() || null,
-    device: android && form.resourceId ? { resource_id: form.resourceId, allow_busy_queue: true } : null,
-    perf:
-      form.module === 'ui'
-        ? null
-        : { duration_s: Number(form.duration.trim()), items: ['CPU', 'Memory', 'FPS'] },
-    ui: null,
+    application_id: form.applicationId,
+    config: {
+      ...(form.platform === 'android'
+        ? { package_name: form.identifier.trim() }
+        : { identifier: form.identifier.trim() }),
+      app_version: form.appVersion.trim() || null,
+      scenario: form.scenario.trim() || null,
+      device: form.platform === 'android' && form.resourceId
+        ? { resource_id: form.resourceId, allow_busy_queue: true } : null,
+      ...(form.module === 'ui' ? {} : {
+        perf: { duration_s: Number(form.duration.trim()), items: ['CPU', 'Memory', 'FPS'] },
+      }),
+    },
   }
-  return body
 }
 
 /** 设备可选性：offline / unauthorized 不可选（原型 §2.6 第 2 步） */
 export function isDeviceSelectable(resource: ResourceRecord): boolean {
-  return resource.status === 'ready' || resource.status === 'draining'
+  return resource.status === 'ready'
 }
 
 interface TaskWizardProps {
@@ -217,6 +220,12 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
   const [errors, setErrors] = useState<WizardErrors>({})
   const [touched, setTouched] = useState(false)
   const requestKeyRef = useRef<string>('')
+  const stepsRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const body = stepsRef.current?.closest('.dialog-body')
+    if (body) body.scrollTop = 0
+  }, [step])
 
   const fieldId = (name: keyof WizardForm) => `${uid}-${name}`
 
@@ -231,6 +240,17 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
     }
   }, [open, initialPlatform])
 
+  const applicationsQuery = useQuery({
+    queryKey: ['applications', 'wizard'],
+    queryFn: ({ signal }) => fetchApplications(signal),
+    enabled: open,
+    retry: false,
+  })
+  const applications = (applicationsQuery.data?.items ?? []).filter(
+    (application) => application.platform === form.platform,
+  )
+  const applicationsError = applicationsQuery.isError ? describeError(applicationsQuery.error) : null
+
   // Android 才需要选设备；其它端不请求资源列表
   const resourcesQuery = useQuery({
     queryKey: ['resources', 'wizard'],
@@ -241,12 +261,13 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
 
   const resourcesError = resourcesQuery.isError ? describeError(resourcesQuery.error) : null
   const devices = useMemo(
-    () => (resourcesQuery.data?.items ?? []).filter((item) => item.platform === 'android'),
-    [resourcesQuery.data],
+    () => (resourcesQuery.data?.items ?? []).filter((item) => item.platform === 'android'
+      && item.project_id === applicationsQuery.data?.items.find((app) => app.id === form.applicationId)?.project_id),
+    [resourcesQuery.data, applicationsQuery.data, form.applicationId],
   )
 
   const submit = useMutation({
-    mutationFn: (body: CreateTaskRequest) => createTask(body),
+    mutationFn: (body: CreateTaskRequest) => createTask(body, requestKeyRef.current),
     onSuccess: (created) => {
       // 成功后通知页面：toast + 关闭 + refetch 由调用方统一处理（避免各页各写一份）
       onCreated?.(created)
@@ -309,7 +330,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
       return
     }
     if (!requestKeyRef.current) requestKeyRef.current = newRequestKey()
-    submit.mutate(buildCreateTaskRequest(form, requestKeyRef.current))
+    submit.mutate(buildCreateTaskRequest(form))
   }
 
   function handleClose() {
@@ -349,7 +370,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
           : '每步校验通过后才能进入下一步'
       }
     >
-      <div className="wizard-steps" role="list" aria-label="向导步骤">
+      <div ref={stepsRef} className="wizard-steps" role="list" aria-label="向导步骤">
         {STEP_LABELS.map((label, index) => {
           const value = index + 1
           return (
@@ -382,7 +403,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
                   onClick={() => {
                     update('platform', platform)
                     // 换端后设备选择与标识含义都变了，清掉旧值避免误提交
-                    setForm((prev) => ({ ...prev, platform, identifier: '', resourceId: '' }))
+                    setForm((prev) => ({ ...prev, platform, applicationId: '', identifier: '', resourceId: '' }))
                     setErrors({})
                   }}
                 >
@@ -441,6 +462,31 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
           </div>
 
           <div className="field">
+            <label htmlFor={fieldId('applicationId')}>已登记应用 <span className="text-red">*</span></label>
+            <select
+              id={fieldId('applicationId')}
+              value={form.applicationId}
+              disabled={applicationsQuery.isLoading}
+              aria-invalid={Boolean(fieldErrors.applicationId)}
+              aria-describedby={`${fieldId('applicationId')}-error`}
+              onChange={(event) => {
+                const application = applications.find((item) => item.id === event.target.value)
+                setForm((prev) => ({ ...prev, applicationId: application?.id ?? '',
+                  identifier: application?.identifier ?? '', resourceId: '' }))
+              }}
+            >
+              <option value="">请选择已登记应用</option>
+              {applications.map((application) => (
+                <option key={application.id} value={application.id}>{application.name} · {application.identifier}</option>
+              ))}
+            </select>
+            {applicationsError ? <Notice tone="red" title="应用列表获取失败">{applicationsError.message}</Notice> : null}
+            {!applicationsQuery.isLoading && !applicationsError && applications.length === 0
+              ? <div className="field-hint">当前目标端没有已登记应用。</div> : null}
+            <FieldError id={`${fieldId('applicationId')}-error`} message={fieldErrors.applicationId} />
+          </div>
+
+          <div className="field">
             <label htmlFor={fieldId('identifier')}>
               {form.platform === 'android' ? '应用包名' : form.platform === 'web' ? '站点地址（URL）' : 'Bundle ID'}{' '}
               <span className="text-red">*</span>
@@ -458,7 +504,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
               }
               aria-invalid={Boolean(fieldErrors.identifier)}
               aria-describedby={fieldErrors.identifier ? `${fieldId('identifier')}-error` : undefined}
-              onChange={(event) => update('identifier', event.target.value)}
+              readOnly
             />
             <div className="field-hint">
               {form.platform === 'android'
@@ -532,9 +578,9 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
                           {device.profile?.os_name ?? '未知系统'}
                           {device.profile?.os_version ? ` ${device.profile.os_version}` : ''} ·{' '}
                           {device.status === 'ready'
-                            ? '可用'
+                            ? (device.busy ? '占用中（可排队）' : '可用')
                             : device.status === 'draining'
-                              ? '占用中（可排队）'
+                              ? '维护中'
                               : device.status === 'offline'
                                 ? '离线'
                                 : '待授权'}
@@ -548,7 +594,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
                   })}
                 </div>
               )}
-              <div className="field-hint">离线或未授权设备不可选；占用中的设备可选择排队。</div>
+              <div className="field-hint">离线、未授权或维护中的设备不可选；在线设备占用中可选择排队。</div>
               <FieldError id={`${fieldId('resourceId')}-error`} message={fieldErrors.resourceId} />
             </div>
           ) : (

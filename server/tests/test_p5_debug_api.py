@@ -261,10 +261,13 @@ def test_fake_runner_lifecycle(api_client, p3_project, fake_runner_env, control_
         assert response.status_code == 503
         assert _json(response)["code"] == "viewer_unavailable"
 
-        # 模板端点在有活动会话时也应 501（fake 端口上没有模板实现）——
-        # 设计选择：模板端点要求"活动会话 + viewer"，fake 会话下同样不伪造。
-        response = api_client.get("/api/v1/templates", headers=CLIENT_HEADERS)
-        assert response.status_code == 501
+        # 模板代理必须显式携带会话：带 session_id 指向活动会话；fake 端口没有
+        # 真 viewer -> 503，不伪造清单
+        response = api_client.get(
+            f"/api/v1/templates?session_id={session_id}", headers=CLIENT_HEADERS
+        )
+        assert response.status_code == 503
+        assert _json(response)["code"] == "viewer_unavailable"
 
         # 活动会话下 WS 不再是 4403（连不连得上 vendor 由透传决定；这里只验状态门）
     finally:
@@ -358,20 +361,31 @@ def _expect_close(client: TestClient, url: str, code: int) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 模板 501（无活动会话）
+# 模板 400（session_id 必填：按调试会话隔离，删除了全局兜底）
 # --------------------------------------------------------------------------- #
 @requires_db
-def test_templates_501_without_session(api_client, p3_project):
+def test_templates_400_without_session(api_client, p3_project):
+    """无 session_id 的模板请求曾兜底挑"最新活动会话"，是跨项目泄漏点；现在必须校验失败。"""
     for method, url, kwargs in [
         ("get", "/api/v1/templates", {}),
         ("post", "/api/v1/templates", {"json": {"name": "t"}}),
         ("put", "/api/v1/templates/some/path", {"json": {"name": "t"}}),
     ]:
         response = getattr(api_client, method)(url, headers=CLIENT_HEADERS, **kwargs)
-        assert response.status_code == 501, (method, response.status_code)
+        assert response.status_code == 400, (method, response.status_code)
         body = _json(response)
-        assert body["code"] == "no_active_debug_session"
+        assert body["code"] == "validation_error"
+        assert "session_id" in body["message"]
         assert "debug-sessions" in body["message"]
+
+
+@requires_db
+def test_templates_with_unknown_session_404(api_client, p3_project):
+    response = api_client.get(
+        f"/api/v1/templates?session_id={uuid.uuid4()}", headers=CLIENT_HEADERS
+    )
+    assert response.status_code == 404
+    assert _json(response)["code"] == "not_found"
 
 
 # --------------------------------------------------------------------------- #

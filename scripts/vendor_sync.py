@@ -2,7 +2,7 @@
 """vendor 同步与只读校验。
 
 用法:
-  python scripts/vendor_sync.py sync     # 从源仓库复制到 vendor/，生成 VENDOR.lock.json
+  python scripts/vendor_sync.py sync [mobile_perf|mobile_auto]  # 按源更新快照与锁文件，不删除目标文件
   python scripts/vendor_sync.py check    # 校验 vendor/ 与锁文件逐字节一致（CI 与提交前必跑）
   python scripts/vendor_sync.py list     # 打印锁文件摘要
 
@@ -142,21 +142,32 @@ def _iter_source_files(root: Path, include: list[str], exclude_dirs: set[str], e
             yield path.relative_to(root).as_posix(), path
 
 
-def cmd_sync() -> int:
-    files: dict[str, dict[str, object]] = {}
-    sources_meta: dict[str, dict[str, object]] = {}
+def cmd_sync(names: list[str] | None = None) -> int:
+    """按源同步，不删除目标目录；源移除文件时拒绝隐式清理。"""
+    selected = names or list(SOURCES)
+    previous = json.loads(LOCK_PATH.read_text(encoding="utf-8")) if LOCK_PATH.is_file() else {}
+    files: dict[str, dict[str, object]] = dict(previous.get("files", {}))
+    sources_meta: dict[str, dict[str, object]] = dict(previous.get("sources", {}))
+    plans = {}
+    for name in selected:
+        cfg = SOURCES[name]
+        source_files = list(_iter_source_files(cfg["root"], cfg["include"], cfg["exclude_dirs"], cfg["exclude_globs"]))
+        incoming = {f"{cfg['target']}/{rel}" for rel, _ in source_files}
+        removed = {rel for rel in files if rel.startswith(cfg["target"] + "/")} - incoming
+        if removed:
+            raise SystemExit("源文件已移除，需显式批准清理后同步：" + ", ".join(sorted(removed)))
+        plans[name] = source_files
 
-    for name, cfg in SOURCES.items():
+    for name in selected:
+        cfg = SOURCES[name]
         root: Path = cfg["root"]
         target: str = cfg["target"]
         if not root.is_dir():
             raise SystemExit(f"源仓库不存在: {root}")
         dst_root = VENDOR_DIR / target
-        if dst_root.exists():
-            shutil.rmtree(dst_root)
         count = 0
         total_bytes = 0
-        for rel, src in _iter_source_files(root, cfg["include"], cfg["exclude_dirs"], cfg["exclude_globs"]):
+        for rel, src in plans[name]:
             dst = dst_root / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
@@ -165,9 +176,6 @@ def cmd_sync() -> int:
             files[key] = {"sha256": digest, "size": dst.stat().st_size}
             count += 1
             total_bytes += dst.stat().st_size
-        pruned = _prune_cache_dirs(target)
-        if pruned:
-            print(f"[sync] {name}: 剪除 {pruned} 个缓存目录")
         sources_meta[name] = {
             "root": str(root),
             "target": target,
@@ -257,10 +265,17 @@ def cmd_list() -> int:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2 or argv[1] not in {"sync", "check", "list"}:
+    if len(argv) < 2 or argv[1] not in {"sync", "check", "list"}:
         print(__doc__)
         return 2
-    return {"sync": cmd_sync, "check": cmd_check, "list": cmd_list}[argv[1]]()
+    if argv[1] == "sync":
+        if any(name not in SOURCES for name in argv[2:]):
+            print("同步源仅支持：" + ", ".join(SOURCES), file=sys.stderr)
+            return 2
+        return cmd_sync(argv[2:] or None)
+    if len(argv) != 2:
+        return 2
+    return {"check": cmd_check, "list": cmd_list}[argv[1]]()
 
 
 if __name__ == "__main__":

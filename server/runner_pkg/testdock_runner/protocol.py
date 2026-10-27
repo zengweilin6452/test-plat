@@ -132,6 +132,8 @@ class ControlClient:
         cases: list[Mapping[str, Any]] | None = None,
         metrics: Mapping[str, Any] | None = None,
         junit: Mapping[str, Any] | None = None,
+        artifacts_dir: str | None = None,
+        reason: str | None = None,
     ) -> dict[str, Any]:
         return self._request(
             "POST",
@@ -143,6 +145,8 @@ class ControlClient:
                 "cases": list(cases or []),
                 "metrics": dict(metrics or {}),
                 "junit": dict(junit or {}),
+                "artifacts_dir": artifacts_dir,
+                "reason": reason,
             },
         )
 
@@ -159,6 +163,19 @@ class ControlClient:
                 "fencing_token": fencing_token,
             },
         )
+
+
+class DebugControlClient(ControlClient):
+    """调试会话有自己的租约和状态，不能使用 test_runs 协议。"""
+
+    def _url(self, suffix: str) -> str:
+        return "%s/internal/debug-sessions/%s/%s" % (self.base_url, self.run_id, suffix.lstrip("/"))
+
+    def ready(self, *, port: int, fencing_token: int) -> dict[str, Any]:
+        return self._request("POST", "ready", {"port": port, "fencing_token": fencing_token})
+
+    def close(self, *, reason: str, fencing_token: int) -> dict[str, Any]:
+        return self._request("POST", "close", {"reason": reason, "fencing_token": fencing_token})
 
 
 def _code_of(body: str) -> str:

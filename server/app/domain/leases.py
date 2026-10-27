@@ -56,6 +56,7 @@ _PICK_SQL = text(
       FROM execution_resources er
      WHERE er.project_id = :project_id
        AND er.status = 'ready'
+       AND (CAST(:platform AS text) IS NULL OR er.platform = :platform)
        AND er.id NOT IN (
              SELECT rl.resource_id FROM resource_leases rl WHERE rl.released_at IS NULL
            )
@@ -123,6 +124,7 @@ async def acquire_lease(
     holder_id: str,
     resource_id: str | uuid.UUID | None = None,
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    platform: str | None = None,
 ) -> Lease | None:
     """在**调用方的事务里**领取一台设备；没有可用设备返回 None。
 
@@ -135,6 +137,7 @@ async def acquire_lease(
             {
                 "project_id": str(project_id),
                 "resource_id": str(resource_id) if resource_id else None,
+                "platform": platform,
             },
         )
     ).mappings().first()
@@ -142,6 +145,13 @@ async def acquire_lease(
         return None
 
     rid = str(picked["id"])
+    # 租约的复合外键要求运行已绑定同一资源，必须先绑定再插租约。
+    await session.execute(
+        text("UPDATE test_runs SET resource_id = :resource_id, profile_id = :profile_id, "
+             "lock_version = lock_version + 1 WHERE id = :run_id AND project_id = :pid"),
+        {"resource_id": rid, "profile_id": str(picked["profile_id"]),
+         "run_id": str(run_id), "pid": str(project_id)},
+    )
     fence = (await session.execute(_BUMP_FENCE_SQL, {"resource_id": rid})).scalar_one()
 
     row = (
@@ -372,7 +382,7 @@ async def acquire_lease_for_debug(
     picked = (
         await session.execute(
             _PICK_SQL,
-            {"project_id": str(project_id), "resource_id": str(resource_id)},
+            {"project_id": str(project_id), "resource_id": str(resource_id), "platform": None},
         )
     ).mappings().first()
     if picked is None:

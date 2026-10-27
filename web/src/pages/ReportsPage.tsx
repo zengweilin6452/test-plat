@@ -8,10 +8,11 @@
  *   perf failed → 性能阈值未满足，查看指标与基线
  *   perf passed → 性能门禁通过，指标与基线可比
  *
- * P1 可用数据：已完成运行（state='completed'）作为报告清单；
- * 证据链与可比性说明接口在 P4 提供。
+ * 数据源：
+ *  - 清单：已完成运行（state='completed'）；
+ *  - 「查看报告」：GET /runs/{id}/report + GET /runs/{id}/artifacts（ReportDrawer）。
  */
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import { fetchRuns } from '../api/endpoints'
@@ -21,18 +22,19 @@ import { PageHeading, Panel, PanelHead } from '../components/Card'
 import { ContextBar, PrimaryAction } from '../components/PageBits'
 import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
+import { ReportDrawer } from '../components/ReportDrawer'
 import { Table, type Column } from '../components/Table'
-import { TARGET_CATALOG } from '../constants'
+import { TARGET_CATALOG, isPerformanceType } from '../constants'
 import { displayStatus } from '../lib/display'
 import { fmtDateTime } from '../lib/fmt'
 import { useTargetScope } from '../store/scope'
-import type { RunOutcome, RunRecord, TestModule } from '../types'
+import type { RunOutcome, RunRecord } from '../types'
 
-/** 原型 L214 的映射表：只做文案映射，不做判定 */
-export function conclusionText(module: TestModule | null, outcome: RunOutcome | null): string {
+/** 原型 L214 的映射表：只做文案映射，不做判定（module 用后端原始枚举） */
+export function conclusionText(module: string | null, outcome: RunOutcome | null): string {
   if (outcome === null) return '后端尚未给出结论'
   if (outcome === 'not_tested') return '样本不足，未产生门禁结论'
-  if (module === 'perf') {
+  if (isPerformanceType(module)) {
     return outcome === 'passed' ? '性能门禁通过，指标与基线可比' : '性能阈值未满足，查看指标与基线'
   }
   return outcome === 'passed' ? '用例断言通过，执行过程可追溯' : '断言未满足，已保留失败现场'
@@ -40,6 +42,7 @@ export function conclusionText(module: TestModule | null, outcome: RunOutcome | 
 
 export function ReportsPage() {
   const { targetScope, setTargetScope } = useTargetScope()
+  const [activeRun, setActiveRun] = useState<RunRecord | null>(null)
 
   const runsQuery = useQuery({
     queryKey: ['runs', 'reports', targetScope],
@@ -92,8 +95,8 @@ export function ReportsPage() {
       key: 'action',
       header: '操作',
       align: 'right',
-      render: () => (
-        <LinkButton onClick={() => undefined}>
+      render: (run) => (
+        <LinkButton onClick={() => setActiveRun(run)}>
           查看报告<span aria-hidden="true">›</span>
         </LinkButton>
       ),
@@ -175,6 +178,12 @@ export function ReportsPage() {
           </footer>
         </Panel>
       </div>
+
+      <ReportDrawer
+        open={Boolean(activeRun)}
+        run={activeRun}
+        onClose={() => setActiveRun(null)}
+      />
     </>
   )
 }

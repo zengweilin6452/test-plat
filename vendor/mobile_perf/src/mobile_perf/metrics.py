@@ -129,7 +129,10 @@ METRICS: dict[str, MetricSpec] = {
         # 真机样本中无电量%列：保留 canonical key，映射待上游确认后补入
         MetricSpec("battery_pct", "%", "solo_pi", "电量", "Battery level"),
         MetricSpec("temp_battery_c", "°C", "pc_supplement", "电池温度", "Battery temperature"),
+        # GPU 双源（工单 16）：利用率优先 kgsl gpubusy（窗口平均，非瞬时），
+        # 退化到 dumpsys gpu 文本；显存取 dumpsys gpu 的 Proc <pid> total
         MetricSpec("gpu_util_pct", "%", "pc_supplement", "GPU占用", "GPU utilization"),
+        MetricSpec("gpu_mem_mb", "MB", "pc_supplement", "应用GPU显存", "App GPU memory"),
         # 启动编排指标（ticket 12）：采集窗口内 force-stop/退后台后 am start -W
         # 计得，单样本入库（聚合字段填单值）；无 SoloPi 原始列
         MetricSpec("app_cold_start_ms", "ms", "pc_orchestration", "冷启动耗时", "Cold start time"),
@@ -177,6 +180,25 @@ METRICS: dict[str, MetricSpec] = {
         MetricSpec(
             "net_conn_duration_ms", "ms", "pc_supplement",
             "连接建立耗时", "Connection setup duration",
+        ),
+        # 解密档接口级指标（ticket 18）：按 URL 去查询串后的路由聚合。
+        # api_req_duration_ms / api_payload_kb 是**逐请求**分布，
+        # api_req_count / api_error_rate_pct 是会话级单样本
+        MetricSpec(
+            "api_req_duration_ms", "ms", "pc_supplement",
+            "接口耗时", "API request duration",
+        ),
+        MetricSpec("api_req_count", "次", "pc_supplement", "接口请求数", "API request count"),
+        MetricSpec(
+            "api_error_rate_pct", "%", "pc_supplement",
+            "接口错误率", "API error rate",
+        ),
+        MetricSpec("api_payload_kb", "KB", "pc_supplement", "接口响应大小", "API payload size"),
+        # 整页加载耗时（ticket 19）：从页面打标到画面进入稳定的耗时，末帧稳定口径。
+        # 多页面时一行内放每页一个样本，逐页值见报告 pages 与 page_load 事件
+        MetricSpec(
+            "page_load_ms", "ms", "pc_orchestration",
+            "整页加载耗时", "Page load time",
         ),
         # 泄漏趋势斜率（ticket 13）：跨 run 回归产物，非采集指标、无 SoloPi 原始列；
         # 由 leak.analyze_leak_trend 计算，阈值判定归宿主（leak.leak_verdict）

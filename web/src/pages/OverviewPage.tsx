@@ -19,7 +19,7 @@ import { Notice } from '../components/Notice'
 import { Progress } from '../components/Progress'
 import { StatCard } from '../components/StatCard'
 import { TargetCardGrid } from '../components/TargetCard'
-import { MODULE_NAMES, SCOPE_OPTIONS, TARGET_CATALOG } from '../constants'
+import { moduleName, SCOPE_OPTIONS, TARGET_CATALOG } from '../constants'
 import { DASH, fmtDateTime } from '../lib/fmt'
 import { displayStatus } from '../lib/display'
 import { StatusBadge } from '../components/Badge'
@@ -147,7 +147,7 @@ export function OverviewPage() {
                   </div>
                   <div className="task-sub">
                     {run.display_id} · {TARGET_CATALOG[run.platform]?.label ?? run.platform} ·{' '}
-                    {run.test_type ? MODULE_NAMES[run.test_type] : '未指定类型'}
+                    {moduleName(run.test_type)}
                   </div>
                   <div style={{ marginTop: 8 }}>
                     <Progress value={run.progress} />

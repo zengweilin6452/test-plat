@@ -202,13 +202,18 @@ def seed(api_client):
     )
 
     def cleanup() -> None:
-        try:
+        """按外键叶子优先的顺序删（先删 projects 必然 ForeignKeyViolation，D6 改动三）。"""
+        from tests._p3_common import PROJECT_TABLE_DROP_ORDER
+
+        for table in PROJECT_TABLE_DROP_ORDER[:-1]:
             _exec_sync(
-                "DELETE FROM projects WHERE id = CAST(:pid AS uuid)",
+                f"DELETE FROM {table} WHERE project_id = CAST(:pid AS uuid)",  # noqa: S608 - 表名来自共享常量
                 {"pid": ids["project_id"]},
             )
-        except Exception:  # noqa: BLE001 - 清理失败不该遮盖真正的失败
-            pass
+        _exec_sync(
+            "DELETE FROM projects WHERE id = CAST(:pid AS uuid)",
+            {"pid": ids["project_id"]},
+        )
 
     ids["suffix"] = suffix
     ids["cleanup"] = cleanup

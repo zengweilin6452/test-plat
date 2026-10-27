@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import os
+import queue
+import threading
 import signal
 import subprocess
 import sys
@@ -48,6 +50,9 @@ class UiJobOptions:
     test_paths: list[str] = field(default_factory=list)
     fake: bool = False
     vendor_dir: Path | None = None
+    app_package: str = ""
+    app_activity: str = ""
+    perf: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -61,6 +66,8 @@ class UiJobResult:
     cancelled: bool = False
     fence_lost: bool = False
     timed_out: bool = False
+    outcome: str | None = None
+    components: list[dict[str, Any]] = field(default_factory=list)
 
 
 def resolve_test_paths(options: UiJobOptions) -> list[str]:
@@ -80,6 +87,27 @@ def _vendor_unit_tests(vendor_dir: Path | None) -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
+def _evidence_plugin_preloaded() -> bool:
+    """vendor 插件是否已通过 pytest11 入口点自动加载（如本机 editable 安装）。
+
+    入口点已加载同一模块时再显式 `-p mobile_auto.evidence.pytest_plugin`，
+    pytest 会报 "Plugin already registered under a different name" 直接崩；
+    但 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 时入口点不生效，仍需显式 -p。
+    """
+    if os.environ.get("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "").strip() in ("1", "true", "yes", "on"):
+        return False
+    try:
+        import importlib.metadata
+
+        return any(
+            ep.name == "mobile-auto-evidence"
+            and ep.value == "mobile_auto.evidence.pytest_plugin"
+            for ep in importlib.metadata.entry_points(group="pytest11")
+        )
+    except Exception:
+        return False
+
+
 def build_pytest_command(
     *,
     serial: str,
@@ -93,21 +121,21 @@ def build_pytest_command(
         sys.executable,
         "-m",
         "pytest",
-        "-p",
-        "mobile_auto.evidence.pytest_plugin",
+    ]
+    if not _evidence_plugin_preloaded():
+        argv += ["-p", "mobile_auto.evidence.pytest_plugin"]
+    argv += [
         "--mobile-evidence",
         "--mobile-devices",
         serial or "fake-serial",
-        "--mobile-artifacts-dir",
-        str(artifacts_dir),
+        "-p",
+        "testdock_runner.pytest_plugin",
         "--junit-xml",
         str(junit),
         "-p",
         "no:cacheprovider",
         "-q",
     ]
-    if revision_id:
-        argv.extend(["--mobile-revision", str(revision_id)])
     argv.extend(test_paths or list(DEFAULT_TEST_PATHS))
     return argv
 
@@ -120,11 +148,11 @@ def _lock_dir() -> Path:
     return root / ".runtime" / "device-locks"
 
 
-def _acquire_local_locks(serial: str, *, run_id: str) -> tuple[Any, LocalDeviceLock]:
+def _acquire_local_locks(serial: str, *, run_id: str, vendor: bool = True) -> tuple[Any, LocalDeviceLock]:
     """先 vendor DeviceLease（有 vendor 时），再本地跨进程锁。"""
     vendor_lease: Any = None
     real_serial = bool(serial) and serial != "fake-serial" and not serial.startswith("fake")
-    if real_serial:
+    if real_serial and vendor:
         ensure_vendor_on_path()
         try:
             from mobile_auto.core.lease import DeviceLease
@@ -136,7 +164,7 @@ def _acquire_local_locks(serial: str, *, run_id: str) -> tuple[Any, LocalDeviceL
                 vendor_lease.acquire()
             except Exception as exc:  # noqa: BLE001
                 raise DeviceBusy(serial, None) from exc
-    lock = LocalDeviceLock(serial=serial or "fake-serial", lock_dir=_lock_dir())
+    lock = LocalDeviceLock(serial=serial or "fake-serial", lock_dir=_lock_dir(), pid=os.getpid())
     try:
         lock.acquire()
     except DeviceBusy:
@@ -183,7 +211,7 @@ def run_ui_job(options: UiJobOptions, context: RunnerContext) -> UiJobResult:
     context.set_stage("lease", 10, stage=1)
     emit_stage("lease", 10)
     try:
-        vendor_lease, lock = _acquire_local_locks(options.serial, run_id=options.run_id)
+        vendor_lease, lock = _acquire_local_locks(options.serial, run_id=options.run_id, vendor=False)
     except DeviceBusy as exc:
         emit_text("local_lease_busy", detail=str(exc))
         return UiJobResult(exit_code=3, reason="local_lease_busy", message=str(exc))
@@ -199,12 +227,8 @@ def run_ui_job(options: UiJobOptions, context: RunnerContext) -> UiJobResult:
         if fake_enabled(options.fake):
             return _run_fake(options, context, artifacts_dir, serial)
 
-        # 3) vendor 设备会话（真机路径）
-        try:
-            session = _open_session(serial, artifacts_dir, options)
-        except Exception as exc:  # noqa: BLE001
-            emit_text("device_unavailable", detail=str(exc))
-            return UiJobResult(exit_code=3, reason="device_unavailable", message=str(exc))
+        # 设备会话和 vendor 租约由 pytest 子进程的 mobile_session fixture 持有，
+        # 父进程只持本地锁，避免父子进程重复争抢同一 vendor 租约。
         return _run_pytest(options, context, artifacts_dir, serial)
     finally:
         # 释放顺序：停设备 -> 释放 vendor 锁 -> 释放本地锁（DB 租约由 API 释放）
@@ -218,17 +242,12 @@ def run_ui_job(options: UiJobOptions, context: RunnerContext) -> UiJobResult:
 def _open_session(serial: str, artifacts_dir: Path, options: UiJobOptions) -> Any:
     from mobile_auto.core.session import DeviceSession
 
-    session = DeviceSession(
-        serial=serial,
-        artifacts_dir=str(artifacts_dir),
-        device_serial=serial,
-        app_package="com.example.xinghe",
-        app_activity="",
-        assets_dir="",
-        launch_ready_target="",
-        allowed_deeplink_schemes=(),
-        dialog_guard=(),
-    )
+    from mobile_auto.config import MobileConfig
+
+    session = DeviceSession(MobileConfig(
+        device_serial=serial, artifacts_dir=artifacts_dir,
+        app_package=options.app_package or None, app_activity=options.app_activity or None,
+    ))
     session.start()
     return session
 
@@ -281,6 +300,12 @@ def _run_pytest(
     deadline = Deadline(options.timeout)
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
+    import json
+    env["TESTDOCK_JOB_CONFIG"] = json.dumps({
+        "serial": serial, "artifacts_dir": str(artifacts_dir),
+        "app_package": options.app_package, "app_activity": options.app_activity,
+        "revision_id": options.revision_id,
+    })
     process = subprocess.Popen(
         argv,
         stdout=subprocess.PIPE,
@@ -290,13 +315,32 @@ def _run_pytest(
         text=True,
         encoding="utf-8",
         errors="replace",
+        start_new_session=os.name != "nt",
     )
+    lines: queue.Queue[str | None] = queue.Queue()
+
+    def read_output():
+        try:
+            for line in process.stdout:
+                lines.put(line)
+        finally:
+            lines.put(None)
+
+    reader = threading.Thread(target=read_output, name="pytest-output", daemon=True)
+    reader.start()
     cancelled = False
     timed_out = False
     try:
         assert process.stdout is not None
-        for line in process.stdout:
-            emit_text("pytest: %s" % line.rstrip())
+        while True:
+            try:
+                line = lines.get(timeout=0.1)
+            except queue.Empty:
+                line = ""
+            if line is None:
+                break
+            if line:
+                emit_text("pytest: %s" % line.rstrip())
             if context.cancelled():
                 cancelled = True
                 _terminate_process_tree(process)
@@ -311,7 +355,10 @@ def _run_pytest(
     finally:
         _quiet(lambda: process.wait(timeout=10));
         if process.poll() is None:
-            _quiet(process.kill)
+            _terminate_process_tree(process)
+        reader.join(timeout=2)
+        if process.stdout is not None:
+            process.stdout.close()
 
     context.set_stage("archive", 90, stage=3)
     emit_stage("archive", 90)
@@ -335,9 +382,13 @@ def _run_pytest(
     elif junit.parse_error:
         result.exit_code = 3
         result.reason = "junit_parse_error"
+    elif process.returncode not in (0, 1, 5):
+        result.exit_code = 3
+        result.reason = "pytest_error"
     elif junit.present:
         result.exit_code = 2 if junit.failed else 0
-        result.reason = "case_failure" if junit.failed else "passed"
+        result.outcome = junit.outcome() or "not_tested"
+        result.reason = "case_failure" if junit.failed else ("passed" if result.outcome == "passed" else "no_tests")
     elif result.exit_code != 0:
         result.reason = "pytest_error"
     return result

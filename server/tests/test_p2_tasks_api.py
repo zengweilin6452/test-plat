@@ -109,6 +109,25 @@ def test_create_task_is_idempotent_with_request_key(api_client, seed):
     assert len(matching) == 1
 
 
+def test_wizard_contract_preserves_config_and_header_idempotency(api_client, seed):
+    config = {
+        "package_name": "com.example.demo", "app_version": "1.2.3", "scenario": "login",
+        "device": {"resource_id": "22222222-2222-4222-8222-222222222222", "allow_busy_queue": True},
+        "perf": {"duration_s": 120, "items": ["CPU", "Memory", "FPS"]},
+    }
+    payload = _payload(seed, test_type="performance", config=config)
+    headers = {**CLIENT_HEADERS, "Idempotency-Key": f"wizard-{seed['suffix']}"}
+    first = api_client.post("/api/v1/tasks", json=payload, headers=headers)
+    assert first.status_code == 201, first.text
+    second = api_client.post("/api/v1/tasks", json=payload, headers=headers)
+    assert second.status_code == 200, second.text
+    assert second.json()["id"] == first.json()["id"]
+    revision = first.json()["revision"]
+    assert revision["test_type"] == "performance"
+    for key, value in config.items():
+        assert revision["config"][key] == value
+
+
 def test_create_task_without_client_header_is_428(api_client, seed):
     resp = api_client.post("/api/v1/tasks", json=_payload(seed))
     assert resp.status_code == 428, resp.text

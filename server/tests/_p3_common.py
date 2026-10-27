@@ -1,9 +1,8 @@
-"""P3 测试夹具：直接连共享 testdock 库（与 Lead 的 API server 同一实例）。
+"""P3 测试夹具：连 pytest_configure 备好的独立测试库（tests/conftest.py）。
 
-为什么不用 tests/conftest.py 里的临时 PG：
-  那个 fixture 会在 55433 上 initdb + start，而该端口被 Lead 的 API server 占着，
-  initdb 出来的集群起不来。P3 的用例都是"写自己的行 + 唯一键/项目级联清理"隔离，
-  也不 drop 库，因此复用同一个库最稳。
+库的来源由 conftest.py 决定：默认是进程私有的临时 PG 实例；显式设置
+TESTDOCK_TEST_DATABASE_URL 时才复用外部库。本模块在**导入期**读取该环境变量
+算 HAVE_DB，因此实例必须在收集开始前就绪（conftest.py 的 pytest_configure）。
 
 命名：文件名以 _ 开头，pytest 不会当测试收集；测试模块里 `from _p3_common import ...`
 （tests/ 有 __init__.py，pytest 以 tests.xxx 收集，所以用 tests._p3_common 也行）。
@@ -284,12 +283,53 @@ def make_project(sync_engine, *, resources: int = 2, platform: str = "android") 
     }
 
 
+#: 删项目要按外键依赖叶子优先的顺序（全部外键都是 NO ACTION，先删 projects 必然
+#: ForeignKeyViolation）。顺序来自 .runtime/cleanup_test_projects.py——已在真实库
+#: 上验证过 11619 行删除成功的那份（device-registration.md D6 改动三）。
+PROJECT_TABLE_DROP_ORDER: tuple[str, ...] = (
+    "resource_leases",
+    "artifacts",
+    "case_results",
+    "metric_summaries",
+    "gate_evaluations",
+    "baselines",
+    "run_events",
+    "run_components",
+    "debug_sessions",
+    "test_runs",
+    "task_revisions",
+    "execution_resources",
+    "suite_versions",
+    "test_tasks",
+    "test_suites",
+    "gate_policies",
+    "app_builds",
+    "environments",
+    "execution_nodes",
+    "resource_profiles",
+    "applications",
+    "audit_events",
+    "project_members",
+    "projects",
+)
+
+
 def drop_project(project_id: str) -> None:
-    """按项目级联清理（P3 的失败不该污染共享库）。"""
-    try:
-        _exec_sync("DELETE FROM projects WHERE id = CAST(:pid AS uuid)", {"pid": project_id})
-    except Exception:  # noqa: BLE001 - 清理失败不遮盖真正的失败
-        pass
+    """按外键叶子优先的顺序删项目及其全部从属数据。
+
+    失败直接抛，不吞异常：清理失败要立刻暴露，而不是攒成 949 台孤儿设备
+    （device-registration.md §1.4 就是这么来的）。
+    """
+    for table in PROJECT_TABLE_DROP_ORDER[:-1]:
+        _exec_sync(
+            f"DELETE FROM {table} WHERE project_id = CAST(:pid AS uuid)",  # noqa: S608 - 表名来自本模块常量
+            {"pid": project_id},
+        )
+    # projects 自身没有 project_id 列，按 id 删（cleanup_test_projects.py 同款）
+    _exec_sync(
+        "DELETE FROM projects WHERE id = CAST(:pid AS uuid)",
+        {"pid": project_id},
+    )
 
 
 @pytest.fixture
@@ -333,8 +373,11 @@ def make_run(sync_engine):
     """插一条指定状态的 run（直接 SQL，不经路由层）。"""
     from sqlalchemy import text as _text
 
-    def _factory(*, state: str = "queued", request_key: str, project: dict | None = None) -> str:
+    def _factory(*, state: str = "queued", request_key: str, project: dict | None = None,
+                 config_snapshot: dict | None = None) -> str:
         from app.domain import runs as _runs
+
+        import json as _json
 
         proj = project or _DEFAULT_PROJECT[0]
         project_id = proj.get("project_id")
@@ -357,7 +400,7 @@ def make_run(sync_engine):
                     "                      outcome)"
                     " VALUES (CAST(:id AS uuid), CAST(:project_id AS uuid), CAST(:application_id AS uuid),"
                     "         :platform, CAST(:revision_id AS uuid),"
-                    "         :request_key, :state, '{}'::jsonb, 'pytest',"
+                    "         :request_key, :state, CAST(:config AS jsonb), 'pytest',"
                     "         CAST(:resource_id AS uuid), CAST(:profile_id AS uuid),"
                     "         CASE WHEN :needs_start THEN now() ELSE NULL END,"
                     "         CASE WHEN :terminal THEN now() ELSE NULL END,"
@@ -372,6 +415,7 @@ def make_run(sync_engine):
                     "application_id": application_id,
                     "request_key": request_key,
                     "state": state,
+                    "config": _json.dumps(config_snapshot or {}, ensure_ascii=False),
                     "platform": proj.get("platform") or "android",
                     "revision_id": proj.get("revision_id"),
                     "resource_id": resource_id if needs_resource else None,
@@ -439,6 +483,7 @@ async def async_session() -> AsyncIterator[Any]:
 __all__ = [
     "CLIENT_HEADERS",
     "HAVE_DB",
+    "PROJECT_TABLE_DROP_ORDER",
     "REPO_ROOT",
     "SERVER_ROOT",
     "TEST_DB",

@@ -34,6 +34,17 @@ EXIT_FENCE_MISMATCH = 5
 SUBCOMMANDS = ("ui", "perf", "debug")
 
 
+def _json_object(value: str) -> dict:
+    import json
+    try:
+        parsed = json.loads(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("配置必须是 JSON 对象") from exc
+    if not isinstance(parsed, dict):
+        raise argparse.ArgumentTypeError("配置必须是 JSON 对象")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="testdock_runner")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -49,6 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
         job.add_argument("--fencing-token", type=int, default=0)
         job.add_argument("--timeout", type=float, default=1800.0)
         job.add_argument("--test-path", action="append", default=[])
+        job.add_argument("--app-package", default="")
+        job.add_argument("--app-activity", default="")
+        job.add_argument("--perf-config", type=_json_object, default={})
         job.add_argument("--fake", action="store_true")
         job.add_argument("--skip-vendor-check", action="store_true")
     return parser
@@ -58,7 +72,9 @@ def _control_client(args: argparse.Namespace) -> ControlClient | None:
     if not args.control_url or not args.control_token:
         emit_text("control_disabled")
         return None
-    return ControlClient(args.control_url, args.control_token, args.run_id)
+    from .protocol import DebugControlClient
+    client_type = DebugControlClient if args.command == "debug" else ControlClient
+    return client_type(args.control_url, args.control_token, args.run_id)
 
 
 def _job_options(args: argparse.Namespace):
@@ -73,7 +89,23 @@ def _job_options(args: argparse.Namespace):
         timeout=float(args.timeout or 0),
         test_paths=list(args.test_path or []),
         fake=bool(args.fake),
+        app_package=args.app_package,
+        app_activity=args.app_activity,
+        perf=args.perf_config,
     )
+
+
+def _result_outcome(result) -> str:
+    if result.exit_code not in (0, 2):
+        return "not_tested"
+    if result.outcome:
+        return result.outcome
+    junit = result.junit or {}
+    if junit.get("failed"):
+        return "failed"
+    if int(junit.get("tests") or 0) > int(junit.get("skipped") or 0):
+        return "passed"
+    return "not_tested"
 
 
 def _report_complete(
@@ -84,23 +116,22 @@ def _report_complete(
     if control is None:
         return
     junit = result.junit or {}
-    if junit.get("failed"):
-        outcome = "failed"
-    elif junit.get("tests"):
-        outcome = "passed"
-    else:
-        outcome = "not_tested"
+    outcome = _result_outcome(result)
     try:
         control.complete(
             outcome=outcome,
             fencing_token=int(args.fencing_token or 0),
-            components=[{"kind": "ui", "state": "completed", "outcome": outcome}],
+            components=result.components or [{"kind": "ui", "state": "completed", "outcome": outcome,
+                                              "reason_code": result.reason if outcome == "not_tested" else None}],
+            artifacts_dir=str(Path(args.artifacts_dir).resolve()),
+            reason=result.reason,
             cases=result.cases or [],
             junit=junit,
             metrics={"artifacts": len((result.layout or {}).get("files", []))},
         )
-    except ControlError as exc:
-        emit_text("complete_failed", detail=str(exc)[:500])
+    except ControlError:
+        emit_text("complete_failed")
+        raise
 
 
 def _report_fail(
@@ -160,10 +191,19 @@ def main(argv: list[str] | None = None) -> int:
 
             result = run_ui_job(options, context)
         exit_code = result.exit_code
+        if args.command == "debug":
+            if control is not None:
+                try:
+                    control.close(reason=result.reason, fencing_token=context.fencing_token)
+                except ControlError as exc:
+                    # 控制面瞬时不可达时不让回报失败拖垮退出码：调试会话由平台侧
+                    # 租约超时兜底回收，这里只留下可观测的失败标记。
+                    emit_text("close_report_failed", detail=str(exc)[:300])
+            return exit_code
         emit_stage("finalize", 100, stage=3)
         layout = result.layout or collect_layout(Path(args.artifacts_dir))
         emit_result(
-            outcome=(result.junit or {}).get("failed") and "failed" or "passed",
+            outcome=_result_outcome(result),
             reason=result.reason,
             junit=result.junit,
             files=len(layout.get("files", [])),

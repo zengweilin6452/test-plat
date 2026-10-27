@@ -15,6 +15,8 @@ from . import frameinfo as frameinfo_module
 from . import jank as jank_module
 from . import leak as leak_module
 from . import metrics as metrics_module
+from . import netprof as netprof_module
+from . import pageflow as pageflow_module
 from . import report as report_module
 from . import startup as startup_module
 from . import supplement as supplement_module
@@ -60,29 +62,49 @@ TREND_MAX_RUNS = 1000
 
 
 def _resolve_profile(
-    pkg: str, sessions: list[dict[str, Any]], profile: str | None
+    pkg: str,
+    sessions: list[dict[str, Any]],
+    profile: str | None,
+    *,
+    getter: Callable[[dict[str, Any]], Any] | None = None,
+    label: str = "设备档案",
+    argname: str = "profile",
 ) -> tuple[list[dict[str, Any]], bool]:
-    """跨档案口径选择（trend 与 leak_trend 共用，Q6 语义唯一来源）。
+    """跨口径维度选择（trend 与 leak_trend 共用，Q6 语义唯一来源）。
 
-    profile 未传且 run 跨多个档案 → ProfileMismatchError；显式传 profile 时
-    只保留该档案的 run，其余被排除则返回 profileMismatch=True。
+    维度由 ``getter`` 决定：默认取 ``device_profile``；工单 20 起网络档位
+    复用同一语义（getter 取 ``net_profile`` 的档位名，label 换成"网络档位"）。
+    profile 未传且 run 跨多个档位值 → ProfileMismatchError；显式传 profile
+    时只保留该档位的 run，其余被排除则返回 mismatch=True。
     """
-    profiles = {session.get("device_profile") for session in sessions}
+    if getter is None:
+        getter = lambda session: session.get("device_profile")  # noqa: E731
+    tiers = {getter(session) for session in sessions}
     if profile is None:
-        if len(profiles) > 1:
-            shown = ", ".join(sorted(str(item) for item in profiles))
+        if len(tiers) > 1:
+            shown = ", ".join(sorted(str(item) for item in tiers))
             raise ProfileMismatchError(
-                f"包 {pkg} 的 run 跨多个设备档案（{shown}），口径不一致；"
-                "请显式传 profile= 指定档案后重试"
+                f"包 {pkg} 的 run 跨多个{label}（{shown}），口径不一致；"
+                f"请显式传 {argname}= 指定{label}后重试"
             )
         return sessions, False
-    chosen = [session for session in sessions if session.get("device_profile") == profile]
+    chosen = [session for session in sessions if getter(session) == profile]
     if not chosen:
         raise TrendError(
-            f"包 {pkg} 没有 device_profile={profile!r} 的 run；"
-            f"已有档案: {', '.join(sorted(str(item) for item in profiles)) or '未记录'}"
+            f"包 {pkg} 没有{label}={profile!r} 的 run；"
+            f"已有: {', '.join(sorted(str(item) for item in tiers)) or '未记录'}"
         )
-    return chosen, profiles != {profile}
+    return chosen, tiers != {profile}
+
+
+def _net_tier_of(session: dict[str, Any]) -> str | None:
+    """session 的网络档位名（无弱网记录的 run 归为 None 档参与口径判断）。"""
+    net_profile = session.get("net_profile")
+    if isinstance(net_profile, dict):
+        return net_profile.get("name")
+    if isinstance(net_profile, str):
+        return net_profile
+    return None
 
 
 class CollectBackend(Protocol):
@@ -155,6 +177,10 @@ class CollectScope:
         jank_thresholds_ms: dict[str, float] | None = None,
         frame_poll: bool = False,
         frame_interval_s: float = frameinfo_module.DEFAULT_INTERVAL_S,
+        net_profile: netprof_module.NetProfile | None = None,
+        net_tier: str = netprof_module.TIER_PASSTHROUGH,
+        net_mitmdump: str | None = None,
+        net_port: int = netprof_module.DEFAULT_PORT,
     ):
         self._kit = kit
         self.target = target
@@ -164,6 +190,11 @@ class CollectScope:
         self._supplement_interval_s = supplement_interval_s
         self._frame_poll = frame_poll
         self._frame_interval_s = frame_interval_s
+        self._net_profile = net_profile
+        self._net_tier = net_tier
+        self._net_mitmdump = net_mitmdump
+        self._net_port = net_port
+        self._net_profiler: netprof_module.NetProfiler | None = None
         self._start_mode = start_mode
         self._jank_thresholds_ms = (
             jank_module.validate_thresholds(jank_thresholds_ms)
@@ -194,11 +225,32 @@ class CollectScope:
             raise RuntimeError("cannot mark before collect scope is entered")
         return self._session.mark(label)
 
+    def mark_page(self, page: str):
+        """声明页面起点（工单 19）：整页加载耗时从这一刻算起。
+
+        与 ``mark`` 共用统一时间轴，只是落 ``kind=page``；需要 ``frame_poll=True``
+        才有帧完成时刻可用——没开逐帧时页面打标照常记入时间轴，但
+        ``page_load_ms`` 会如实 ``not_tested`` 并说明原因。
+        """
+        if self._session is None:
+            raise RuntimeError("cannot mark_page before collect scope is entered")
+        return self._session.mark_page(page)
+
     def __enter__(self) -> CollectScope:
         kit = self._kit
         backend = kit.backend
         if kit.foreground_restore:
             self.foreground_before = kit._read_foreground_state()
+        # 网络剖面（ticket 17）：在采集窗口开始前施加，代理不可用/端口占用等
+        # 情况不抛错——如实降级，由 finalize 落 not_tested 原因与事件
+        if self._net_profile is not None:
+            self._net_profiler = kit._start_net_profile(
+                self._net_profile,
+                self._run_dir,
+                self._net_mitmdump,
+                self._net_port,
+                self._net_tier,
+            )
         self._session = CollectSession(
             target=self.target,
             items=self.items,
@@ -215,7 +267,7 @@ class CollectScope:
         self._session.start()
         kit._supplement_offset = (0.0, "assumed")
         self._poller = kit._start_supplement(
-            self._supplement, self._supplement_interval_s
+            self._supplement, self._supplement_interval_s, self.target
         )
         # 逐帧采集（ticket 15）：reset 清零窗口后按间隔增量读 framestats，
         # 独立线程、不持 gate 设备权；失败如实降级为事件，不阻断采集闭环
@@ -272,6 +324,11 @@ class CollectScope:
             supplement_result = self._poller.stop()
         if self._frame_poller is not None:
             frame_result = self._frame_poller.stop()
+        # 弱网环境必须先恢复再停采集：stop/pull 期间设备仍要能正常联网，
+        # 否则 pull 会被自己的代理拖慢甚至失败。恢复结果随 meta 落库。
+        net_session = (
+            self._net_profiler.stop() if self._net_profiler is not None else None
+        )
         try:
             record = self._session.stop(str(self._artifacts_dir))
         finally:
@@ -322,6 +379,9 @@ class CollectScope:
                     "rounds": supplement_result.rounds,
                     "errors": supplement_result.errors,
                     "degraded": supplement_result.degraded,
+                    # 实际生效的 GPU 利用率数据源（kgsl_gpubusy / dumpsys_gpu）；
+                    # 两个源都没拿到时为 None，与 degraded 里的逐级原因配合看
+                    "gpuSource": supplement_result.gpu_source,
                     "clockOffsetS": kit._supplement_offset[0],
                     "clockOffsetSource": kit._supplement_offset[1],
                 }
@@ -366,8 +426,89 @@ class CollectScope:
                 frameinfo_module.write_frames_csv(
                     self._artifacts_dir / "frames_gfxinfo.csv", frame_result.samples
                 )
+        # 整页加载耗时（ticket 19）：页面打标 + 帧完成时刻 → 末帧稳定口径。
+        # 帧时刻在设备时钟域（CLOCK_MONOTONIC），用一次括号式 uptime 测量换算到
+        # 会话时间轴；测不到偏移就不换算，如实 not_tested（不拿错位的时刻硬算）
+        page_results: list[pageflow_module.PageLoad] = []
+        page_meta: dict[str, Any] | None = None
+        page_marks = self._session.page_marks()
+        if page_marks:
+            offset = (
+                frameinfo_module.measure_clock_offset(
+                    kit._channel, kit.serial, elapsed=self._session.elapsed_s
+                )
+                if frame_result is not None
+                else None
+            )
+            observed_until_s = self._session.elapsed_s()
+            if (
+                offset is not None
+                and observed_until_s is not None
+                and frame_result is not None
+            ):
+                frame_times_s = [
+                    sample.completed_s + offset["offsetS"]
+                    for sample in frame_result.samples
+                    if sample.completed_s is not None
+                ]
+                page_results = [
+                    pageflow_module.page_load(
+                        mark.label,
+                        mark.elapsed_s,
+                        frame_times_s,
+                        observed_until_s=observed_until_s,
+                    )
+                    for mark in page_marks
+                ]
+            page_meta = {
+                "quietGapMs": pageflow_module.QUIET_GAP_MS,
+                "timeoutMs": pageflow_module.PAGE_TIMEOUT_MS,
+                # 时钟换算的可信度必须写出来：没换算 ≠ 没页面
+                "clockOffsetS": None if offset is None else round(offset["offsetS"], 6),
+                "clockOffsetSource": (
+                    "uptime_bracket"
+                    if offset is not None
+                    else ("no_frame_poll" if frame_result is None else "no_uptime_offset")
+                ),
+                "clockRttMs": None if offset is None else offset["rttMs"],
+                "pages": [result.as_dict() for result in page_results],
+            }
+            if page_results:
+                page_meta["status"] = "ok" if any(r.ok for r in page_results) else "degraded"
+        page_aggregates: list[dict[str, Any]] = []
+        if page_results:
+            row = pageflow_module.aggregate_row(page_results)
+            if row is not None:
+                page_aggregates = [row]
+        # 弱网连接级耗时（ticket 17）：只有代理侧日志真的看到连接才有值；
+        # 未生效时不出数，由下方 not_tested 标注与事件说明原因
+        net_aggregates: list[dict[str, Any]] = []
+        api_aggregates: list[dict[str, Any]] = []
+        net_meta: dict[str, Any] | None = None
+        api_breakdown: dict[str, Any] | None = None
+        if net_session is not None:
+            net_meta = net_session.as_dict()
+            if net_session.effective:
+                net_aggregates = netprof_module.conn_duration_rows(net_session.log_summary)
+                net_meta["connSamples"] = len(net_session.log_summary.conn_durations_ms)
+            elif net_session.applied:
+                net_meta["connSamples"] = 0
+            # 接口级指标（ticket 18）：只有解密档且信任探测成功才有值。
+            # 与连接级指标分开入库、报告分栏——两套口径不混算
+            if self._net_profiler is not None and net_session.api_effective:
+                api_aggregates = self._net_profiler.api_aggregates()
+                api_breakdown = self._net_profiler.api_breakdown()
+                net_meta["apiSamples"] = len(net_session.log_summary.api_records)
+            elif net_session.tier == netprof_module.TIER_DECRYPT:
+                net_meta["apiSamples"] = 0
         merged_aggregates = (
-            aggregates + supplement_aggregates + jank_aggregates + frame_aggregates
+            aggregates
+            + supplement_aggregates
+            + jank_aggregates
+            + frame_aggregates
+            + page_aggregates
+            + net_aggregates
+            + api_aggregates
         )
         # 启动编排结论（ticket 12）：ms 为单样本指标（聚合字段填单值），
         # 双路对照与失败明细随事件/meta 如实入库
@@ -415,6 +556,47 @@ class CollectScope:
             metrics_module.mark_not_tested(
                 metrics_summary, getattr(readiness, "degraded_items", ())
             )
+        # 弱网未生效（无 mitmproxy / 代理侧零连接）时如实 not_tested：给出原因，
+        # 不留空白让人误以为"没测"等于"没做"，也不硬造 0 值
+        if net_meta is not None and net_session is not None and not net_session.effective:
+            metrics_summary[netprof_module.METRIC_CONN_DURATION] = {
+                "notTested": True,
+                "notTestedReason": net_session.not_tested_reason,
+            }
+            if net_session.hint:
+                metrics_summary[netprof_module.METRIC_CONN_DURATION]["hint"] = (
+                    net_session.hint
+                )
+        # 接口级指标不可用（直通档 / App 不信任代理 CA / 未观察到握手）时同样
+        # 如实 not_tested：四个 key 一起标，原因写清并给出可执行的下一步。
+        # 绝不因为"拿不到"就留空，让人误以为接口没问题
+        if (
+            net_meta is not None
+            and net_session is not None
+            and not net_session.api_effective
+        ):
+            for key in netprof_module.API_METRIC_KEYS:
+                metrics_summary[key] = {
+                    "notTested": True,
+                    "notTestedReason": net_session.api_not_tested_reason,
+                }
+            if net_session.tier == netprof_module.TIER_DECRYPT:
+                metrics_summary[netprof_module.METRIC_API_DURATION]["hint"] = (
+                    netprof_module.TRUST_HINT
+                )
+
+        # 整页耗时不可用（未打页面 / 未开逐帧 / 无 uptime 锚点 / 全部页面超时）时
+        # 如实 not_tested：写明是哪一页、哪种原因，不用空值让人以为"没测"
+        if page_meta is not None:
+            if not page_aggregates:
+                metrics_summary[pageflow_module.METRIC_KEY] = {
+                    "notTested": True,
+                    "notTestedReason": pageflow_module.not_tested_reason(
+                        page_results,
+                        frames_enabled=frame_result is not None,
+                        page_count=len(page_marks),
+                    ),
+                }
 
         meta = {
             "runId": self._run_id,
@@ -432,6 +614,8 @@ class CollectScope:
             "integrity": integrity,
             "supplement": supplement_info,
             "frames": frame_meta,
+            "pages": page_meta,
+            "network": net_meta,
             "startup": startup_meta,
             "jank": (
                 {"thresholdsMs": dict(self._jank_thresholds_ms)}
@@ -455,6 +639,23 @@ class CollectScope:
             events=[],
             jank_thresholds_ms=self._jank_thresholds_ms,
             frames=frame_meta,
+            pages=page_meta,
+            network=net_meta,
+            api=api_breakdown,
+            # GPU 双源（ticket 16）：数据源与降级链随报告落盘，报告据此标注口径
+            gpu=(
+                {
+                    "enabled": True,
+                    "gpuSource": supplement_info.get("gpuSource"),
+                    "degraded": [
+                        item
+                        for item in (supplement_info.get("degraded") or [])
+                        if item.get("key") in ("gpu_util_pct", "gpu_mem_mb")
+                    ],
+                }
+                if supplement_info.get("enabled")
+                else None
+            ),
         )
 
         store = kit.store
@@ -477,15 +678,19 @@ class CollectScope:
         store.record_metrics(self._run_id, merged_aggregates)
         store.record_run_artifacts(self._run_id, [str(self._artifacts_dir), str(self._run_dir)])
         for degraded in supplement_info.get("degraded", []):
+            detail = {
+                "key": degraded["key"],
+                "reason": degraded["reason"],
+                "rounds": supplement_info.get("rounds"),
+                "errors": supplement_info.get("errors"),
+            }
+            # 降级链逐级原因（工单 16）：区分"这台机器没这个源"与"有但这次读失败"
+            if degraded.get("stages"):
+                detail["stages"] = degraded["stages"]
             store.record_event(
                 self._run_id,
                 kind="supplement_degraded",
-                detail={
-                    "key": degraded["key"],
-                    "reason": degraded["reason"],
-                    "rounds": supplement_info.get("rounds"),
-                    "errors": supplement_info.get("errors"),
-                },
+                detail=detail,
             )
         # 逐帧采集降级（ticket 15）：零帧/全轮失败时如实记事件，不产出 0 值指标
         if frame_meta is not None and not frame_aggregates:
@@ -503,6 +708,59 @@ class CollectScope:
                     "rounds": frame_result.rounds,
                     "errors": frame_result.errors,
                     "resetOk": frame_result.reset_ok,
+                },
+            )
+        # 整页耗时事件（ticket 19）：每页一条，ts 取页面起点的墙钟以便与
+        # crash/ANR 等旁路事件对齐；detail 含稳定点、帧数与不可判定原因
+        for result in page_results:
+            store.record_event(
+                self._run_id,
+                kind="page_load",
+                detail={**result.as_dict(), "quietGapMs": pageflow_module.QUIET_GAP_MS},
+            )
+        # 打了页面标却算不出结论（没开逐帧 / 取不到 uptime 锚点）：如实记降级，
+        # 否则报告里只会看到"没有 page_load_ms"，看不出是漏测还是不可判定
+        if page_meta is not None and not page_results:
+            store.record_event(
+                self._run_id,
+                kind="page_load_degraded",
+                detail={
+                    "reason": page_meta.get("clockOffsetSource"),
+                    "clockRttMs": page_meta.get("clockRttMs"),
+                    "pages": [mark.label for mark in page_marks],
+                },
+            )
+        # 网络剖面事件（ticket 17）：生效与否、代理侧证据、恢复结果一并入库。
+        # 未生效用 net_profile_degraded，生效用 net_profile —— 两者都记，
+        # 便于事后区分"没跑弱网"与"跑了但没抓到流量"
+        if net_meta is not None:
+            store.record_event(
+                self._run_id,
+                kind=(
+                    "net_profile" if net_session.effective else "net_profile_degraded"
+                ),
+                detail={
+                    **net_meta,
+                    "connSamples": net_meta.get("connSamples", 0),
+                },
+            )
+        # 解密档信任探测（ticket 18）：单独一条事件，便于不翻 meta 就能看出
+        # "这次为什么没有接口级数据"。成功记 decrypt_available，失败记
+        # decrypt_unavailable（含证书错误原文与可执行的下一步）
+        if net_meta is not None and net_session.tier == netprof_module.TIER_DECRYPT:
+            store.record_event(
+                self._run_id,
+                kind=(
+                    "net_profile_decrypt_available"
+                    if net_session.api_effective
+                    else "net_profile_decrypt_unavailable"
+                ),
+                detail={
+                    "trust": net_session.trust,
+                    "trustError": net_session.trust_error,
+                    "reason": net_session.api_not_tested_reason,
+                    "hint": netprof_module.TRUST_HINT,
+                    "apiSamples": net_meta.get("apiSamples", 0),
                 },
             )
         # crash/ANR 事件入统一时间轴（ts 已由 logwatch 用 keeper 偏移换算）
@@ -856,14 +1114,20 @@ class PerfKit:
             health=report.as_dict(),
         )
 
-    def trend(self, pkg: str, metric: str, profile: str | None = None) -> dict[str, Any]:
-        """跨 run 的指标趋势对比（Q6：跨设备档案默认拒绝）。
+    def trend(
+        self,
+        pkg: str,
+        metric: str,
+        profile: str | None = None,
+        net_profile: str | None = None,
+    ) -> dict[str, Any]:
+        """跨 run 的指标趋势对比（Q6：跨设备档案/网络档位默认拒绝）。
 
         返回按时间升序的每 run 聚合对比（median/min/mean/max/p90/sampleCount）。
-        profile 未传且目标包的 run 跨多个设备档案时拒绝（ProfileMismatchError）；
-        显式传 profile 覆盖：只保留该档案的 run，其余被排除时标记
-        profileMismatch=True（口径不一致）。device_profile 未记录的 run 归为
-        None 档案参与判断。
+        profile / net_profile 未传且目标包的 run 跨多个对应档位时拒绝
+        （ProfileMismatchError）；显式传参覆盖：只保留该档位的 run，其余被排除
+        时标记 profileMismatch / netProfileMismatch=True（口径不一致）。
+        device_profile / net_profile 未记录的 run 归为 None 档参与判断。
         """
         spec = metrics_module.METRICS.get(metric)
         if spec is None:
@@ -875,6 +1139,14 @@ class PerfKit:
             raise TrendError(f"包 {pkg} 没有已入库的 run，无法计算趋势")
 
         chosen, profile_mismatch = _resolve_profile(pkg, sessions, profile)
+        chosen, net_mismatch = _resolve_profile(
+            pkg,
+            chosen,
+            net_profile,
+            getter=_net_tier_of,
+            label="网络档位",
+            argname="net_profile",
+        )
 
         runs: list[dict[str, Any]] = []
         for session in reversed(chosen):  # started_at DESC 入库 → 反转为升序
@@ -888,6 +1160,7 @@ class PerfKit:
                         "durationS": session.get("duration_s"),
                         "serial": session.get("serial"),
                         "deviceProfile": session.get("device_profile"),
+                        "netProfile": _net_tier_of(session),
                         "min": row["min"],
                         "median": row["median"],
                         "mean": row["mean"],
@@ -908,6 +1181,10 @@ class PerfKit:
             "labelEn": spec.label_en,
             "profile": profile if profile is not None else chosen[0].get("device_profile"),
             "profileMismatch": profile_mismatch,
+            "netProfile": (
+                net_profile if net_profile is not None else _net_tier_of(chosen[0])
+            ),
+            "netProfileMismatch": net_mismatch,
             "runs": runs,
         }
 
@@ -915,18 +1192,20 @@ class PerfKit:
         self,
         pkg: str,
         profile: str | None = None,
+        net_profile: str | None = None,
         *,
         min_runs: int = leak_module.DEFAULT_MIN_RUNS,
         slope_threshold: float | None = None,
         level: str = "fail",
     ) -> dict[str, Any]:
-        """内存泄漏趋势（ticket 13）：同档案历史 run 的 median 随墙钟时间回归。
+        """内存泄漏趋势（ticket 13）：同口径历史 run 的 median 随墙钟时间回归。
 
         返回每 run 的 median/durationS/startedAt 序列 + OLS 斜率
-        （mem_pss_slope_mb_per_day）+ 置信度标记。跨设备档案语义与 trend
-        完全一致（_resolve_profile）：默认拒绝，显式 profile 覆盖并标记
-        profileMismatch。slope_threshold 传入时附宿主阈值的三态结论
-        （verdict）；样本不足时斜率置 None 并如实给出 insufficient。
+        （mem_pss_slope_mb_per_day）+ 置信度标记。跨设备档案与跨网络档位语义
+        均与 trend 一致（_resolve_profile）：默认拒绝，显式传参覆盖并标记
+        profileMismatch / netProfileMismatch。slope_threshold 传入时附宿主
+        阈值的三态结论（verdict）；样本不足时斜率置 None 并如实给出
+        insufficient。
         """
         slope_spec = metrics_module.METRICS[leak_module.SLOPE_METRIC_KEY]
         series = self.store.fetch_metric_series(pkg, leak_module.LEAK_METRIC_KEY)
@@ -937,6 +1216,14 @@ class PerfKit:
             )
         sessions = self.store.fetch_sessions(target=pkg, limit=TREND_MAX_RUNS)
         chosen, profile_mismatch = _resolve_profile(pkg, sessions, profile)
+        chosen, net_mismatch = _resolve_profile(
+            pkg,
+            chosen,
+            net_profile,
+            getter=_net_tier_of,
+            label="网络档位",
+            argname="net_profile",
+        )
         chosen_ids = {session["run_id"] for session in chosen}
         series = [row for row in series if row["run_id"] in chosen_ids]
 
@@ -961,6 +1248,10 @@ class PerfKit:
             "labelEn": slope_spec.label_en,
             "profile": profile if profile is not None else chosen[0].get("device_profile"),
             "profileMismatch": profile_mismatch,
+            "netProfile": (
+                net_profile if net_profile is not None else _net_tier_of(chosen[0])
+            ),
+            "netProfileMismatch": net_mismatch,
             **analysis.as_dict(),
         }
         if slope_threshold is not None:
@@ -984,6 +1275,32 @@ class PerfKit:
             return None
         return time.time() - device_epoch if device_epoch is not None else None
 
+    def _start_net_profile(
+        self,
+        profile: netprof_module.NetProfile,
+        run_dir: Path,
+        mitmdump: str | None,
+        port: int,
+        tier: str = netprof_module.TIER_PASSTHROUGH,
+    ) -> netprof_module.NetProfiler:
+        """施加网络剖面（采集窗口之前）：代理 → reverse → 系统代理。
+
+        失败不抛错：``NetSession`` 里带着原因，finalize 据此把
+        ``net_conn_duration_ms`` 标 not_tested 并落事件。代理日志与 stdout
+        落在 run 目录下（artifacts 之外），便于事后核查代理是否真的看到流量。
+        ``tier=decrypt`` 时额外产出接口级指标（工单 18）。
+        """
+        profiler = netprof_module.NetProfiler(
+            adb_path=str(self.adb_path),
+            serial=self.serial,
+            mitmdump=mitmdump,
+            port=port,
+            tier=tier,
+            call_device=self._channel,
+        )
+        profiler.start(profile, work_dir=run_dir / "network")
+        return profiler
+
     def _start_frame_poll(
         self, enabled: bool, interval_s: float, target: str
     ) -> frameinfo_module.FramePoller | None:
@@ -991,6 +1308,8 @@ class PerfKit:
 
         与补采轮询同构：独立线程、单次 adb 短事务、不持 gate 设备权。
         reset 失败只记录（窗口起点不可信），轮询照常，结论随 meta 如实标注。
+        帧时刻的设备时钟换算不在这里做——那要在会话末尾测一次偏移
+        （``frameinfo.measure_clock_offset``），见 finalize 的整页耗时段。
         """
         if not enabled:
             return None
@@ -1005,13 +1324,14 @@ class PerfKit:
         return poller
 
     def _start_supplement(
-        self, enabled: bool, interval_s: float
+        self, enabled: bool, interval_s: float, target_pkg: str | None = None
     ) -> supplement_module.SupplementPoller | None:
         """按巡检结论构造并启动补采轮询器（紧随 session.start，起点即会话起点）。
 
         对时基准：巡检 clock_offset_s 优先；无巡检结论则短事务实测；实测失败
         退回 0（假设已同步，偏差如实留在 meta 供判读）。充电降级
         （degraded_items 含 Temperature）时温度补采跳过。轮询器不持 gate 设备权。
+        target_pkg 用于解析应用级显存的 pid（工单 16），缺省则不采该指标。
         """
         if not enabled:
             return None
@@ -1034,6 +1354,9 @@ class PerfKit:
             interval_s=interval_s,
             clock_offset_s=offset,
             collect_temperature=not charging,
+            # 应用级显存需要目标包名解析 pid（工单 16）；拿不到包名就不采，
+            # 而不是去猜某个进程的显存
+            target_pkg=target_pkg,
             call_device=self._channel,
         )
         self._supplement_offset = (offset, offset_source)
@@ -1102,6 +1425,11 @@ class PerfKit:
         jank_thresholds_ms: dict[str, float] | None = None,
         frame_poll: bool = False,
         frame_interval_s: float = frameinfo_module.DEFAULT_INTERVAL_S,
+        net_profile: str | netprof_module.NetProfile | None = None,
+        net_overrides: dict[str, float] | None = None,
+        net_tier: str = netprof_module.TIER_PASSTHROUGH,
+        net_mitmdump: str | None = None,
+        net_port: int = netprof_module.DEFAULT_PORT,
     ) -> CollectScope:
         """打开交互式采集窗口（设计方案 §6.2）：with 块内 UI 驱动 + mark。
 
@@ -1110,6 +1438,10 @@ class PerfKit:
         cold/warm 在采集窗口内编排启动并计得启动时间指标。退出 with 块即
         finalize（停止 → pull → 校验 → 归档 → 入库 → 报告）；报告同时在
         scope.report 上留存。host_run_id 未传时自动生成。
+
+        net_profile（ticket 17）：档位名（none/4g/3g/weak/custom）或已构造的
+        ``NetProfile``；None=不动网络。档位名非法直接抛 ValueError（早失败），
+        代理不可用等运行时问题不抛错——如实降级为 not_tested。
         """
         if spec is not None:
             if target is _UNSET:
@@ -1145,6 +1477,11 @@ class PerfKit:
                 f"start_mode 只支持 {', '.join(startup_module.STARTUP_MODES)} 或 None，"
                 f"收到 {start_mode!r}"
             )
+        resolved_profile = (
+            net_profile
+            if isinstance(net_profile, netprof_module.NetProfile) or net_profile is None
+            else netprof_module.build_profile(net_profile, net_overrides)
+        )
         return CollectScope(
             self,
             target=target,
@@ -1157,6 +1494,10 @@ class PerfKit:
             jank_thresholds_ms=jank_thresholds_ms,
             frame_poll=frame_poll,
             frame_interval_s=frame_interval_s,
+            net_profile=resolved_profile,
+            net_tier=net_tier,
+            net_mitmdump=net_mitmdump,
+            net_port=net_port,
         )
 
     def run_collect(
@@ -1173,6 +1514,11 @@ class PerfKit:
         jank_thresholds_ms: dict[str, float] | None = None,
         frame_poll: bool = False,
         frame_interval_s: float = frameinfo_module.DEFAULT_INTERVAL_S,
+        net_profile: str | netprof_module.NetProfile | None = None,
+        net_overrides: dict[str, float] | None = None,
+        net_tier: str = netprof_module.TIER_PASSTHROUGH,
+        net_mitmdump: str | None = None,
+        net_port: int = netprof_module.DEFAULT_PORT,
     ) -> dict[str, Any]:
         """一次完整采集闭环：巡检 → 启动 → 计时 → 停止 → pull → 校验 → 落盘 → 入库。
 
@@ -1188,6 +1534,8 @@ class PerfKit:
         温度补采跳过。
         frame_poll=True（ticket 15）时另起逐帧轮询器（gfxinfo framestats），
         产出逐帧 P50/P90/P99 与超时帧占比；零帧/命令失败如实降级为事件。
+        net_profile（ticket 17）在采集窗口前施加弱网、窗口后恢复，产出连接级
+        耗时 `net_conn_duration_ms`；代理不可用/未抓到流量如实 not_tested。
         """
         if duration_s <= 0:
             raise ValueError("duration_s 必须为正数")
@@ -1203,6 +1551,11 @@ class PerfKit:
             jank_thresholds_ms=jank_thresholds_ms,
             frame_poll=frame_poll,
             frame_interval_s=frame_interval_s,
+            net_profile=net_profile,
+            net_overrides=net_overrides,
+            net_tier=net_tier,
+            net_mitmdump=net_mitmdump,
+            net_port=net_port,
         ) as scope:
             self._sleep(duration_s)
         # with 退出已无条件 finalize（幂等），直接用 scope.report，避免双收口

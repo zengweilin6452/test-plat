@@ -21,7 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from .config import scheduler_enabled, settings
 from .errors import ApiError
 from .ws import hub as _hub
-from .routers import applications, debug as debug_router, overview, resources, runs, suites, tasks
+from .routers import applications, debug as debug_router, overview, projects, resources, runs, suites, tasks
 from .routers import analyses, baselines, gate_policies
 
 
@@ -85,6 +85,7 @@ app = FastAPI(
 API_PREFIX = "/api/v1"
 app.include_router(overview.router, prefix=API_PREFIX)
 app.include_router(applications.router, prefix=API_PREFIX)
+app.include_router(projects.router, prefix=API_PREFIX)
 app.include_router(resources.router, prefix=API_PREFIX)
 app.include_router(tasks.router, prefix=API_PREFIX)
 app.include_router(runs.router, prefix=API_PREFIX)

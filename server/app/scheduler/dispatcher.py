@@ -7,12 +7,18 @@
 reconciler 看到 queued 却没人领，或者反过来看到租约有主而 run 没动，两种误判
 都会把好好的任务打成 errored。
 
-为什么"领取失败 = errored"而不是"留在 queued"
-------------------------------------------------
-api-design.md §1.2 把"设备不可用"定为 424 device_not_ready（提交时同步校验）。
-走到 dispatcher 说明提交时设备是 ready 的，之后掉线/被占 —— 这是执行期故障，
-重试也只会一直排队，让用户看不到反馈。所以直接 errored(device_unavailable)，
-用户重跑时会拿到新的 run（parent_run_id 保留谱系）。
+设备忙与设备不可用
+------------------
+ready 设备被租约占用或并发领取时保留 queued；指定设备不会被其它空闲设备替换。
+指定设备时按原因分开收敛，避免排查时把"指错设备"当成"设备掉线"：
+
+  requested_device_not_found           设备不存在或不属于本项目
+  requested_device_platform_mismatch   设备存在但平台与运行不符
+  device_unavailable                   设备存在但非 ready（离线/未授权/维护）
+  resource_busy                        设备可用只是暂时被占 —— 留在 queued
+
+未指定设备时只可能是"没有 ready 设备"(device_unavailable) 或暂时被占
+(resource_busy)。前三种都不可重试，直接 errored。
 
 为什么 spawn 失败要回滚成 errored 且必须释放租约
 ------------------------------------------------
@@ -63,6 +69,10 @@ _QUEUED_SQL = text(
            tr.config_snapshot
       FROM test_runs tr
      WHERE tr.state = 'queued'
+       -- 导入运行（POST /runs/import）先以 queued 提交、后在本请求里 finalize；
+       -- 这个窗口若被 dispatcher 领走，外部产物会被当成真跑派给 runner。
+       -- source 记在 config_snapshot JSON 里，没有独立列，用 ->> 判别（NULL 安全）。
+       AND (tr.config_snapshot->>'source') IS DISTINCT FROM 'import'
      ORDER BY tr.created_at, tr.id
      LIMIT :limit
     """
@@ -96,14 +106,16 @@ async def _resolve_config(session, run: dict[str, Any]) -> dict[str, Any]:
 async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome:
     """派发一个 run（run_id 为空时挑最早的 queued）。
 
-    返回 DispatchOutcome；任何失败都已经把 run 收敛到 errored，不会留在 queued。
+    返回 DispatchOutcome；设备暂忙时保留 queued，其余派发故障收敛到 errored。
     """
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session:
         async with session.begin():
             if run_id is None:
                 candidates = (
-                    await session.execute(_QUEUED_SQL, {"limit": DISPATCH_BATCH})
+                    await session.execute(
+                        text(str(_QUEUED_SQL) + " FOR UPDATE SKIP LOCKED"), {"limit": 1}
+                    )
                 ).mappings().all()
                 if not candidates:
                     return DispatchOutcome(run_id="", ok=False, reason="no_queued_run")
@@ -115,7 +127,7 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
                             """
                             SELECT id, project_id, platform, application_id, revision_id,
                                    config_snapshot, state
-                              FROM test_runs WHERE id = :id
+                              FROM test_runs WHERE id = :id FOR UPDATE SKIP LOCKED
                             """
                         ),
                         {"id": str(run_id)},
@@ -130,6 +142,18 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
                 run = dict(row)
 
             rid = str(run["id"])
+            # 显式指派的纵深防御：轮询 SQL 已排除导入运行，这里再挡一道，
+            # 防止测试/手动调用把导入产物当成真跑派出去。
+            snapshot = run.get("config_snapshot") or {}
+            if isinstance(snapshot, str):
+                import json
+
+                try:
+                    snapshot = json.loads(snapshot)
+                except ValueError:
+                    snapshot = {}
+            if isinstance(snapshot, dict) and snapshot.get("source") == "import":
+                return DispatchOutcome(run_id=rid, ok=False, reason="import_not_dispatchable")
             project_id = str(run["project_id"])
             holder = "%s:%d" % (HOLDER_PREFIX, os_pid())
 
@@ -138,17 +162,29 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
                 project_id=project_id,
                 run_id=rid,
                 holder_id=holder,
+                resource_id=(run.get("config_snapshot") or {}).get("requested_resource_id"),
+                platform=run["platform"],
             )
             if lease is None:
+                # 领取失败要分三种情况，否则都挤进 device_unavailable，排查时分不清
+                # 是设备没了、指错了设备，还是设备只是暂时被占：
+                #   - 指定设备不存在/不属于本项目 -> 不可重试，errored
+                #   - 指定设备存在但平台不符       -> 不可重试，errored（平台不符）
+                #   - 设备存在且平台对但被占/并发锁 -> 保留 queued 等下一轮
+                reason, message = await _explain_lease_failure(
+                    session, project_id=project_id, run=run
+                )
+                if reason == "resource_busy":
+                    return DispatchOutcome(run_id=rid, ok=False, reason=reason)
                 await _fail_run_in_tx(
                     session,
                     run=run,
-                    reason="device_unavailable",
-                    message="没有可用设备（全部离线、未授权或被占用）",
+                    reason=reason,
+                    message=message,
                     source=events_mod.SOURCE_DISPATCHER,
                 )
-                logger.warning("run %s 领取设备失败 -> errored(device_unavailable)", rid)
-                return DispatchOutcome(run_id=rid, ok=False, reason="device_unavailable")
+                logger.warning("run %s 领取设备失败 -> errored(%s)", rid, reason)
+                return DispatchOutcome(run_id=rid, ok=False, reason=reason)
 
             # 本地兜底锁：DB 给了这台设备，但宿主上仍有进程占着（vendor 锁残留）
             local = local_leases.probe(str(lease.serial or ""), settings.runtime_dir)
@@ -164,30 +200,7 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
                 )
                 return DispatchOutcome(run_id=rid, ok=False, reason="local_lease_busy")
 
-            # queued -> dispatching，同时写入资源与开始时间（满足
-            # ck_test_runs_state_executing_needs_resource 的兄弟约束：dispatching
-            # 不强制 resource_id，但提前写入让前端能立刻看到"已分配设备"）
-            await session.execute(
-                text(
-                    """
-                    UPDATE test_runs
-                       SET resource_id = :resource_id,
-                           profile_id = :profile_id,
-                           lock_version = lock_version + 1
-                     WHERE id = :run_id AND state = 'queued'
-                    """
-                ),
-                {
-                    "run_id": rid,
-                    "resource_id": lease.resource_id,
-                    "profile_id": (
-                        await session.execute(
-                            text("SELECT profile_id FROM execution_resources WHERE id = :id"),
-                            {"id": lease.resource_id},
-                        )
-                    ).scalar_one(),
-                },
-            )
+            # acquire_lease 已在同一事务内绑定资源，随后迁移状态。
             await runs_mod.transition(
                 session,
                 rid,
@@ -272,6 +285,61 @@ async def mark_spawn_failed(
                         "lease": lease,
                     },
                 )
+
+
+async def _explain_lease_failure(
+    session, *, project_id: str, run: dict[str, Any]
+) -> tuple[str, str]:
+    """领取租约失败的原因分类，返回 (reason, message)。
+
+    区分"暂时领不到"与"这台设备根本用不了"：只有前者能靠下一轮重试自愈。
+    指定设备时按 id 回查（不带 platform 条件），才能把"平台不符"从
+    "设备不存在"里分出来；未指定设备时只可能是无 ready 设备。
+    """
+    requested = (run.get("config_snapshot") or {}).get("requested_resource_id")
+    platform = run["platform"]
+
+    if requested:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT er.platform, er.status FROM execution_resources er "
+                    "WHERE er.id = CAST(:rid AS uuid) AND er.project_id = :pid"
+                ),
+                {"rid": requested, "pid": project_id},
+            )
+        ).mappings().first()
+        if row is None:
+            return (
+                "requested_device_not_found",
+                f"指定的设备 {requested} 不存在或不属于本项目",
+            )
+        if row["platform"] != platform:
+            return (
+                "requested_device_platform_mismatch",
+                f"指定的设备平台为 {row['platform']}，与运行的 {platform} 不符",
+            )
+        # 设备存在、平台相符：状态不是 ready 是执行期故障，不可重试。
+        if row["status"] != "ready":
+            return (
+                "device_unavailable",
+                f"指定设备当前状态为 {row['status']}，不可调度",
+            )
+        # ready 却领不到，只可能是租约或并发锁暂时占用。
+        return ("resource_busy", "")
+
+    ready = (
+        await session.execute(
+            text(
+                "SELECT id FROM execution_resources "
+                "WHERE project_id = :pid AND platform = :platform AND status = 'ready' LIMIT 1"
+            ),
+            {"pid": project_id, "platform": platform},
+        )
+    ).first()
+    if ready:
+        return ("resource_busy", "")
+    return ("device_unavailable", "没有可用设备（全部离线、未授权或被占用）")
 
 
 async def _fail_run_in_tx(

@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     runtime_dir: Path = REPO_ROOT / ".runtime"
     vendor_dir: Path = REPO_ROOT / "vendor"
 
+    # device-registration.md D1：adb 默认走仓库自带的 vendor 二进制，路径可预测。
+    # 运行时覆盖用 TESTDOCK_ADB 环境变量（见 integrations/devices.resolve_adb_path）；
+    # 不复用 vendor mobile_perf.resolve_adb()——它的随包默认指向另一个文件且依赖
+    # 两个当前未设置的 MOBILE_PERF_ADB/ADB 环境变量，平台不跟着 vendor 内部布局漂移。
+    adb_path: Path = REPO_ROOT / "vendor" / "mobile_auto" / "tools" / "adb" / "adb.exe"
+
     runner_python: str = "python"
     run_timeout_s: int = 3600
     stale_run_seconds: int = 60

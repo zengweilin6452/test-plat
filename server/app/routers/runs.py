@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import uuid
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -24,7 +25,6 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -32,7 +32,7 @@ from ..db import get_session
 from ..domain import artifacts as artifacts_mod
 from ..domain import events as events_mod
 from ..domain import runs as runs_mod
-from ..errors import not_found, state_conflict, validation_error
+from ..errors import device_not_ready, not_found, readiness_incomplete, state_conflict, validation_error
 from ..ws import hub as hub_mod
 
 router = APIRouter(tags=["runs"])
@@ -144,13 +144,13 @@ async def get_run(run_id: str, session: AsyncSession = Depends(get_session)) -> 
     if row is None:
         raise HTTPException(status_code=404, detail="run not found")
 
-    # 0001_initial.py 的 run_components 列名是 kind（不是 component）。
-    # P1 这里查了不存在的列，导致 GET /runs/{id} 一直 500；P3 修正列名，
-    # 同时保留原有输出字段 component（= kind 的别名）以免破坏前端。
+    # 0001_initial.py 的 run_components 列名是 kind（不是 component），
+    # 且只有 created_at，没有 started_at/ended_at——查不存在的列会让
+    # 详情接口直接 500。组件级时间线以 created_at 为准。
     comp = (
         await session.execute(
             text(
-                "SELECT kind, state, outcome, started_at, ended_at "
+                "SELECT kind, state, outcome, created_at "
                 "FROM run_components WHERE run_id = :run_id ORDER BY kind"
             ),
             {"run_id": row["id"]},
@@ -178,8 +178,7 @@ async def get_run(run_id: str, session: AsyncSession = Depends(get_session)) -> 
                 "kind": c["kind"],
                 "state": c["state"],
                 "outcome": c["outcome"],
-                "started_at": c["started_at"],
-                "ended_at": c["ended_at"],
+                "created_at": c["created_at"],
             }
             for c in comp
         ],
@@ -226,8 +225,9 @@ async def _pick_application(
     if application_id:
         row = (
             await session.execute(
-                text("SELECT id, project_id, platform, name FROM applications WHERE id::text = :aid"),
-                {"aid": str(application_id)},
+                text("SELECT id, project_id, platform, name FROM applications "
+                     "WHERE id::text = :aid AND platform = :platform AND archived_at IS NULL"),
+                {"aid": str(application_id), "platform": platform},
             )
         ).mappings().first()
         if row is None:
@@ -244,7 +244,7 @@ async def _pick_application(
         )
     ).mappings().first()
     if row is None:
-        raise validation_error("找不到可用应用，请显式提供 application_id")
+        raise validation_error(["找不到可用应用，请显式提供 application_id"])
     return dict(row)
 
 
@@ -252,49 +252,40 @@ async def _resolve_revision(
     session: AsyncSession, *, task_id: str | None, revision_id: str | None,
     project_id: str, application_id: str
 ) -> str:
-    """test_runs.revision_id NOT NULL，但库里可能还没有任务。
-
-    优先级：显式 revision_id > 该任务最新 revision > 合成 ad-hoc revision。
-    合成分支是当前数据状态下的现实需要（test_tasks / task_revisions 仍是空表），
-    用 uuid5 从 (project, application) 派生固定值，保证同一应用重复提交指向同一条。
-    """
-    if revision_id:
-        got = (
-            await session.execute(
-                text("SELECT id FROM task_revisions WHERE id::text = :rid"),
-                {"rid": str(revision_id)},
-            )
-        ).scalar_one_or_none()
-        if got is None:
-            raise not_found("revision", str(revision_id))
-        return str(got)
-    if task_id:
-        got = (
-            await session.execute(
-                text(
-                    "SELECT id FROM task_revisions WHERE task_id::text = :tid "
-                    "ORDER BY revision DESC LIMIT 1"
-                ),
-                {"tid": str(task_id)},
-            )
-        ).scalar_one_or_none()
-        if got is not None:
-            return str(got)
-    digest = "testdock:adhoc:%s:%s" % (project_id, application_id)
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, digest))
+    """只引用所选应用下真实存在的修订，不合成悬空外键。"""
+    if not revision_id and not task_id:
+        raise readiness_incomplete(["task_id 或 revision_id"])
+    got = (
+        await session.execute(
+            text(
+                "SELECT tr.id FROM task_revisions tr "
+                "JOIN test_tasks t ON t.id = tr.task_id "
+                "WHERE t.project_id = :pid AND t.application_id = :aid "
+                "AND (CAST(:rid AS text) IS NULL OR tr.id::text = :rid) "
+                "AND (CAST(:tid AS text) IS NULL OR t.id::text = :tid) "
+                "ORDER BY tr.revision DESC LIMIT 1"
+            ),
+            {"pid": project_id, "aid": application_id,
+             "rid": str(revision_id) if revision_id else None,
+             "tid": str(task_id) if task_id else None},
+        )
+    ).scalar_one_or_none()
+    if got is None:
+        raise not_found("revision" if revision_id else "task", str(revision_id or task_id))
+    return str(got)
 
 
 async def _insert_run(session: AsyncSession, body: Mapping) -> dict:
     """插入 queued run；request_key 重复则返回既有 run（created=False）。"""
     request_key = str(body.get("request_key") or "").strip()
     if not request_key:
-        raise validation_error("request_key 必填（幂等去重键）")
+        raise validation_error(["request_key 必填（幂等去重键）"])
     if len(request_key) > 200:
-        raise validation_error("request_key 过长（<=200）")
+        raise validation_error(["request_key 过长（<=200）"])
 
     platform = str(body.get("platform") or "android")
     if platform not in _PLATFORMS:
-        raise validation_error("platform 只支持 android / ios / web")
+        raise validation_error(["platform 只支持 android / ios / web"])
 
     application = await _pick_application(session, body.get("application_id"), platform)
     project_id = str(application["project_id"])
@@ -317,21 +308,51 @@ async def _insert_run(session: AsyncSession, body: Mapping) -> dict:
         application_id=application_id,
     )
 
+    revision = (
+        await session.execute(
+            text("SELECT config, test_type FROM task_revisions WHERE id = :id"),
+            {"id": revision_id},
+        )
+    ).mappings().one()
+    revision_config = dict(revision["config"] or {})
     overrides = body.get("overrides") or {}
     if not isinstance(overrides, Mapping):
-        raise validation_error("overrides 必须是对象")
-    device = body.get("device") or {}
+        raise validation_error(["overrides 必须是对象"])
+    device = body.get("device") if "device" in body else revision_config.get("device")
+    device = device or {}
     if not isinstance(device, Mapping):
-        raise validation_error("device 必须是对象")
+        raise validation_error(["device 必须是对象"])
     resource_id = device.get("resource_id")
     if resource_id is not None and not _is_uuid(resource_id):
-        raise validation_error("device.resource_id 必须是 uuid")
+        raise validation_error(["device.resource_id 必须是 uuid"])
+    importing = str(body.get("source") or "") == "import"
+    if importing and not resource_id:
+        # completed 行受 ck_test_runs_state_executing_needs_resource 约束：没有资源
+        # 就插不进去。导入通道不派发，但必须显式指明这批产物来自哪台设备。
+        raise validation_error(["导入需要 device.resource_id（completed 运行必须绑定执行资源）"])
+    resource_profile_id = None
+    if resource_id:
+        resource = (
+            await session.execute(
+                text("SELECT status, profile_id FROM execution_resources "
+                     "WHERE id = :rid AND project_id = :pid AND platform = :platform"),
+                {"rid": resource_id, "pid": project_id, "platform": platform},
+            )
+        ).mappings().first()
+        if resource is None:
+            raise not_found("resource", str(resource_id))
+        # 导入通道不派发、不占租约，产物可能来自一台此刻已离线的设备，
+        # 所以只要求资源真实存在且属于本项目；真跑仍要求 ready。
+        if not importing and resource["status"] != "ready":
+            raise device_not_ready(str(resource_id), resource["status"])
+        resource_profile_id = resource["profile_id"]
 
     snapshot = {
+        **revision_config,
         "request_key": request_key,
         "platform": platform,
         "application_id": application_id,
-        "module": str(body.get("module") or "ui"),
+        "module": "perf" if revision["test_type"] == "performance" else revision["test_type"],
         "overrides": dict(overrides),
         "requested_resource_id": resource_id,
         "source": str(body.get("source") or "api"),
@@ -345,41 +366,42 @@ async def _insert_run(session: AsyncSession, body: Mapping) -> dict:
     if body.get("fake_outcome"):
         snapshot["fake_outcome"] = str(body["fake_outcome"])
 
-    try:
-        row = (
-            await session.execute(
-                text(
-                    "INSERT INTO test_runs ("
-                    "  project_id, application_id, platform, revision_id, parent_run_id,"
-                    "  request_key, state, config_snapshot, created_by"
-                    ") VALUES ("
-                    "  :project_id, :application_id, :platform, :revision_id, :parent_run_id,"
-                    "  :request_key, 'queued', CAST(:config AS jsonb), :created_by"
-                    ") RETURNING id, state"
-                ),
-                {
-                    "project_id": project_id,
-                    "application_id": application_id,
-                    "platform": platform,
-                    "revision_id": revision_id,
-                    "parent_run_id": body.get("parent_run_id"),
-                    "request_key": request_key,
-                    "config": _json(snapshot),
-                    "created_by": str(body.get("created_by") or "web"),
-                },
-            )
-        ).mappings().one()
-    except IntegrityError:
-        # 并发下另一方先插入成功：回滚后重查，返回既有 run（幂等，不 500）
-        await session.rollback()
+    row = (
+        await session.execute(
+            text(
+                "INSERT INTO test_runs ("
+                "  id, project_id, application_id, platform, revision_id, parent_run_id,"
+                "  request_key, state, config_snapshot, created_by, resource_id, profile_id"
+                ") VALUES ("
+                "  :id, :project_id, :application_id, :platform, :revision_id, :parent_run_id,"
+                "  :request_key, 'queued', CAST(:config AS jsonb), :created_by,"
+                "  :resource_id, :profile_id"
+                ") ON CONFLICT (project_id, request_key) DO NOTHING RETURNING id, state"
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "project_id": project_id,
+                "application_id": application_id,
+                "platform": platform,
+                "revision_id": revision_id,
+                "parent_run_id": body.get("parent_run_id"),
+                "request_key": request_key,
+                "config": _json(snapshot),
+                "created_by": str(body.get("created_by") or "web"),
+                # 导入通道没有调度器去绑定设备，必须在插入时就写死资源与档案；
+                # 真跑仍留空，由 dispatcher 领取租约时绑定（resource/profile 成对）。
+                "resource_id": resource_id if importing else None,
+                "profile_id": resource_profile_id if importing else None,
+            },
+        )
+    ).mappings().first()
+    if row is None:
         existing = (
             await session.execute(
                 text("SELECT id FROM test_runs WHERE project_id = :pid AND request_key = :rk"),
                 {"pid": project_id, "rk": request_key},
             )
-        ).scalar_one_or_none()
-        if existing is None:
-            raise
+        ).scalar_one()
         return {"id": str(existing), "created": False, "project_id": project_id}
 
     run_id = str(row["id"])
@@ -448,7 +470,7 @@ async def _run_view(session: AsyncSession, run_id: str) -> dict:
     )
     progress = events_mod.compute_progress(events)
     terminal = runs_mod.is_terminal(str(row["state"]))
-    stage = events_mod.stage_number(progress, terminal)
+    stage = events_mod.stage_number(progress, terminal=terminal)
     cancel_requested = any(e.get("event_type") == "cancel_requested" for e in events)
     duration_s = None
     if row["started_at"] and row["ended_at"]:
@@ -494,10 +516,8 @@ async def create_run(
 ):
     """创建 run（queued）。重复 request_key 返回 200 + 既有 run（api-design.md §1.3）。"""
     created = await _insert_run(session, body)
-    await session.commit()
     run_id = str(created["id"])
     view = await _run_view(session, run_id)
-    await session.commit()
     if not created["created"]:
         return JSONResponse(
             status_code=200,
@@ -570,7 +590,6 @@ async def cancel_run(run_id: str, session: AsyncSession = Depends(get_session)) 
             reason="cancel_requested",
             actor="web",
         )
-    await session.commit()
     current = str(
         (
             await session.execute(
@@ -641,7 +660,7 @@ async def get_run_report(
         for item in items
         if item["kind"] in ("report_json", "report_html", "log")
     ]
-    source = runtime_mod.read_report_source(str(run_id)) or {}
+    source = await runtime_mod.read_report_source(str(run_id)) or {}
     snapshot = view["config_snapshot"] or {}
     mode = "imported" if snapshot.get("source") == "import" else "live"
     return {
@@ -670,6 +689,26 @@ async def get_run_report(
     }
 
 
+def _import_artifacts_dir(run_id: str, source: Path) -> Path:
+    """把外部 vendor 产物目录复制到受管产物目录，返回复制后的路径。
+
+    为什么必须复制：artifacts.storage_key 是相对 settings.artifacts_dir 的路径，
+    下载端点与 GET /report 都按这个根反查。直接登记外部绝对路径会让 storage_key
+    退化成裸文件名（storage_key_for 的兜底），读回来永远是"文件不存在"。
+    复制而不是移动：源目录是用户的既有证据，导入是只读补录，不能改它。
+    """
+    target = Path(settings.artifacts_dir) / str(run_id)
+    target.mkdir(parents=True, exist_ok=True)
+    for item in source.rglob("*"):
+        if not item.is_file():
+            continue
+        relative = item.relative_to(source)
+        destination = target / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(item, destination)
+    return target
+
+
 @router.post("/runs/import", status_code=201)
 async def import_run(
     body: dict = Body(default_factory=dict), session: AsyncSession = Depends(get_session)
@@ -681,10 +720,10 @@ async def import_run(
     """
     source_dir = str(body.get("source_dir") or "").strip()
     if not source_dir:
-        raise validation_error("source_dir 必填（已有 vendor 产物目录）")
+        raise validation_error(["source_dir 必填（已有 vendor 产物目录）"])
     path = Path(source_dir)
     if not path.is_dir():
-        raise validation_error("source_dir 不存在或不是目录: %s" % source_dir)
+        raise validation_error(["source_dir 不存在或不是目录: %s" % source_dir])
 
     payload = dict(body)
     payload["source"] = "import"
@@ -695,18 +734,25 @@ async def import_run(
 
     from .. import runtime as runtime_mod
 
+    # 产物必须搬进受管目录：下载端点与 GET /report 都只按 settings.artifacts_dir
+    # 反查 storage_key，登记一个外部绝对路径等于登记了永远读不到的行。
+    imported_dir = _import_artifacts_dir(run_id, path)
     result = await runtime_mod.finalize_run(
         run_id=run_id,
-        state=None,
-        explicit_outcome=None,
+        state=runs_mod.STATE_COMPLETED,
+        outcome=None,
         reason="imported",
         project_id=project_id,
-        artifacts_dir=path,
+        artifacts_dir=imported_dir,
         release_lease_reason="imported",
         actor="import",
     )
-    view = await _run_view(session, run_id)
-    await session.commit()
+    # 上面 commit 之后请求级事务已经关闭（get_session 用 session.begin() 包住），
+    # 不能在同一个 session 上再发查询；视图改用一个新会话读。
+    from ..db import get_sessionmaker
+
+    async with get_sessionmaker()() as view_session:
+        view = await _run_view(view_session, run_id)
     return JSONResponse(
         status_code=200 if not created["created"] else 201,
         content={

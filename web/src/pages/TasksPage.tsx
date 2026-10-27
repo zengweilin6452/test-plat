@@ -20,7 +20,7 @@ import { Table, type Column } from '../components/Table'
 import { TaskDrawer } from '../components/TaskDrawer'
 import { TaskWizard } from '../components/TaskWizard'
 import { useToast } from '../components/Toast'
-import { MODULE_NAMES, TARGET_CATALOG } from '../constants'
+import { moduleName, TARGET_CATALOG } from '../constants'
 import { displayStatus, displayTaskStatus } from '../lib/display'
 import { DASH, fmtDateTime } from '../lib/fmt'
 import { useTargetScope } from '../store/scope'
@@ -77,7 +77,7 @@ export function TasksPage() {
       render: (task) => (
         <>
           <span className="module-pill">{TARGET_CATALOG[task.platform]?.label ?? task.platform}</span>{' '}
-          <span className="muted small">{task.test_type ? MODULE_NAMES[task.test_type] : '未指定类型'}</span>
+          <span className="muted small">{moduleName(task.test_type)}</span>
           <div className="task-sub">{task.application.name}</div>
         </>
       ),

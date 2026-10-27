@@ -47,6 +47,15 @@ async def spawn(
     control_url: str | None = None,
     control_token: str | None = None,
 ) -> int:
+    if control_url is None or control_token is None:
+        # 调度路径没显式传控制面信息时回落到本进程 API 的 internal 面。
+        # 缺 token 会让 runner control_disabled、不再心跳，60s 后被
+        # reconciler 判 lease_expired——真跑链路必然失败，所以必须补齐。
+        from ..routers.debug_runtime import get_control_url_and_token
+
+        resolved_url, resolved_token = get_control_url_and_token()
+        control_url = control_url if control_url is not None else resolved_url
+        control_token = control_token if control_token is not None else resolved_token
     return await _spawner(
         run_id=run_id,
         config=config,

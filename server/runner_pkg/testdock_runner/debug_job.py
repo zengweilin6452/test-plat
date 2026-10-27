@@ -1,152 +1,157 @@
-"""debug / perf 作业：CLI 形状稳定，行为最小可用。
-
-P5 起调试会话有真实行为：
-  - debug：在子进程里启动 vendor viewer（uvicorn，127.0.0.1 随机空闲口），
-    然后把端口回报给 API（POST /internal/debug-sessions/{id}/ready {port}），
-    之后占住设备直到收到取消。vendor / 设备不可用时退回"占位"行为并以
-    exit 3（infra）+ reason=viewer_unavailable 收尾。
-  - perf：复用 ui 的 pytest 通道（性能用例在同一套 evidence 插件下跑）。
-两者都不改变释放顺序（停设备 -> 放 vendor 锁 -> 放本地锁）。
-"""
-
+"""调试 viewer 生命周期与 PerfKit 性能采集。"""
 from __future__ import annotations
 
-import json
+import math
 import socket
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
-from .env import RunnerContext, fake_enabled, has_vendor
+from .artifacts import collect_layout, write_report_json
+from .env import Deadline, RunnerContext, ensure_vendor_on_path, fake_enabled
 from .protocol import emit_stage, emit_text
-from .ui_job import UiJobOptions, UiJobResult, run_ui_job
+from . import ui_job
+from .ui_job import UiJobOptions, UiJobResult
 
-#: fake 模式下回报给 API 的固定端口（不起真 viewer）。
 FAKE_VIEWER_PORT = 58000
 
 
 def _free_port() -> int:
-    """向操作系统要一个 127.0.0.1 上的空闲 TCP 端口。"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
 
 
-def _report_ready(base_url: str, token: str, session_id: str, port: int) -> None:
-    """POST /internal/debug-sessions/{id}/ready。
+def _start_viewer(options: UiJobOptions):
+    ensure_vendor_on_path(options.vendor_dir)
+    from mobile_auto.config import MobileConfig
+    from mobile_auto.viewer.server import start_debug_viewer
 
-    ControlClient 只会拼 /internal/runs/{id}/... 前缀，调试会话的 ready 端点
-    路径不同，这里直接用 urllib 发请求。失败抛 ControlError 语义外的异常由
-    调用方转成 viewer_unavailable。
-    """
-    url = f"{base_url.rstrip('/')}/internal/debug-sessions/{session_id}/ready"
-    data = json.dumps({"port": port}).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "X-Control-Token": token,
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        body = json.loads(response.read().decode("utf-8") or "{}")
-    if not body.get("ok"):
-        raise RuntimeError(f"ready 上报被拒绝：{body}")
-
-
-def _start_viewer(options: UiJobOptions) -> int:
-    """启动 vendor viewer 并返回其监听端口。
-
-    vendor 按依赖隔离契约走 PYTHONPATH（env.ensure_vendor_on_path），import 只能
-    发生在本函数内部 —— runner 子进程不受 app 的静态 vendor import 约束，但保持
-    同样的延迟导入风格。
-    """
-    from .env import ensure_vendor_on_path
-
-    ensure_vendor_on_path()
-    import uvicorn  # noqa: PLC0415 - vendor 侧依赖，函数内导入
-    from mobile_auto.viewer.app import create_app  # noqa: PLC0415
-
-    app = create_app(session=None, store=None)
-    port = _free_port()
-    config = uvicorn.Config(
-        app,
-        host="127.0.0.1",
-        port=port,
-        log_level="warning",
-        access_log=False,
-    )
-    server = uvicorn.Server(config)
-    # 不阻塞主线程：serve 在后台线程跑，主线程负责取消循环
-    import threading  # noqa: PLC0415
-
-    thread = threading.Thread(target=server.run, name="debug-viewer", daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 15.0
-    while not server.started:
-        if time.monotonic() > deadline:
-            raise RuntimeError("viewer 启动超时（15s 未监听）")
-        if thread.is_alive() is False:
-            raise RuntimeError("viewer 线程提前退出")
-        time.sleep(0.1)
-    return port
+    return start_debug_viewer(MobileConfig(
+        device_serial=options.serial or None,
+        app_package=options.app_package or None,
+        app_activity=options.app_activity or None,
+        artifacts_dir=Path(options.artifacts_dir),
+        port=min(_free_port(), 65515),
+    ))
 
 
 def run_debug_job(options: UiJobOptions, context: RunnerContext) -> UiJobResult:
-    """交互式调试：起 viewer -> 回报端口 -> 占住设备直到取消。"""
-    artifacts_dir = Path(options.artifacts_dir)
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-    context.set_stage("debug", 10, stage=2)
-    emit_stage("debug", 10, serial=options.serial)
-
-    viewer_port: int | None = None
-    if fake_enabled(options.fake) or options.serial.startswith("fake"):
-        # 假执行：不起真 viewer，直接回报固定端口让 API 转 active
-        viewer_port = FAKE_VIEWER_PORT
-        emit_text(f"fake debug viewer port={viewer_port}")
-    else:
-        if not has_vendor():
-            emit_text("vendor 不可用，debug 会话退化为占位")
-            return UiJobResult(exit_code=3, reason="viewer_unavailable")
-        try:
-            viewer_port = _start_viewer(options)
-            emit_text(f"viewer started on 127.0.0.1:{viewer_port}")
-        except Exception as exc:  # noqa: BLE001 - viewer 起不来按 infra 收敛
-            emit_text(f"viewer 启动失败：{exc}")
-            return UiJobResult(exit_code=3, reason="viewer_unavailable")
-
-    # 回报端口（__main__.main 已先 ack，此时会话行 state=opening）
+    Path(options.artifacts_dir).mkdir(parents=True, exist_ok=True)
+    viewer = None
+    lock = None
     try:
-        _report_ready(
-            context.control.base_url,
-            context.control.token,
-            options.run_id,
-            viewer_port,
-        )
-    except Exception as exc:  # noqa: BLE001
-        emit_text(f"ready 上报失败：{exc}")
-        return UiJobResult(exit_code=3, reason="viewer_unavailable")
-
-    context.set_stage("debug", 50, stage=2)
-    emit_stage("debug", 50, serial=options.serial)
-    deadline = time.monotonic() + float(options.timeout or 0)
-    while not context.cancelled():
+        _, lock = ui_job._acquire_local_locks(options.serial, run_id=options.run_id, vendor=False)
         if not context.check_fence():
-            return UiJobResult(exit_code=5, reason="fence_mismatch", fence_lost=True)
-        if options.timeout and time.monotonic() > deadline:
-            return UiJobResult(exit_code=3, reason="timeout")
-        time.sleep(1.0)
-    emit_text("debug cancelled")
-    return UiJobResult(exit_code=4, reason="cancelled", cancelled=True)
+            return UiJobResult(5, "fence_mismatch", fence_lost=True)
+        context.set_stage("debug", 10, stage=2)
+        port = FAKE_VIEWER_PORT
+        if not fake_enabled(options.fake):
+            viewer = _start_viewer(options)
+            port = urlparse(viewer.url).port
+        if context.control is not None:
+            reply = context.control.ready(port=port, fencing_token=context.fencing_token)
+            if not reply.get("ok"):
+                return UiJobResult(3, "viewer_unavailable")
+        context.set_stage("debug", 50, stage=2)
+        deadline = Deadline(options.timeout)
+        while True:
+            if context.cancelled():
+                return UiJobResult(4, "cancelled", cancelled=True)
+            if not context.check_fence():
+                return UiJobResult(5, "fence_mismatch", fence_lost=True)
+            if deadline.expired:
+                return UiJobResult(3, "timeout", timed_out=True)
+            time.sleep(0.2)
+    except ui_job.DeviceBusy as exc:
+        return UiJobResult(3, "local_lease_busy", message=str(exc))
+    except Exception as exc:
+        emit_text("viewer_unavailable", error=type(exc).__name__, detail=str(exc)[:300])
+        return UiJobResult(3, "viewer_unavailable", message=str(exc))
+    finally:
+        if viewer is not None:
+            viewer.stop()
+        if lock is not None:
+            lock.release()
 
 
 def run_perf_job(options: UiJobOptions, context: RunnerContext) -> UiJobResult:
-    """性能作业：当前复用 UI 通道（同一 artifacts_dir 契约）。"""
-    emit_text("perf job delegating to ui pipeline")
-    return run_ui_job(options, context)
+    """PerfKit 负责 start/stop/pull/report；宿主轮询取消、租约和超时。"""
+    ensure_vendor_on_path(options.vendor_dir)
+    from mobile_perf import PerfKit
+
+    artifacts_dir = Path(options.artifacts_dir)
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    if fake_enabled(options.fake):
+        write_report_json(artifacts_dir, {"fake": True, "items": [], "metricsSummary": {}})
+        return UiJobResult(0, "gate_policy_missing", outcome="not_tested",
+                           components=[{"kind": "performance", "state": "completed",
+                                        "outcome": "not_tested", "reason_code": "gate_policy_missing"}],
+                           layout=collect_layout(artifacts_dir))
+    try:
+        duration = float(options.perf.get("duration_s", 60))
+        items = options.perf.get("items", ["CPU", "Memory", "FPS"])
+        if not options.serial or not options.app_package:
+            raise ValueError("性能采集需要 serial 和 app_package")
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError("duration_s 必须是正有限数")
+        if not isinstance(items, list) or not items or any(not isinstance(i, str) for i in items):
+            raise ValueError("items 必须是非空字符串数组")
+    except (TypeError, ValueError) as exc:
+        return UiJobResult(3, "invalid_perf_config", message=str(exc))
+
+    vendor_lease = lock = None
+    deadline = Deadline(options.timeout)
+    interrupted = None
+    try:
+        vendor_lease, lock = ui_job._acquire_local_locks(options.serial, run_id=options.run_id)
+        if not context.check_fence():
+            return UiJobResult(5, "fence_mismatch", fence_lost=True)
+        vendor_root = Path(options.vendor_dir) if options.vendor_dir else Path(__file__).resolve().parents[3] / "vendor"
+        kit = PerfKit(serial=options.serial, repo_root=vendor_root / "mobile_perf",
+                      runs_dir=artifacts_dir / "perf", db_path=artifacts_dir / "perf.sqlite3",
+                      keep_runs=1, keep_days=36500)
+        context.set_stage("ready", 20, stage=1)
+        kit.ensure_ready()
+        context.set_stage("collect", 40, stage=2)
+        emit_stage("collect", 40)
+        with kit.collect(target=options.app_package, items=items, host_run_id=options.run_id,
+                         runs_dir=artifacts_dir / "perf") as scope:
+            stop_at = time.monotonic() + duration
+            while time.monotonic() < stop_at:
+                if context.cancelled():
+                    interrupted = UiJobResult(4, "cancelled", cancelled=True)
+                    break
+                if context.fence_lost_now() or not context.check_fence():
+                    interrupted = UiJobResult(5, "fence_mismatch", fence_lost=True)
+                    break
+                if deadline.expired:
+                    interrupted = UiJobResult(3, "timeout", timed_out=True)
+                    break
+                time.sleep(min(0.2, max(0, stop_at - time.monotonic())))
+        report = scope.report
+        if not isinstance(report, dict):
+            raise RuntimeError("PerfKit 未返回报告")
+        write_report_json(artifacts_dir, report)
+        if interrupted is not None:
+            interrupted.layout = collect_layout(artifacts_dir)
+            return interrupted
+        if not context.check_fence():
+            return UiJobResult(5, "fence_mismatch", fence_lost=True)
+        context.set_stage("archive", 90, stage=3)
+        return UiJobResult(0, "gate_policy_missing", outcome="not_tested",
+                           components=[{"kind": "performance", "state": "completed",
+                                        "outcome": "not_tested", "reason_code": "gate_policy_missing"}],
+                           layout=collect_layout(artifacts_dir))
+    except ui_job.DeviceBusy as exc:
+        return UiJobResult(3, "local_lease_busy", message=str(exc))
+    except Exception as exc:
+        return UiJobResult(3, "perf_collect_failed", message=str(exc), layout=collect_layout(artifacts_dir))
+    finally:
+        if vendor_lease is not None:
+            vendor_lease.release()
+        if lock is not None:
+            lock.release()
 
 
 __all__ = ["run_debug_job", "run_perf_job"]

@@ -180,7 +180,7 @@ async def post_events(
     row = await _run_row(session, run_id)
     items = body.get("events") or []
     if not isinstance(items, list):
-        raise validation_error("events 必须是数组")
+        raise validation_error(["events 必须是数组"])
     batch: list[events_mod.Event] = []
     for item in items:
         if not isinstance(item, dict):
@@ -320,6 +320,57 @@ async def fail_run(
 # --------------------------------------------------------------------------- #
 # P5：调试会话 runner 回报（viewer 端口就绪）
 # --------------------------------------------------------------------------- #
+async def _debug_fence(session: AsyncSession, session_id: str, token: Any) -> dict:
+    row = (await session.execute(text(
+        "SELECT id, state, expires_at > now() AS unexpired FROM debug_sessions "
+        "WHERE id = CAST(:sid AS uuid)"
+    ), {"sid": session_id})).mappings().first()
+    if row is None:
+        raise not_found("debug_session", session_id)
+    lease = await leases_mod.live_lease_for_debug(session, session_id)
+    valid = (row["state"] in ("opening", "active") and row["unexpired"] and lease is not None
+             and str(lease["fencing_token"]) == str(token))
+    return {"ok": bool(valid), "cancel": row["state"] not in ("opening", "active") or not row["unexpired"],
+            "state": row["state"]}
+
+
+@router.post("/debug-sessions/{session_id}/ack", dependencies=[Depends(require_control_token)])
+@router.post("/debug-sessions/{session_id}/heartbeat", dependencies=[Depends(require_control_token)])
+async def heartbeat_debug(session_id: str, body: dict = Body(default_factory=dict),
+                          session: AsyncSession = Depends(get_session)) -> dict:
+    result = await _debug_fence(session, session_id, body.get("fencing_token"))
+    if result["ok"]:
+        await session.execute(text(
+            "UPDATE resource_leases SET expires_at = now() + make_interval(secs => :seconds) "
+            "WHERE debug_session_id = CAST(:sid AS uuid) AND released_at IS NULL "
+            "AND fencing_token = :token"
+        ), {"sid": session_id, "token": body["fencing_token"], "seconds": leases_mod.DEFAULT_LEASE_SECONDS})
+    return {**result, "fence_ok": result["ok"]}
+
+
+@router.get("/debug-sessions/{session_id}/fence", dependencies=[Depends(require_control_token)])
+async def fence_debug(session_id: str, token: str | None = None,
+                      session: AsyncSession = Depends(get_session)) -> dict:
+    result = await _debug_fence(session, session_id, token)
+    if not result["ok"]:
+        raise fence_mismatch(session_id, None, token)
+    return result
+
+
+@router.post("/debug-sessions/{session_id}/close", dependencies=[Depends(require_control_token)])
+async def close_debug(session_id: str, body: dict = Body(default_factory=dict),
+                      session: AsyncSession = Depends(get_session)) -> dict:
+    result = await _debug_fence(session, session_id, body.get("fencing_token"))
+    if result["state"] in ("closed", "lost"):
+        return {"ok": True, "already": True}
+    if not result["ok"]:
+        raise fence_mismatch(session_id, None, body.get("fencing_token"))
+    await session.rollback()
+    from .debug import _close_session
+    await _close_session(session_id, reason=str(body.get("reason") or "runner_exit"))
+    return {"ok": True}
+
+
 @router.post("/debug-sessions/{session_id}/ready", dependencies=[Depends(require_control_token)])
 async def debug_session_ready(
     session_id: str,
@@ -334,8 +385,11 @@ async def debug_session_ready(
     spawn._PROCESSES 同一信任级别）。
     """
     port = body.get("port")
-    if not isinstance(port, int) or port <= 0:
-        raise validation_error("port 必须是正整数")
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise validation_error(["port 必须在 1–65535 之间"])
+    fence = await _debug_fence(session, session_id, body.get("fencing_token"))
+    if not fence["ok"]:
+        raise fence_mismatch(session_id, None, body.get("fencing_token"))
     row = (
         await session.execute(
             text(

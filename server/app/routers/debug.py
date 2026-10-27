@@ -15,8 +15,9 @@
 3. **代理端点不解析业务**：/debug-sessions/{id}/snapshots 等只做"会话必须 active
    + 拼上游 URL + 原样转发"，json 与二进制都不改写。上游不可达返回 503。
 
-4. **模板端点不伪造**：没有活动调试会话时返回 501（Not Implemented）+ 明确文案，
-   绝不在 API 进程里伪造一份模板数据。
+4. **模板端点不伪造**：模板按调试会话隔离（vendor TemplateStore 绑定
+   session.assets_dir），必须显式传 session_id（缺失 400 validation_error、
+   非活动 409、上游不可达 503），绝不在 API 进程里伪造一份模板数据。
 
 5. **WS 双向透传**：/ws/debug/{id} 仅在会话 active 时接受（否则 close 4403/4404），
    与 vendor /api/v1/preview 之间做字节级双向转发（json 帧与 binary 帧都不改），
@@ -50,6 +51,7 @@ from ..errors import (
     conflict,
     not_found,
     runner_spawn_failed,
+    validation_error,
 )
 from ..runner import spawn as spawn_mod
 
@@ -62,20 +64,11 @@ API_PREFIX = "/api/v1"
 DEFAULT_SESSION_SECONDS = 3600
 #: 每个调试会话的 WS 客户端上限（§3.2）
 MAX_WS_CLIENTS_PER_SESSION = 4
-#: 模板端点在无活动会话时的统一文案
-_TEMPLATES_501_MESSAGE = (
-    "模板读写需要活动的设备调试会话（viewer 上游）。当前没有活动会话，"
-    "请先 POST /api/v1/debug-sessions 创建调试会话。"
-)
 
 #: 进程内会话 WS 客户端计数：{session_id: int}。单进程 uvicorn 下是权威计数。
 _WS_CLIENTS: dict[str, int] = {}
 #: 进程内 viewer 端口表：{session_id: port}，ready 上报时写入，关闭时删除。
 _READY_PORTS: dict[str, int] = {}
-
-
-def templates_unavailable() -> ApiError:
-    return ApiError(501, "no_active_debug_session", _TEMPLATES_501_MESSAGE, {})
 
 
 # --------------------------------------------------------------------------- #
@@ -388,7 +381,7 @@ async def create_debug_session(
 
     control_url, control_token = get_control_url_and_token()
     try:
-        _spawn_runner_threadsafe(
+        await spawn_mod.spawn_runner(
             run_id=session_id,
             config={"module": "debug", "serial": serial, "purpose": purpose},
             lease={
@@ -549,21 +542,44 @@ async def proxy_locators_validate(
 
 
 # --------------------------------------------------------------------------- #
-# 模板端点（不伪造：无活动会话 -> 501）
+# 模板端点（session_id 必填：模板按调试会话隔离，无兜底）
 # --------------------------------------------------------------------------- #
+async def _template_session(session: AsyncSession, session_id: str | None) -> str:
+    """模板代理的目标会话。vendor 的 TemplateStore 绑定 session.assets_dir——
+    模板数据本身就是按调试会话隔离的，所以会话 id 必须显式给出。
+
+    曾经的"无 session_id 时挑最新活动会话"兜底是跨项目泄漏点（A 项目的请求
+    会落到 B 项目的 viewer 上），已删除；缺失 session_id 走项目统一的
+    validation_error（400），非活动会话 409，上游不可达 503。
+    """
+    if not session_id:
+        raise validation_error(
+            ["session_id 必填：模板按调试会话隔离，请传入调试会话 id"
+             "（POST /api/v1/debug-sessions 创建后取得）"]
+        )
+    row = await _active_row(session, session_id)
+    return str(row["id"])
+
+
 @router.get("/templates")
-async def list_templates() -> dict:
-    raise templates_unavailable()
+async def list_templates(session_id: str | None = None, session: AsyncSession = Depends(get_session)) -> Response:
+    sid = await _template_session(session, session_id)
+    return await _forward(sid, "GET", "/api/v1/templates")
 
 
 @router.post("/templates")
-async def create_template() -> dict:
-    raise templates_unavailable()
+async def create_template(request: Request, session_id: str | None = None,
+                          session: AsyncSession = Depends(get_session)) -> Response:
+    sid = await _template_session(session, session_id)
+    return await _forward(sid, "POST", "/api/v1/templates", json_body=await request.json())
 
 
 @router.put("/templates/{logical:path}")
-async def update_template(logical: str) -> dict:
-    raise templates_unavailable()
+async def update_template(logical: str, request: Request, session_id: str | None = None,
+                          session: AsyncSession = Depends(get_session)) -> Response:
+    from urllib.parse import quote
+    sid = await _template_session(session, session_id)
+    return await _forward(sid, "PUT", "/api/v1/templates/" + quote(logical, safe="/"), json_body=await request.json())
 
 
 # --------------------------------------------------------------------------- #

@@ -44,7 +44,7 @@ class JUnitSummary:
 
     def outcome(self) -> str | None:
         """只有真正跑过才有结论：无用例 -> None（API 侧落 not_tested）。"""
-        if not self.present or self.tests <= 0:
+        if not self.present or self.tests <= 0 or self.tests == self.skipped:
             return None
         return "failed" if self.failed > 0 else "passed"
 

@@ -93,7 +93,6 @@ _NEXT_SEQ_SQL = text(
       FROM run_events
      WHERE project_id = :project_id
        AND run_id = :run_id
-       FOR UPDATE
     """
 )
 
@@ -126,6 +125,11 @@ async def append_events(
     items = list(events)
     if not items:
         return []
+    # 锁父运行，串行分配序号；PostgreSQL 不允许对聚合结果 FOR UPDATE。
+    await session.execute(
+        text("SELECT id FROM test_runs WHERE project_id = :pid AND id = :rid FOR UPDATE"),
+        {"pid": str(project_id), "rid": str(run_id)},
+    )
     seq = int(
         (
             await session.execute(

@@ -25,6 +25,8 @@ vendor mobile_perf 的 `judge` 只用 `report["deviceProfile"]` 做**字符串�
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import unicodedata
 from typing import Any
@@ -34,9 +36,14 @@ __all__ = [
     "PROFILE_KEY_OS",
     "PROFILE_KEY_RESOLUTION",
     "ProfileNormalizationError",
+    "canonical_profile_spec",
+    "fingerprint_for",
     "normalize_profile",
     "profile_components",
     "profiles_comparable",
+    "spec_from_probe",
+    "unknown_profile_fingerprint",
+    "unknown_profile_spec",
 ]
 
 
@@ -282,3 +289,67 @@ def profiles_comparable(left: str | None, right: str | None) -> bool:
         return normalize_profile(left) == normalize_profile(right)
     except ProfileNormalizationError:
         return False
+
+
+# --------------------------------------------------------------------------- #
+# 设备同步（device-registration.md D3）：adb 探测结果 -> 档案 spec 与指纹
+# --------------------------------------------------------------------------- #
+#: 规范化 os 段 -> spec 里的展示名（canonical spec 的唯一写法）
+_OS_DISPLAY = {"android": "Android", "ios": "iOS", "ipados": "iPadOS", "harmonyos": "HarmonyOS", "web": "Web"}
+
+
+def spec_from_probe(probe: dict[str, Any]) -> dict[str, str]:
+    """adb 探测结果 -> 可入库的规范化档案 spec（四字段）。
+
+    缺任何一段都在 normalize_profile 处抛 ProfileNormalizationError——
+    半截档案不入库（缺失信息不能当作相等）。
+    """
+    spec = {
+        "os_name": "Android",
+        "os_version": str(probe.get("os_version") or ""),
+        "screen_resolution": str(probe.get("screen_resolution") or ""),
+        "model": str(probe.get("model") or ""),
+    }
+    normalize_profile(spec)  # 只做校验，返回值不带原始大小写
+    return spec
+
+
+def canonical_profile_spec(spec: dict[str, Any]) -> dict[str, str]:
+    """从任意合法 spec 推导**规范化 spec**：同样的设备永远得到同一个 dict。
+
+    model 取规范化后的 slug（小写）、分辨率短边在前、os 版本去尾零——
+    `25102RKBEC` 与 `25102rkbec`、`2608x1200` 与 `1200x2608` 落到同一指纹。
+    """
+    normalized = normalize_profile(spec)
+    os_part, resolution_part, model_part = normalized.split("|")
+    os_name, _, os_version = os_part.partition("-")
+    return {
+        "os_name": _OS_DISPLAY.get(os_name, os_name),
+        "os_version": os_version,
+        "screen_resolution": resolution_part,
+        "model": model_part,
+    }
+
+
+def fingerprint_for(spec: dict[str, Any]) -> str:
+    """档案指纹：规范化 spec 的 SHA-256（对齐 0001 的列注释「规范化档案的 SHA-256」）。
+
+    先经 canonical_profile_spec 归一，调用方传原始探测值还是规范化值结果一致。
+    """
+    payload = json.dumps(canonical_profile_spec(spec), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def unknown_profile_spec() -> dict[str, Any]:
+    """未识别设备（unauthorized / 探测失败）的占位档案 spec（D3.3）。"""
+    return {"unknown": True}
+
+
+def unknown_profile_fingerprint(platform: str) -> str:
+    """未识别档案的固定指纹：同 (platform) 恒等，靠唯一索引全局只建一行。"""
+    payload = json.dumps(
+        {"unknown": True, "platform": platform},
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

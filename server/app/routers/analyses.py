@@ -724,7 +724,7 @@ async def create_gate_evaluation(
     baseline_rows = (
         await _load_metrics(session, [baseline_component["id"]]) if baseline_component else {}
     )
-    baseline_metrics = snapshot_from_rows(baseline_rows.get(baseline_component["id"], []))
+    baseline_metrics = snapshot_from_rows(baseline_rows.get(baseline_component["id"], []) if baseline_component else [])
 
     baseline_id = None
     if baseline_component is not None:

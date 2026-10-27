@@ -140,13 +140,16 @@ async def transition(run_id, *, expect: RunState, to: RunState,
 
 映射函数 `to_reason_code(vendor_not_tested_reason: str) -> str`：按关键词匹配（`档案`→profile_mismatch、`样本`→sample_count_below_minimum、`不支持`→metric_missing…），**未匹配一律 `metric_missing` 并记录原文**，不允许返回空。
 
-## 5. 原型 schema 需要补的三处（唯一允许的「平台新增」）
+## 5. 原型 schema 需要补的四处（唯一允许的「平台新增」）
 
 | # | 新增 | 理由 | 影响 |
 | --- | --- | --- | --- |
 | G1 | `metric_summaries.missing_reason_text TEXT NULL` | vendor 只给中文原因，枚举不够解释给人看 | 加列，CHECK 不变 |
 | G2 | `execution_resources.fence_counter BIGINT NOT NULL DEFAULT 0` | 租约 fencing token 来源（原型没有） | 加列 + 默认 0 |
 | G3 | `test_runs.parent_run_id UUID NULL REFERENCES test_runs(id)` | 「重新运行」追溯链（原型抽屉里有「重新运行自 RUN-x」文案但 DB 无字段） | 加列 + 引用 |
+| G4 | `execution_resources.last_seen_at TIMESTAMPTZ NULL` | `api-design.md:82` 已承诺该字段；没有它无法区分「从未同步过」与「3 天前还在」（`device-registration.md` §5.1） | 加列，NULL 允许 |
+
+> G4 由 `device-registration.md` §5.1 提出，2026-10-27 评审签字批准（dev）。
 
 > 若评审认为不得改原型 schema，替代方案：G1 存进 `metric_summaries.extra JSONB`（若存在）、G2 用 `resource_leases.id` 自增序列代替（弱化 fencing，可接受但退一步）、G3 用 `run_events` 记录。此替代方案成本 +0.5 人日且语义变弱，**不推荐**。
 

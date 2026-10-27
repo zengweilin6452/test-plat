@@ -31,6 +31,23 @@ export const MODULE_NAMES: Record<TestModule, string> = {
   joint: 'UI + 性能',
 }
 
+/**
+ * 后端 test_type -> 展示名。
+ * 后端枚举是 ui / performance / joint（DB CHECK），前端向导内部用 perf；
+ * 两种写法都要认，否则页面会把 performance 显示成"未指定类型"。
+ */
+export function moduleName(value: string | null | undefined): string {
+  if (!value) return '未指定类型'
+  if (value === 'performance' || value === 'perf') return MODULE_NAMES.perf
+  if (value === 'ui' || value === 'joint') return MODULE_NAMES[value]
+  return value
+}
+
+/** 该运行是否属于性能类（含历史/前端写法 perf） */
+export function isPerformanceType(value: string | null | undefined): boolean {
+  return value === 'performance' || value === 'perf'
+}
+
 /** 原型 L74 targetCatalog */
 export const TARGET_CATALOG: Record<Platform, { label: string; capability: string }> = {
   android: { label: 'Android', capability: '已有组件基础' },

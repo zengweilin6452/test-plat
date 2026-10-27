@@ -39,8 +39,17 @@ export type GateMode = 'original' | 'reanalysis'
 /** schema.sql artifacts.availability */
 export type ArtifactAvailability = 'available' | 'missing' | 'expired'
 
-/** 测试类型：UI 自动化 / 性能测试 / 联动 */
+/**
+ * 测试类型：UI 自动化 / 性能测试 / 联动。
+ * 这是**前端向导与页面**的词汇；提交给后端时要映射成 TestType（perf -> performance）。
+ */
 export type TestModule = 'ui' | 'perf' | 'joint'
+
+/**
+ * 后端 task_revisions.test_type 的原始取值（DB CHECK：ui / performance / joint）。
+ * 页面展示一律用 MODULE_NAMES 映射，不能直接拿 'perf' 去比对接口返回值。
+ */
+export type TestType = 'ui' | 'performance' | 'joint'
 
 /**
  * 展示态：由 state + outcome 合成，只用于渲染徽章，不回写后端。
@@ -196,12 +205,16 @@ export interface ResourceProfile {
 /** GET /api/v1/resources 的一行（server/app/routers/resources.py） */
 export interface ResourceRecord {
   id: string
+  project_id: string
+  node_id: string | null
   name: string
   resource_key: string
   status: ResourceStatus
   kind: string
   platform: Platform
   profile_id: string | null
+  /** 最近一次被 /resources/sync 确认在线；null = 从未同步过 */
+  last_seen_at: string | null
   profile: ResourceProfile | null
   /** 由未释放租约推导，不是库列 */
   busy: boolean
@@ -215,6 +228,49 @@ export interface ResourcesResponse {
   summary: string
 }
 
+/** ---- 以下为设备注册 / 资源同步新增的类型（docs/plan/device-registration.md §4）---- */
+
+/** GET /api/v1/projects 的一行（D5 配套） */
+export interface ProjectRecord {
+  id: string
+  code: string
+  name: string
+  archived_at: string | null
+}
+
+export interface ProjectsResponse {
+  items: ProjectRecord[]
+  total: number
+}
+
+/** POST /api/v1/resources/sync 响应里的一台设备 */
+export interface ResourceSyncDevice {
+  resource_key: string
+  status: ResourceStatus
+  action: 'created' | 'updated'
+  profile: { id: string; name: string; created: boolean }
+}
+
+/** POST /api/v1/resources/sync 响应里的一个节点 */
+export interface ResourceSyncNode {
+  node_id: string
+  node_name: string
+  status: 'ok' | 'unreachable'
+  seen: number
+  created: number
+  updated: number
+  offlined: number
+  busy_skipped: string[]
+  devices: ResourceSyncDevice[]
+}
+
+export interface ResourceSyncResponse {
+  started_at: string
+  duration_ms: number
+  adb_path: string
+  nodes: ResourceSyncNode[]
+}
+
 /** GET /api/v1/runs 的一行（server/app/routers/runs.py） */
 export interface RunRecord {
   id: string
@@ -224,8 +280,8 @@ export interface RunRecord {
   task_id: string | null
   application: { id: string; name: string }
   platform: Platform
-  /** 来自 task_revisions.test_type；没有修订时为 null */
-  test_type: TestModule | null
+  /** 来自 task_revisions.test_type（ui / performance / joint）；没有修订时为 null */
+  test_type: TestType | null
   state: RunState
   outcome: RunOutcome | null
   reason_code: string | null
@@ -248,7 +304,7 @@ export interface TaskRecord {
   id: string
   display_id: string
   name: string
-  test_type: TestModule | null
+  test_type: TestType | null
   lifecycle: TaskLifecycle
   application: { id: string; name: string }
   platform: Platform
@@ -273,32 +329,21 @@ export interface TasksResponse {
 
 /** ---- 以下为 P2 新建任务向导 / 任务详情抽屉新增的类型（契约见 docs/plan/api-design.md §2.3，后端由同事并行实现）---- */
 
-/**
- * POST /api/v1/tasks 的请求体（api-design.md §2.3 请求样例）。
- *
- * 只发后端契约里声明的字段，不塞前端自造字段：
- * - android 端 package_name 必填；web / ios 端应用标识走 URL / Bundle ID（由目标应用决定），
- *   因此 package_name 可省略，不在这里伪造一个包名。
- * - duration_s 只有 module != 'ui' 才发（api-design.md：module != ui 必填）。
- */
+/** POST /tasks：对齐 TaskCreateIn；幂等键通过 Idempotency-Key 头携带。 */
 export interface CreateTaskRequest {
-  /** 幂等键 UUIDv4（api-design.md §1.3） */
-  request_key: string
   project_id?: string
-  application_id?: string
-  /** 1–60 字符 */
+  application_id: string
   name: string
-  module: TestModule
+  test_type: 'ui' | 'performance' | 'joint'
   platform: Platform
-  /** Android 包名：^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$，≤120 */
-  package_name?: string | null
-  /** 应用版本，≤40 */
-  app_version?: string | null
-  suite_id?: string | null
-  scenario?: string | null
-  device?: { resource_id: string; allow_busy_queue: boolean } | null
-  perf?: { duration_s: number; items: string[]; extra_items?: string[] } | null
-  ui?: null
+  config: {
+    package_name?: string
+    identifier?: string
+    app_version: string | null
+    scenario: string | null
+    device: { resource_id: string; allow_busy_queue: boolean } | null
+    perf?: { duration_s: number; items: string[] }
+  }
 }
 
 /** POST /api/v1/tasks 的响应（201） */
@@ -306,10 +351,12 @@ export interface CreateTaskResponse {
   id: string
   display_id: string
   lifecycle: TaskLifecycle
+  lock_version: number
+  readiness: TaskReadiness
   revision: {
     id: string
     readiness: TaskReadiness
-    lock_version: number
+    revision: number
   }
 }
 
@@ -325,7 +372,8 @@ export interface TaskRevisionRecord {
   /** 修订号（revision 或 revision_no） */
   revision: number | null
   readiness: TaskReadiness | null
-  test_type: TestModule | null
+  /** 后端原始枚举：ui / performance / joint */
+  test_type: TestType | null
   created_at: string | null
   created_by?: string | null
   build_id?: string | null

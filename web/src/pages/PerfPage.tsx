@@ -6,8 +6,11 @@
  * - 样本不足或基线不可比时后端返回 not_tested，前端原样显示"未判定"；
  * - 指标缺失（如 GPU 不支持）显示原因，不显示 0。
  *
- * P1 可用数据：GET /api/v1/runs 里 test_type='perf' 的运行；
- * 指标与门禁明细接口（/runs/{id}/metrics、/runs/{id}/gate）在 P3 提供。
+ * 可用数据：GET /api/v1/runs 里 test_type 为 performance 的运行。
+ * 注意后端枚举是 ui / performance / joint（task_revisions.test_type 的 CHECK），
+ * 不是前端向导内部的 'perf'；联动（joint）运行同样产出性能组件与门禁结论，
+ * 因此一并列出，避免门禁结果在性能页看不到。
+ * 门禁明细读接口（GET /runs/{id}/metrics、GET /analyses?run_id=）尚未在本页接入。
  */
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -23,7 +26,7 @@ import { Table, type Column } from '../components/Table'
 import { TaskDrawer } from '../components/TaskDrawer'
 import { TaskWizard } from '../components/TaskWizard'
 import { useToast } from '../components/Toast'
-import { TARGET_CATALOG, isImplementedPlatform } from '../constants'
+import { TARGET_CATALOG, isImplementedPlatform, isPerformanceType, moduleName } from '../constants'
 import { displayStatus } from '../lib/display'
 import { DASH, fmtDateTime } from '../lib/fmt'
 import { useTargetScope } from '../store/scope'
@@ -74,7 +77,10 @@ export function PerfPage() {
 
   const error = runsQuery.isError ? describeError(runsQuery.error) : null
   const perfRuns = useMemo(
-    () => (runsQuery.data?.items ?? []).filter((run) => run.test_type === 'perf'),
+    () =>
+      (runsQuery.data?.items ?? []).filter(
+        (run) => isPerformanceType(run.test_type) || run.test_type === 'joint',
+      ),
     [runsQuery.data],
   )
 
@@ -95,6 +101,12 @@ export function PerfPage() {
       render: (run) => (
         <span className="module-pill">{TARGET_CATALOG[run.platform]?.label ?? run.platform}</span>
       ),
+    },
+    {
+      key: 'module',
+      header: '类型',
+      // 性能页同时列出联动运行（joint）：不标出来会被读成纯性能任务
+      render: (run) => <span className="muted small">{moduleName(run.test_type)}</span>,
     },
     {
       key: 'verdict',
@@ -169,7 +181,7 @@ export function PerfPage() {
             description={
               planned
                 ? 'iOS / Web 目标端暂无执行能力，接入后按同一套指标口径开通。'
-                : '提交性能任务后，运行与门禁结论会出现在这里。'
+                : '提交性能或联动任务后，运行与门禁结论会出现在这里。'
             }
           />
         ) : (
@@ -179,7 +191,7 @@ export function PerfPage() {
             rowKey={(run) => run.id}
             ariaLabel="性能运行"
             onRowClick={openTaskOfRun}
-            footer={<span>共 {perfRuns.length} 条性能运行</span>}
+            footer={<span>共 {perfRuns.length} 条性能 / 联动运行</span>}
           />
         )}
       </Panel>
@@ -189,8 +201,8 @@ export function PerfPage() {
           <PanelHead title="门禁检查明细" hint="逐项检查来自后端，前端只展示级别、阈值与是否满足" />
           <Empty
             icon="flag"
-            title="门禁明细接口尚未接入"
-            description="每次性能运行完成后后端写入 gate_evaluations（原始 / 重算两种模式）；明细读接口在 P3 提供。"
+            title="本页暂不渲染门禁明细"
+            description="逐项检查已由后端写入 gate_evaluations，可通过 GET /runs/{id}/metrics 与 GET /analyses?run_id= 读取；报告中心展示了结论、指标与证据，本页只做运行清单。"
           />
         </Panel>
       </div>

@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,8 +35,26 @@ from ..domain import control as control_mod
 
 logger = logging.getLogger(__name__)
 
+class RunnerProcess:
+    """Popen 的异步等待适配，同时支持 Windows Selector 与 Proactor。"""
+
+    def __init__(self, process: subprocess.Popen) -> None:
+        self.process = process
+        self.pid = process.pid
+
+    @property
+    def returncode(self):
+        return self.process.poll()
+
+    async def wait(self):
+        return await asyncio.to_thread(self.process.wait)
+
+    def kill(self):
+        self.process.kill()
+
+
 #: 运行中进程表：run_id -> 进程句柄。API 进程内唯一真源，用于 cancel/kill。
-_PROCESSES: dict[str, asyncio.subprocess.Process] = {}
+_PROCESSES: dict[str, RunnerProcess] = {}
 #: 每个 run 的读日志任务（取消时取消它）
 _TAIL_TASKS: dict[str, asyncio.Task[Any]] = {}
 
@@ -154,7 +173,14 @@ def build_spec(
         paths = config["test_paths"]
         if isinstance(paths, str):
             paths = [paths]
-        argv += ["--test-path", *[str(p) for p in paths]]
+        for path in paths:
+            argv += ["--test-path", str(path)]
+    if config.get("app_package") or config.get("package_name"):
+        argv += ["--app-package", str(config.get("app_package") or config["package_name"])]
+    if config.get("app_activity"):
+        argv += ["--app-activity", str(config["app_activity"])]
+    if config.get("perf"):
+        argv += ["--perf-config", json.dumps(config["perf"], ensure_ascii=False)]
     if fake_runner_enabled():
         argv.append("--fake")
 
@@ -204,14 +230,11 @@ async def spawn_runner(
     # 事件转发走 _tail_stdout 的增量读文件任务。
     log_file = open(spec.log_path, "ab")
     try:
-        process = await asyncio.create_subprocess_exec(
-            *spec.argv,
-            cwd=spec.cwd,
-            env=spec.env,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=log_file,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+        process = RunnerProcess(subprocess.Popen(
+            spec.argv, cwd=spec.cwd, env=spec.env,
+            stdin=subprocess.DEVNULL, stdout=log_file, stderr=subprocess.STDOUT,
+            start_new_session=os.name != "nt",
+        ))
     finally:
         log_file.close()
     _PROCESSES[run_id] = process
@@ -222,7 +245,7 @@ async def spawn_runner(
     return int(process.pid or 0)
 
 
-async def _tail_stdout(run_id: str, process: asyncio.subprocess.Process, log_path: Path) -> None:
+async def _tail_stdout(run_id: str, process: RunnerProcess, log_path: Path) -> None:
     """增量读 runner 日志文件：解析 JSON 行 -> run_events -> WS 广播。
 
     runner 的 stdout 直接落到 log_path（完整日志），这里只做 tail：记录读取偏移，
@@ -360,7 +383,11 @@ async def _finalize_after_exit(run_id: str, code: int | None) -> None:
         row = (
             await session.execute(text_project_state_sql(), {"id": run_id})
         ).mappings().first()
-    if row is None or row["state"] in runs_mod.TERMINAL_STATES:
+    if row is None:
+        from ..routers.debug import _close_session
+        await _close_session(run_id, reason="runner_exit")
+        return
+    if row["state"] in runs_mod.TERMINAL_STATES:
         return
     mapped = map_exit_code(code)
     await runtime_mod.finalize_run(
@@ -410,7 +437,7 @@ async def _pid_from_events(run_id: str) -> int | None:
     return None
 
 
-def get_process(run_id: str) -> asyncio.subprocess.Process | None:
+def get_process(run_id: str) -> RunnerProcess | None:
     process = _PROCESSES.get(run_id)
     if process is not None and process.returncode is None:
         return process
@@ -436,12 +463,10 @@ async def terminate_run_process(run_id: str, *, force: bool = True) -> bool:
         return False
     if os.name == "nt":
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "taskkill", "/T", "/F", "/PID", str(pid),
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
+            await asyncio.to_thread(
+                subprocess.run, ["taskkill", "/T", "/F", "/PID", str(pid)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10,
             )
-            await proc.wait()
         except Exception:  # noqa: BLE001
             logger.exception("taskkill %s 失败", pid)
     else:

@@ -505,3 +505,385 @@ def test_write_html_omits_frame_section_without_frames(tmp_path):
     html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
 
     assert "逐帧卡顿" not in html
+
+
+# ---------- 网络剖面（ticket 17）：档位与生效证据 ----------
+
+
+def _network_meta(**overrides):
+    meta = {
+        "profile": {"name": "weak", "latencyMs": 400.0, "downKbps": 400.0,
+                    "upKbps": 200.0, "lossPct": 2.0},
+        "tier": "passthrough",
+        "applied": True,
+        "effective": True,
+        "evidence": "observed",
+        "notTestedReason": None,
+        "hint": None,
+        "proxy": {"connections": 12, "connectRequests": 12, "httpRequests": 0,
+                  "hosts": ["api.test"], "errors": 0, "bytesDown": 100, "bytesUp": 50,
+                  "params": None},
+        "setupErrors": [],
+        "restored": {"deviceProxy": True, "reverse": True, "proxyProcess": True},
+        "logPath": "/tmp/net_proxy.jsonl",
+    }
+    meta.update(overrides)
+    return meta
+
+
+def test_build_report_network_block_records_tier_and_source():
+    built = report.build_report(
+        meta=_meta(), record=_record(), artifacts=[], network=_network_meta()
+    )
+
+    assert built["network"]["tier"] == "passthrough"
+    assert built["network"]["source"] == "mitmproxy"
+    assert built["network"]["profile"]["name"] == "weak"
+
+
+def test_build_report_without_network_omits_block():
+    built = report.build_report(meta=_meta(), record=_record(), artifacts=[])
+
+    assert "network" not in built
+
+
+def test_write_html_renders_network_section_with_evidence_rule(tmp_path):
+    built = report.build_report(
+        meta=_meta(), record=_record(), artifacts=[], network=_network_meta()
+    )
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    assert "网络剖面" in html
+    assert "Network profile" in html
+    assert "weak" in html
+    assert "只看代理侧日志" in html  # 生效判据必须写明，防止拿页面表现当证据
+
+
+def test_write_html_network_section_shows_not_tested_reason(tmp_path):
+    built = report.build_report(
+        meta=_meta(),
+        record=_record(),
+        artifacts=[],
+        network=_network_meta(
+            applied=False,
+            effective=False,
+            evidence="unavailable",
+            notTestedReason="mitmproxy 不可用（未安装，或解释器版本低于其要求的 Python 3.12）",
+            hint="把 MOBILE_PERF_MITMDUMP 指向该 venv 的 mitmdump",
+            restored={},
+        ),
+    )
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    assert "未生效原因" in html
+    assert "mitmproxy 不可用" in html
+    assert "MOBILE_PERF_MITMDUMP" in html
+
+
+def test_write_html_omits_network_section_without_network(tmp_path):
+    built = report.build_report(meta=_meta(), record=_record(), artifacts=[])
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    assert "网络剖面" not in html
+
+
+# ---------- GPU 双源（ticket 16）：数据源、显存与降级链 ----------
+
+
+def _gpu_summary():
+    return {
+        "gpu_util_pct": {"unit": "%", "source": "pc_supplement", "min": 7.0,
+                         "median": 28.0, "mean": 25.0, "max": 35.0, "p90": 33.0,
+                         "sampleCount": 20, "labelZh": "GPU占用",
+                         "labelEn": "GPU utilization"},
+        "gpu_mem_mb": {"unit": "MB", "source": "pc_supplement", "min": 120.0,
+                       "median": 125.4, "mean": 125.0, "max": 130.0, "p90": 128.0,
+                       "sampleCount": 20, "labelZh": "应用GPU显存",
+                       "labelEn": "App GPU memory"},
+    }
+
+
+def test_write_html_renders_gpu_section_with_actual_source(tmp_path):
+    """数据源必须写出来：kgsl 是窗口平均、dumpsys 是瞬时，混看会误判。"""
+    built = report.build_report(
+        meta=_meta(),
+        record=_record(),
+        artifacts=[],
+        metrics_summary=_gpu_summary(),
+        gpu={"enabled": True, "gpuSource": "kgsl_gpubusy", "degraded": []},
+    )
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    assert "GPU / GPU" in html
+    assert "应用GPU显存" in html
+    assert "gpubusy" in html
+    assert "窗口平均" in html  # 口径限定：非瞬时值
+    assert "不可跨机型比较" in html  # §2.1a：同一负载在不同 GPU/系统上可差一倍以上
+    assert "125.4" in html
+
+
+def test_write_html_gpu_section_shows_degradation_chain(tmp_path):
+    built = report.build_report(
+        meta=_meta(),
+        record=_record(),
+        artifacts=[],
+        metrics_summary={},
+        gpu={
+            "enabled": True,
+            "gpuSource": None,
+            "degraded": [
+                {"key": "gpu_util_pct", "reason": "output_unparseable_or_unsupported",
+                 "stages": ["kgsl:kgsl_not_readable", "dumpsys:unparseable"]}
+            ],
+        },
+    )
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    assert "降级项" in html
+    assert "kgsl:kgsl_not_readable" in html
+    assert "dumpsys:unparseable" in html
+    assert "不产出 0 值指标" in html
+
+
+def test_write_html_omits_gpu_section_without_gpu(tmp_path):
+    built = report.build_report(meta=_meta(), record=_record(), artifacts=[])
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    assert "GPU / GPU" not in html
+
+
+# ---------- 解密档与接口瀑布图（ticket 18） ----------
+
+
+def _api_breakdown():
+    return {
+        "top": [
+            {"host": "api.trainapp.com", "route": "POST /v1/login", "count": 3,
+             "medianMs": 620.0, "p90Ms": 980.0, "maxMs": 1100.0, "errors": 1,
+             "payloadKb": 12.5},
+            {"host": "cdn.trainapp.com", "route": "GET /static/app.js", "count": 1,
+             "medianMs": 45.0, "p90Ms": 45.0, "maxMs": 45.0, "errors": 0,
+             "payloadKb": 220.0},
+        ],
+        "totalRoutes": 7,
+        "byHost": {"api.trainapp.com": 5, "cdn.trainapp.com": 2},
+        "errors": 1,
+    }
+
+
+def _decrypt_meta(**overrides):
+    return _network_meta(
+        tier="decrypt",
+        trust="trusted",
+        trustError=None,
+        apiEffective=True,
+        apiNotTestedReason=None,
+        **overrides,
+    )
+
+
+def test_build_report_records_api_block_with_its_own_source():
+    built = report.build_report(
+        meta=_meta(), record=_record(), artifacts=[],
+        network=_decrypt_meta(), api=_api_breakdown(),
+    )
+
+    assert built["api"]["source"] == "mitmproxy_decrypt"
+    assert built["network"]["tier"] == "decrypt"
+    assert built["api"]["totalRoutes"] == 7
+
+
+def test_write_html_renders_api_waterfall_sorted_by_p90(tmp_path):
+    built = report.build_report(
+        meta=_meta(), record=_record(), artifacts=[],
+        network=_decrypt_meta(), api=_api_breakdown(),
+    )
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    assert "接口瀑布图" in html
+    assert "API waterfall" in html
+    assert "POST /v1/login" in html
+    assert html.index("POST /v1/login") < html.index("GET /static/app.js")  # 慢的在上
+    assert "980.0" in html  # P90
+    assert "排序依据 P90" in html  # 口径必须写明，避免当成中位
+    # 域名分组正确
+    assert "api.trainapp.com：5 次" in html
+    assert "cdn.trainapp.com：2 次" in html
+    assert "共 7 个接口路由" in html
+    # 与连接级口径的差异必须明示，不可互相换算
+    assert "不可互相换算" in html
+
+
+def test_write_html_network_section_shows_decrypt_trust_verdict(tmp_path):
+    built = report.build_report(
+        meta=_meta(), record=_record(), artifacts=[],
+        network=_decrypt_meta(), api=_api_breakdown(),
+    )
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    assert "解密 / decrypt" in html
+    assert "信任探测" in html
+    assert "成功 / trusted" in html
+
+
+def test_write_html_network_section_shows_api_unavailable_reason(tmp_path):
+    """证书不信任时：原因与下一步都进网络小节，且不渲染瀑布图（没数据不画空表）。"""
+    built = report.build_report(
+        meta=_meta(),
+        record=_record(),
+        artifacts=[],
+        network=_network_meta(
+            tier="decrypt",
+            trust="rejected",
+            trustError="tlsv1 alert unknown ca",
+            apiEffective=False,
+            apiNotTestedReason=(
+                "被测 App 不信任代理 CA（tlsv1 alert unknown ca），本 run 不重试解密"
+            ),
+        ),
+    )
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    assert "证书不信任 / rejected" in html
+    assert "tlsv1 alert unknown ca" in html
+    assert "接口级不可用" in html
+    assert "本 run 不重试解密" in html
+    assert "接口瀑布图" not in html  # 没有接口数据就不出这一栏
+
+
+def test_write_html_passthrough_network_section_says_no_url():
+    built = report.build_report(
+        meta=_meta(), record=_record(), artifacts=[], network=_network_meta()
+    )
+
+    markup = report._network_markup(built)
+
+    assert "直通档 / passthrough" in markup
+    assert "无 URL / 状态码" in markup
+    assert "信任探测" not in markup  # 直通档不解密，没有信任结论可说
+
+
+# ---------- 整页加载耗时（ticket 19）：逐页呈现与时间轴标注 ----------
+
+
+def _pages_meta(**overrides):
+    meta = {
+        "quietGapMs": 300.0,
+        "timeoutMs": 15000.0,
+        "clockOffsetS": -1000.025,
+        "clockOffsetSource": "uptime_bracket",
+        "clockRttMs": 50.0,
+        "status": "ok",
+        "pages": [
+            {"page": "home", "status": "ok", "t0S": 1.0, "pageLoadMs": 1200.0,
+             "stableAtS": 2.2, "frameCount": 3, "lastFrameS": 2.2, "reason": None},
+            {"page": "carousel", "status": "timeout", "t0S": 5.0, "pageLoadMs": None,
+             "stableAtS": None, "frameCount": 200, "lastFrameS": 20.0,
+             "reason": "观测 15000 ms 内画面始终有新帧（无限动画/持续刷新），"
+                       "未出现 ≥300 ms 的静默窗口"},
+        ],
+    }
+    meta.update(overrides)
+    return meta
+
+
+def test_build_report_records_pages_block_with_its_own_source():
+    built = report.build_report(
+        meta=_meta(), record=_record(), artifacts=[], pages=_pages_meta()
+    )
+
+    assert built["pages"]["source"] == "pageflow_last_frame_stable"
+    assert built["pages"]["quietGapMs"] == 300.0
+    assert [item["page"] for item in built["pages"]["pages"]] == ["home", "carousel"]
+
+
+def test_build_report_without_pages_omits_block():
+    built = report.build_report(meta=_meta(), record=_record(), artifacts=[])
+
+    assert "pages" not in built
+
+
+def test_write_html_renders_page_section_with_per_page_status(tmp_path):
+    built = report.build_report(
+        meta=_meta(), record=_record(), artifacts=[], pages=_pages_meta()
+    )
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    assert "整页加载耗时 / Page load" in html
+    assert "1200" in html
+    # 不可判定的页必须如实写 not_tested 与原因，不能留空
+    assert "not_tested" in html
+    assert "无限动画" in html
+    assert "超时（持续动画）" in html
+    # 与启动耗时口径不同这件事必须写在页面上
+    assert "不可互相换算" in html
+
+
+def test_write_html_page_section_explains_clock_offset_source(tmp_path):
+    built = report.build_report(
+        meta=_meta(), record=_record(), artifacts=[], pages=_pages_meta()
+    )
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    assert "括号式 uptime 实测换算" in html
+    assert "往返 50.0 ms" in html  # 对齐误差量级必须写出来
+
+
+def test_write_html_page_section_says_why_no_clock_offset(tmp_path):
+    built = report.build_report(
+        meta=_meta(), record=_record(), artifacts=[],
+        pages=_pages_meta(clockOffsetS=None, clockOffsetSource="no_uptime_offset",
+                          clockRttMs=None, status="degraded", pages=[]),
+    )
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    assert "未取到设备 uptime" in html
+    assert "本 run 不硬算" in html
+
+
+def test_page_markline_appends_to_startup_markline(tmp_path):
+    """启动点与页面稳定点共用一条 markLine：必须追加，不能互相覆盖。"""
+    built = report.build_report(
+        meta={**_meta(), "startup": STARTUP_META},
+        record=_record(),
+        artifacts=[],
+        series={
+            "mem_pss_mb": {"unit": "MB", "labelZh": "应用PSS内存", "points": [[0.0, 42.0]]}
+        },
+        pages=_pages_meta(),
+    )
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    script = _strip_vendor(html)
+    assert "启动点" in script
+    # 页面稳定点以数据形式注入（名字在浏览器侧拼出来），故只看注入的 points 段
+    points = script[script.index("var points = "):]
+    points = points[: points.index(";")]
+    assert '"page": "home"' in points and '"ms": 1200.0' in points
+    assert "carousel" not in points  # 超时页没有稳定点，不画线
+    # 追加语义：先判已有 markLine 再 concat，而不是直接赋值覆盖
+    assert "markLine.data.concat" in script
+
+
+def test_page_markline_absent_when_no_page_is_stable(tmp_path):
+    built = report.build_report(
+        meta=_meta(), record=_record(), artifacts=[],
+        pages=_pages_meta(pages=[_pages_meta()["pages"][1]]),
+    )
+
+    html = report.write_html(tmp_path, built).read_text(encoding="utf-8")
+
+    assert "markLine" not in _strip_vendor(html)

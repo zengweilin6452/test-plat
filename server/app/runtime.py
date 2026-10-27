@@ -96,25 +96,54 @@ def read_junit_summary(path: Path) -> dict[str, Any]:
     return totals
 
 
-def _terminal_expect_states(run: dict[str, Any], default: tuple[str, ...]) -> tuple[str, ...]:
-    """终态迁移的前置状态集合。
+async def _advance_to(session, run_id: str, current: str, target: str, *, reason: str | None,
+                      actor: str) -> str:
+    """沿状态机的正向边把运行推到 target 的前驱，返回推进后的状态。
 
-    ck_test_runs_state_executing_needs_resource 要求 running / finalizing / completed
-    必须有 resource_id 与 started_at。导入通道（POST /runs/import）没有设备，completed
-    就插不进去 —— 它必须跳过执行态，直接 queued/dispatching -> completed。这里按行内
-    事实裁剪，调用方不必各处重复判断。
+    为什么不能直接写终态：check_transition 只认 FORWARD_EDGES 的单步边
+    （queued -> dispatching -> running -> finalizing -> completed），
+    dispatching -> completed 是非法迁移。runner 正常跑完时确实会先 ack 进
+    running，但进程崩溃、导入通道、以及 runner 从未 ack 的情况都没有中间态，
+    所以收敛时必须自己补齐这几步，而不是绕过状态机。
+
+    errored / cancelled 可以从任意非终态直达，不需要推进。
     """
-    if run.get("resource_id") and run.get("started_at"):
-        return default
-    trimmed: list[str] = []
-    for state in default:
-        if state in (runs_mod.STATE_RUNNING, runs_mod.STATE_FINALIZING):
-            continue
-        trimmed.append(state)
-    for extra in (runs_mod.STATE_QUEUED, runs_mod.STATE_DISPATCHING):
-        if extra not in trimmed:
-            trimmed.append(extra)
-    return tuple(trimmed)
+    if target != runs_mod.STATE_COMPLETED:
+        return current
+    while True:
+        forward = runs_mod.FORWARD_EDGES.get(current)
+        if forward is None or forward == target:
+            return current
+        if forward in (runs_mod.STATE_RUNNING, runs_mod.STATE_FINALIZING):
+            bound = (
+                await session.execute(
+                    text("SELECT resource_id FROM test_runs WHERE id = :id"), {"id": run_id}
+                )
+            ).scalar_one_or_none()
+            if bound is None:
+                # 没有绑定设备就进不了执行态（DB CHECK 会拒绝）。这是调用方的
+                # 前置条件缺失，给出可读的 409，而不是把 IntegrityError 抛成 500。
+                from .errors import conflict
+
+                raise conflict(
+                    "run_without_resource",
+                    f"运行 {run_id} 尚未绑定执行资源，无法收敛到 completed",
+                    {"run_id": run_id, "state": current},
+                )
+            # ck_test_runs_state_executing_needs_resource：进入执行态必须有
+            # resource_id + started_at。用 DB 的 now() 与 created_at 取大，
+            # 避免 Python 时钟略早于插入时间而撞 started_at_not_before_created。
+            await session.execute(
+                text(
+                    "UPDATE test_runs SET started_at = GREATEST(now(), created_at) "
+                    " WHERE id = :id AND started_at IS NULL"
+                ),
+                {"id": run_id},
+            )
+        await runs_mod.transition(
+            session, run_id, current, forward, reason=reason, actor=actor
+        )
+        current = forward
 
 
 def derive_outcome(
@@ -144,6 +173,62 @@ def derive_outcome(
     return runs_mod.OUTCOME_NOT_TESTED
 
 
+async def _record_results(session, row: dict, artifacts_dir, extra_event) -> bool:
+    """登记组件、用例及性能摘要；返回是否需要执行原始性能门禁。"""
+    components = list((extra_event or {}).get("components") or [])
+    report = None
+    if artifacts_dir is not None:
+        path = Path(artifacts_dir) / "report.json"
+        if path.is_file():
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                # report.json 损坏（半截写入/编码坏）不该让整个 finalize 崩掉：
+                # 按"没有性能报告"处理，组件与用例仍从事件登记，指标缺失由
+                # metric_summaries.missing_reason 表达，而不是 500。
+                payload = None
+            if isinstance(payload, dict) and "metricsSummary" in payload:
+                report = payload
+    if report is not None and not any(c.get("kind") == "performance" for c in components):
+        components.append({"kind": "performance", "outcome": "not_tested", "reason_code": "gate_policy_missing"})
+    has_perf = False
+    for component in components:
+        kind = component.get("kind")
+        if kind not in ("ui", "performance"):
+            continue
+        outcome = component.get("outcome") or "not_tested"
+        reason = component.get("reason_code") or ("gate_policy_missing" if kind == "performance" else "no_tests")
+        cid = (await session.execute(text(
+            "INSERT INTO run_components (id, project_id, run_id, kind, adapter_key, adapter_version, state, outcome, reason_code, summary) "
+            "VALUES (gen_random_uuid(), :pid, :rid, :kind, :adapter, '1', 'completed', :outcome, :reason, CAST(:summary AS jsonb)) "
+            "ON CONFLICT (project_id, run_id, kind) DO UPDATE SET summary = EXCLUDED.summary RETURNING id"
+        ), {"pid": row["project_id"], "rid": row["id"], "kind": kind,
+            "adapter": "mobile_perf" if kind == "performance" else "mobile_auto", "outcome": outcome,
+            "reason": reason if outcome == "not_tested" else None,
+            "summary": json.dumps(report if kind == "performance" and report is not None else component.get("summary") or {}, ensure_ascii=False)})).scalar_one()
+        if kind == "ui":
+            for case in (extra_event or {}).get("cases") or []:
+                await session.execute(text(
+                    "INSERT INTO case_results (id, project_id, component_id, case_key, outcome, duration_ms, error_summary) "
+                    "VALUES (gen_random_uuid(), :pid, :cid, :key, :outcome, :duration, :error) "
+                    "ON CONFLICT (project_id, component_id, case_key, attempt) DO NOTHING"
+                ), {"pid": row["project_id"], "cid": cid, "key": case["case_key"], "outcome": case["outcome"],
+                    "duration": case.get("duration_ms"), "error": case.get("error_summary")})
+        else:
+            has_perf = True
+            if report is not None:
+                from .integrations.mobile_perf import summaries_from_report
+                mapped = summaries_from_report(report)
+                for metric in mapped.rows:
+                    await session.execute(text(
+                        "INSERT INTO metric_summaries (id, project_id, component_id, metric_key, metric_version, unit, scope, window_key, "
+                        "statistic, sample_count, value, missing_reason, missing_reason_text) "
+                        "VALUES (gen_random_uuid(), :pid, :cid, :metric_key, :version, :unit, :scope, :window_key, "
+                        ":statistic, :sample_count, :value, :missing_reason, :missing_reason_text) ON CONFLICT DO NOTHING"
+                    ), {"pid": row["project_id"], "cid": cid, "version": mapped.metric_version, **metric.as_dict()})
+    return has_perf
+
+
 async def finalize_run(
     *,
     run_id: str | uuid.UUID,
@@ -154,11 +239,6 @@ async def finalize_run(
     artifacts_dir: Path | str | None = None,
     release_lease_reason: str | None = None,
     extra_event: Mapping[str, Any] | None = None,
-    expect_states: tuple[str, ...] = (
-        runs_mod.STATE_DISPATCHING,
-        runs_mod.STATE_RUNNING,
-        runs_mod.STATE_FINALIZING,
-    ),
     actor: str = "runtime",
 ) -> FinalizeResult:
     """把 run 收敛到终态。幂等：已是同一终态时直接返回 already_terminal。
@@ -217,6 +297,10 @@ async def finalize_run(
     # 2) 事件 + 状态 + 租约释放放在同一事务里
     async with sessionmaker() as session:
         async with session.begin():
+            locked = (await session.execute(text("SELECT state FROM test_runs WHERE id = :id FOR UPDATE"), {"id": rid})).scalar_one()
+            if locked in runs_mod.TERMINAL_STATES:
+                return FinalizeResult(rid, locked, row["outcome"], artifact_count, sha_map, already_terminal=True)
+            has_perf = await _record_results(session, row, artifacts_dir, extra_event) if state == runs_mod.STATE_COMPLETED else False
             payload = {
                 "stage": "finish",
                 "state": state,
@@ -227,23 +311,44 @@ async def finalize_run(
             }
             if extra_event:
                 payload.update({str(k): v for k, v in extra_event.items()})
-            await events_mod.append_event(
-                session,
-                project_id=pid,
-                run_id=rid,
-                source_key=events_mod.SOURCE_RECONCILER if actor == "reconciler" else "runtime",
-                source_event_id=events_mod.event_id_for("finish", rid, state, reason),
-                event_type="error" if state == runs_mod.STATE_ERRORED else "finish",
-                payload=payload,
+            # 收敛目标可能是多步之外的终态（runner 崩溃时停留在 dispatching），
+            # 先沿正向边推到前驱，再由 transition 做最后一步，绝不跳过状态机。
+            current = await _advance_to(
+                session, rid, str(locked), state, reason=reason, actor=actor
             )
             await runs_mod.transition(
                 session,
                 rid,
-                _terminal_expect_states(row, expect_states),
+                current,
                 state,
                 outcome=final_outcome,
                 reason=not_tested_reason or reason,
                 actor=actor,
+            )
+            if has_perf:
+                # 判定必须在运行已是 completed 之后：gate 把未完成的运行视为 run_incomplete。
+                from .routers.analyses import create_gate_evaluation
+                evaluation = await create_gate_evaluation(rid, {"request_key": "original:" + rid}, session)
+                await session.execute(text(
+                    "UPDATE run_components SET outcome = :outcome, reason_code = :reason "
+                    "WHERE run_id = :rid AND kind = 'performance'"
+                ), {"rid": rid, "outcome": evaluation["verdict"], "reason": evaluation["reason_code"]})
+                component_outcomes = (await session.execute(text(
+                    "SELECT outcome FROM run_components WHERE run_id = :rid"
+                ), {"rid": rid})).scalars().all()
+                final_outcome = ("failed" if "failed" in component_outcomes else
+                                 "not_tested" if "not_tested" in component_outcomes else "passed")
+                reason = evaluation["reason_code"] if final_outcome == "not_tested" else None
+                await session.execute(text(
+                    "UPDATE test_runs SET outcome = :outcome, reason_code = :reason, not_tested_reason = :reason "
+                    "WHERE id = :rid"
+                ), {"rid": rid, "outcome": final_outcome, "reason": reason})
+                payload.update(outcome=final_outcome, reason=reason)
+            await events_mod.append_event(
+                session, project_id=pid, run_id=rid,
+                source_key=events_mod.SOURCE_RECONCILER if actor == "reconciler" else "runtime",
+                source_event_id=events_mod.event_id_for("finish", rid, state, reason),
+                event_type="error" if state == runs_mod.STATE_ERRORED else "finish", payload=payload,
             )
             if release_lease_reason:
                 await leases_mod.release_lease(
@@ -328,54 +433,70 @@ def _report_json_payload(run_id: str) -> dict[str, Any]:
     """
     from sqlalchemy import create_engine
 
+    picked: dict[str, Any] = {}
     try:
         engine = create_engine(str(settings.database_url))
         try:
             with engine.connect() as conn:
-                row = conn.execute(
+                rows = conn.execute(
                     text(
-                        "SELECT storage_key FROM artifacts "
-                        " WHERE run_id = :run_id AND kind = :kind "
-                        "   AND logical_key LIKE :pattern "
-                        " ORDER BY logical_key LIMIT 1"
+                        "SELECT kind, storage_key FROM artifacts "
+                        " WHERE run_id = :run_id "
+                        "   AND (kind = :report_kind OR logical_key LIKE :pattern) "
+                        " ORDER BY logical_key"
                     ),
-                    {"run_id": run_id, "kind": "report_json", "pattern": "%report.json"},
-                ).first()
+                    {
+                        "run_id": run_id,
+                        "report_kind": "report_json",
+                        "pattern": "%junit.xml",
+                    },
+                ).mappings().all()
         finally:
             engine.dispose()
     except Exception:  # noqa: BLE001 - 报告是只读视图，取不到就降级为空
         return {}
-    if not row:
-        return {}
-    path = artifacts_mod.resolve_storage_path(str(row[0]), settings.artifacts_dir)
-    if path is None or not path.is_file():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-    # 只取报告需要的字段，避免把任意 JSON 原样塞进 API 响应
-    picked: dict[str, Any] = {}
-    if isinstance(payload.get("metricsSummary"), dict):
-        picked["metricsSummary"] = payload["metricsSummary"]
-    elif isinstance(payload.get("metrics"), dict):
-        picked["metricsSummary"] = payload["metrics"]
-    if isinstance(payload.get("thresholdsAtRun"), dict):
-        picked["thresholdsAtRun"] = payload["thresholdsAtRun"]
-    elif isinstance(payload.get("thresholds"), dict):
-        picked["thresholdsAtRun"] = payload["thresholds"]
-    if isinstance(payload.get("junit"), dict):
-        picked["junit"] = payload["junit"]
-    if payload.get("mode"):
-        picked["mode"] = str(payload["mode"])
+
+    report_path = None
+    junit_path = None
+    for row in rows:
+        key = str(row["storage_key"])
+        if junit_path is None and key.endswith("junit.xml"):
+            junit_path = artifacts_mod.resolve_storage_path(key, settings.artifacts_dir)
+        elif report_path is None and key.endswith("report.json"):
+            report_path = artifacts_mod.resolve_storage_path(key, settings.artifacts_dir)
+
+    payload: dict[str, Any] = {}
+    if report_path is not None and report_path.is_file():
+        try:
+            loaded = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            loaded = None
+        if isinstance(loaded, dict):
+            payload = loaded
+            if isinstance(loaded.get("metricsSummary"), dict):
+                picked["metricsSummary"] = loaded["metricsSummary"]
+            elif isinstance(loaded.get("metrics"), dict):
+                picked["metricsSummary"] = loaded["metrics"]
+            if isinstance(loaded.get("thresholdsAtRun"), dict):
+                picked["thresholdsAtRun"] = loaded["thresholdsAtRun"]
+            elif isinstance(loaded.get("thresholds"), dict):
+                picked["thresholdsAtRun"] = loaded["thresholds"]
+            if isinstance(loaded.get("junit"), dict):
+                picked["junit"] = loaded["junit"]
+            if loaded.get("mode"):
+                picked["mode"] = str(loaded["mode"])
+
+    # junit.xml 是证据里的权威用例计数，report.json 未必带；缺的时候从这里补，
+    # 报告页才能显示"跑了几个用例 / 几个失败"。
+    if "junit" not in picked and junit_path is not None:
+        summary = read_junit_summary(junit_path)
+        if summary.get("present"):
+            picked["junit"] = summary
     return picked
 
 
 __all__ = [
     "FinalizeResult",
-    "_terminal_expect_states",
     "derive_outcome",
     "finalize_run",
     "read_junit_summary",

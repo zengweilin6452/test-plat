@@ -25,32 +25,145 @@ export interface CreateDebugSessionResponse {
   state?: DebugSessionState
 }
 
-/** POST /api/v1/debug-sessions/{id}/locators/validate 的返回匹配项 */
+/** POST /api/v1/debug-sessions/{id}/locators/validate 的返回匹配项（vendor 给的是矩形） */
 export interface LocatorMatch {
   x?: number | null
   y?: number | null
+  width?: number | null
+  height?: number | null
   confidence?: number | null
   [key: string]: unknown
 }
 
 export interface LocatorValidateResponse {
+  snapshot_id?: string | null
+  captured_at?: string | null
   matches?: LocatorMatch[] | null
   count?: number | null
+  /** 唯一匹配才算通过；多匹配/零匹配 vendor 给 false */
+  passed?: boolean | null
+  note?: string | null
   [key: string]: unknown
 }
 
-/** GET /api/v1/templates 的一行（vendor TemplateStore 清单） */
+/** POST /api/v1/debug-sessions/{id}/snapshots 的响应（vendor create_snapshot） */
+export interface SnapshotCaptureResponse {
+  snapshot_id: string
+  width?: number | null
+  height?: number | null
+  orientation?: string | null
+  captured_at?: string | null
+  tree_captured_at?: string | null
+  tree_error?: string | null
+  consistent?: boolean | null
+}
+
+/** vendor 归一化层级树节点（_normalized_tree_json：children 是节点下标） */
+export interface SnapshotTreeNode {
+  index: number
+  class_name?: string | null
+  resource_id?: string | null
+  text?: string | null
+  content_desc?: string | null
+  bounds?: number[] | null
+  clickable?: boolean | null
+  children?: number[]
+}
+
+export interface SnapshotTreeResponse {
+  nodes?: SnapshotTreeNode[] | null
+  [key: string]: unknown
+}
+
+/**
+ * GET /api/v1/templates 的一行 —— vendor viewer `list_templates` 原样透传：
+ * `{logical, version_id, image_sha256}`。平台不做二次包装，因此没有
+ * logical_path / confidence / updated_at 这些字段（旧声明是猜的）。
+ */
 export interface TemplateRecord {
-  logical_path: string
-  version?: number | string | null
-  confidence?: number | null
-  updated_at?: string | null
-  size?: number | null
+  logical: string
+  version_id?: string | null
+  image_sha256?: string | null
   [key: string]: unknown
 }
 
+/** vendor 返回的是 `{templates: [...]}`，不是 `{items: [...]}` */
 export interface TemplatesResponse {
-  items: TemplateRecord[]
+  templates: TemplateRecord[]
+}
+
+/** POST /api/v1/templates 的请求体（vendor 契约：服务端从保留快照裁剪，不收浏览器图片） */
+export interface CreateTemplateRequest {
+  /** POST /debug-sessions/{id}/snapshots 返回的快照 id */
+  snapshot_id: string
+  /** 裁剪区域 [x, y, width, height]，必须是四个整数 */
+  region: [number, number, number, number]
+  /** 模板逻辑名，必须以 .png 结尾的 POSIX 相对路径 */
+  logical: string
+  note?: string
+}
+
+/** POST/PUT 的成功响应（vendor `_template_payload`） */
+export interface TemplateVersionRecord {
+  logical: string
+  version_id: string
+  sha256?: string | null
+  width?: number | null
+  height?: number | null
+  [key: string]: unknown
+}
+
+/**
+ * GET /api/v1/runs/{id}/report（server/app/routers/runs.py: get_run_report）。
+ * 后端字段是 camelCase，与 vendor report.json 同源；缺失字段一律可空，页面显示破折号。
+ */
+export interface RunReport {
+  runId: string
+  hostRunId?: string | null
+  name?: string | null
+  projectId?: string | null
+  applicationId?: string | null
+  platform?: string | null
+  resourceId?: string | null
+  module?: string | null
+  status?: string | null
+  /** 后端门禁结论：passed / failed / not_tested；null 表示尚未判定 */
+  verdict?: 'passed' | 'failed' | 'not_tested' | null
+  target?: { id?: string | null; name?: string | null } | null
+  deviceProfile?: string | null
+  durationS?: number | null
+  /** vendor metricsSummary 原样透传：{metric_key: {unit, median, sampleCount, ...}} */
+  metricsSummary?: Record<string, Record<string, unknown>> | null
+  thresholdsAtRun?: Record<string, unknown> | null
+  reason?: string | null
+  reasonText?: string | null
+  evaluatedAt?: string | null
+  /** live = 真跑产物；imported = 导入补录 */
+  mode?: 'live' | 'imported' | string | null
+  vendorReports?: { kind?: string | null; artifact_id?: string | null }[] | null
+  /** junit 用例计数：{present, tests, failures, errors, skipped, failed} */
+  junit?: Record<string, unknown> | null
+}
+
+/** GET /api/v1/runs/{id}/artifacts 的一行 */
+export interface RunArtifact {
+  id: string
+  run_id?: string | null
+  component_id?: string | null
+  logical_key: string
+  kind?: string | null
+  mime_type?: string | null
+  byte_size?: number | null
+  sha256?: string | null
+  availability?: string | null
+  created_at?: string | null
+  /** 由后端拼接，前端不自己拼路径 */
+  download_url?: string | null
+  [key: string]: unknown
+}
+
+export interface RunArtifactsResponse {
+  items: RunArtifact[]
   total?: number
 }
 
