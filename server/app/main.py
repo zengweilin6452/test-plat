@@ -46,6 +46,9 @@ async def lifespan(app: FastAPI):
     """
     token = control_mod.ensure_token(settings.control_token_path)
     app.state.control_token = token
+    # 同值登记到 domain 层：`python -m app.main` 下 `from ..main import app` 会拿到
+    # 另一个 app 对象（state 为空），spawn 侧只能靠这里取到与校验侧一致的令牌。
+    control_mod.set_current_token(token)
 
     stop = asyncio.Event()
     tasks: list[asyncio.Task[None]] = []

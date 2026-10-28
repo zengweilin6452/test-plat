@@ -40,13 +40,16 @@ CONTROL_TOKEN_HEADER = "X-Control-Token"
 
 
 def _expected_token(request: Request) -> str:
-    token = getattr(request.app.state, "control_token", None)
-    if not token:
-        # lifespan 没跑（例如直接构造 app 的测试）时回落到磁盘 token
-        from ..config import settings
+    """校验侧令牌：与 spawn 侧共用 domain 层解析入口（进程内 > app.state > 文件）。
 
-        token = control_mod.read_token(settings.control_token_path)
-    return token or ""
+    两边都走 resolve_token 是硬要求 —— 各自回落会让 runner 拿到没人认的令牌。
+    """
+    from ..config import settings
+
+    return control_mod.resolve_token(
+        getattr(request.app.state, "control_token", None),
+        settings.control_token_path,
+    )
 
 
 async def require_control_token(

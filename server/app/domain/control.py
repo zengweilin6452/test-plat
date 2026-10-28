@@ -74,12 +74,46 @@ def tokens_match(expected: str | None, provided: str | None) -> bool:
     return hmac.compare_digest(expected.encode("utf-8"), provided.encode("utf-8"))
 
 
+# --------------------------------------------------------------------------- #
+# 进程内令牌：spawn 侧与校验侧的唯一真源
+# --------------------------------------------------------------------------- #
+# 为什么不能只靠 app.state：`python -m app.main` 启动时服务跑在 `__main__` 模块里，
+# 而任何 `from ..main import app` 的代码会把 `app.main` **再导入一次**，拿到另一个
+# app 对象（lifespan 没跑过，state 为空），于是回落去读磁盘文件。文件一旦被别的
+# 进程轮换过，spawn 出去的 runner 拿到的令牌就和 /internal/* 校验用的不一致 ——
+# 会话直接 401（runner_exit）。令牌放在本模块（全进程唯一单例）里，两侧都从这里取。
+_CURRENT_TOKEN: str | None = None
+
+
+def set_current_token(token: str | None) -> None:
+    """lifespan 启动时登记本进程的令牌（与 app.state.control_token 同值）。"""
+    global _CURRENT_TOKEN
+    _CURRENT_TOKEN = token or None
+
+
+def current_token() -> str | None:
+    """本进程登记过的令牌；未跑过 lifespan（CLI / 纯单测）时为 None。"""
+    return _CURRENT_TOKEN
+
+
+def resolve_token(state_token: str | None, path: Path | str) -> str:
+    """令牌解析的唯一入口：进程内值 > app.state > 磁盘文件。
+
+    spawn 侧（交给 runner）与校验侧（/internal/*）必须走同一个入口，否则会出现
+    "发出去的令牌没人认"。
+    """
+    return current_token() or state_token or (read_token(path) or "")
+
+
 __all__ = [
     "ENV_CONTROL_TOKEN",
     "TOKEN_BYTES",
+    "current_token",
     "ensure_token",
     "generate_token",
     "read_token",
+    "resolve_token",
+    "set_current_token",
     "token_path",
     "tokens_match",
     "write_token",

@@ -14,8 +14,9 @@ def get_control_url_and_token() -> tuple[str, str]:
     """返回 (control_url, control_token)。
 
     URL 指向本 API 的 internal 面（settings.host:settings.port）；
-    token 优先用 lifespan 写进 app.state 的值，其次读磁盘 token 文件
-    （与 internal.require_control_token 的回落顺序一致）。
+    token 走 domain 层的唯一解析入口（进程内值 > app.state > 磁盘文件），与
+    internal.require_control_token 用的是同一个函数，保证 runner 拿到的令牌
+    一定能通过校验。
     """
     import os
 
@@ -23,9 +24,10 @@ def get_control_url_and_token() -> tuple[str, str]:
     url = override or ("http://%s:%d" % (settings.host, settings.port))
     from ..domain import control as control_mod
 
-    token = getattr(_current_app_state(), "control_token", None)
-    if not token:
-        token = control_mod.read_token(settings.control_token_path) or ""
+    token = control_mod.resolve_token(
+        getattr(_current_app_state(), "control_token", None),
+        settings.control_token_path,
+    )
     return url, token
 
 
