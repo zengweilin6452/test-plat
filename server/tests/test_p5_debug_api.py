@@ -370,6 +370,7 @@ def test_templates_400_without_session(api_client, p3_project):
         ("get", "/api/v1/templates", {}),
         ("post", "/api/v1/templates", {"json": {"name": "t"}}),
         ("put", "/api/v1/templates/some/path", {"json": {"name": "t"}}),
+        ("post", "/api/v1/templates/validate", {"json": {"target": {"by": "image", "value": "a.png"}}}),
     ]:
         response = getattr(api_client, method)(url, headers=CLIENT_HEADERS, **kwargs)
         assert response.status_code == 400, (method, response.status_code)
@@ -386,6 +387,44 @@ def test_templates_with_unknown_session_404(api_client, p3_project):
     )
     assert response.status_code == 404
     assert _json(response)["code"] == "not_found"
+
+
+# --------------------------------------------------------------------------- #
+# 图像定位验证：必须转发到 vendor 的 /templates/validate
+# --------------------------------------------------------------------------- #
+@requires_db
+def test_image_validate_forwards_to_vendor_template_endpoint(api_client, monkeypatch):
+    """真机实测（2026-10-28）：POST /locators/validate 传 by='image' 必 500 ——
+    vendor 的 `_query_payload` 对图像目标返回 4 元组（带 scores），
+    `capture_and_query_sync` 在 with_scores=False 时按 3 元组解包。vendor/ 是只读
+    源仓库，所以平台侧改走 vendor 自己的 /templates/validate；这条测试钉住转发路径，
+    防止有人"顺手"改回通用定位端点。
+    """
+    from fastapi.responses import JSONResponse
+
+    from app.routers import debug as debug_mod
+
+    captured: dict = {}
+
+    async def _fake_forward(session_id, method, path, *, json_body=None):
+        captured.update({"session_id": session_id, "method": method, "path": path, "body": json_body})
+        return JSONResponse({"count": 0, "matches": [], "scores": [], "note": "零匹配"})
+
+    async def _fake_template_session(session, session_id):
+        return "00000000-0000-0000-0000-000000000001"
+
+    monkeypatch.setattr(debug_mod, "_template_session", _fake_template_session)
+    monkeypatch.setattr(debug_mod, "_forward", _fake_forward)
+
+    response = api_client.post(
+        f"/api/v1/templates/validate?session_id={uuid.uuid4()}",
+        json={"target": {"by": "image", "value": "buttons/ok.png"}},
+        headers=CLIENT_HEADERS,
+    )
+    assert response.status_code == 200, response.text
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/api/v1/templates/validate"
+    assert captured["body"]["target"]["value"] == "buttons/ok.png"
 
 
 # --------------------------------------------------------------------------- #

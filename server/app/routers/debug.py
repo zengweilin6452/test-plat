@@ -574,6 +574,21 @@ async def create_template(request: Request, session_id: str | None = None,
     return await _forward(sid, "POST", "/api/v1/templates", json_body=await request.json())
 
 
+@router.post("/templates/validate")
+async def validate_template(request: Request, session_id: str | None = None,
+                            session: AsyncSession = Depends(get_session)) -> Response:
+    """IMAGE 定位验证：走 vendor 的专用端点 `/templates/validate`。
+
+    为什么不用 `/locators/validate`：vendor 那条路径在 image 目标上必 500 ——
+    `_query_payload` 对图像目标返回 4 元组（带 scores），而 `capture_and_query_sync`
+    在 with_scores=False 时按 3 元组解包（viewer/app.py `ValueError: too many values
+    to unpack`）。vendor/ 是只读源仓库，不在本地改；改用 vendor 自己的
+    `/templates/validate`（with_scores=True，响应多一个 `scores` 数组）。
+    """
+    sid = await _template_session(session, session_id)
+    return await _forward(sid, "POST", "/api/v1/templates/validate", json_body=await request.json())
+
+
 @router.put("/templates/{logical:path}")
 async def update_template(logical: str, request: Request, session_id: str | None = None,
                           session: AsyncSession = Depends(get_session)) -> Response:

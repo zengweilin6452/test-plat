@@ -1,5 +1,9 @@
 /**
- * 设备调试抽屉（P5）。
+ * 设备调试工作区（P5）。
+ *
+ * 布局：不再是浮在内容上的窄抽屉，而是占据右侧工作区的全高面板（`.debug-pane`），
+ * 打开时给 `.main` 让出等宽内边距，页面内容缩到左边，画面、层级树、定位与图像识别
+ * 都有足够宽度看清（原先 570px 三栏挤在一起）。
  *
  * 数据来源（全部经平台代理到活动调试会话的 vendor viewer）：
  *  - 实时预览：WS /api/v1/ws/debug/{id}，vendor 下发 **JSON 文本帧**
@@ -8,10 +12,17 @@
  *  - 层级树：WS 不带树。点「采集快照」→ POST .../snapshots {with_tree} →
  *    GET .../snapshots/{nid}/tree，vendor 返回 `{nodes: [{index, children: [下标]}]}`。
  *  - 定位验证：POST .../locators/validate，体是 `{target: {by, value}}`，
- *    返回 matches[]（x/y/width/height）。唯一匹配才算通过，vendor 给 passed 字段。
+ *    返回 matches[]（x/y/width/height/confidence）。唯一匹配才算通过。
+ *  - 图像识别（vendor imaging + TemplateStore）：
+ *      GET  /templates?session_id=            模板清单（逻辑名 / 版本 / 摘要）
+ *      POST /templates {snapshot_id, region, logical}
+ *                                             从**服务端保留的快照**裁剪建档，
+ *                                             vendor 不接受浏览器上传图片
+ *    匹配本身仍走 locators/validate（by='image'，value=逻辑名），命中框叠在画面上。
+ *    框选区域直接在预览画面上拖拽得到（设备像素坐标 = 快照像素坐标）。
  * 硬约束：
  *  - 会话创建失败 / 端点不可用只显示 Notice + 错误码，不伪造画面；
- *  - 关闭抽屉先 DELETE /debug-sessions/{id} 再清 WS；
+ *  - 关闭面板先 DELETE /debug-sessions/{id} 再清 WS；
  *  - WS 断开（非主动关闭）提示「会话已结束」。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -21,14 +32,16 @@ import {
   captureSnapshot,
   closeDebugSession,
   createDebugSession,
+  createTemplate,
   fetchDebugSession,
   fetchSnapshotTree,
+  fetchTemplates,
   validateLocator,
+  validateTemplate,
 } from '../api/endpoints'
-import type { LocatorMatch, SnapshotTreeNode } from '../api/types'
+import type { LocatorMatch, SnapshotTreeNode, TemplateRecord } from '../api/types'
 import { Badge } from './Badge'
 import { Button } from './Button'
-import { Drawer } from './Dialog'
 import { Empty } from './Empty'
 import { Notice } from './Notice'
 import { useToast } from './Toast'
@@ -65,6 +78,18 @@ const LOCATOR_OPTIONS: { value: LocatorBy; label: string }[] = [
   { value: 'xpath', label: 'xpath' },
   { value: 'image', label: '图像模板（逻辑名）' },
 ]
+
+interface Region {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+interface FrameSize {
+  w: number
+  h: number
+}
 
 /** 层级树节点：vendor 用 children 存下标，渲染前先按 index 建表 */
 export function buildTreeIndex(nodes: SnapshotTreeNode[]): {
@@ -118,7 +143,7 @@ function TreeBranch({
     .filter((kid): kid is SnapshotTreeNode => Boolean(kid))
   const bounds = nodeBounds(node)
   return (
-    <div style={{ paddingLeft: depth ? 14 : 0 }}>
+    <div style={{ paddingLeft: depth ? 16 : 0 }}>
       <div className="flex" style={{ gap: 6, alignItems: 'center' }}>
         {kids.length > 0 && depth < 200 ? (
           <button
@@ -134,8 +159,8 @@ function TreeBranch({
           <span style={{ minWidth: 14 }} />
         )}
         <button type="button" className="link-btn" onClick={() => onPick(node)} title="选中该节点做定位验证">
-          <span className="mono small">{nodeLabel(node)}</span>
-          {bounds ? <span className="muted small"> {bounds}</span> : null}
+          <span className="mono">{nodeLabel(node)}</span>
+          {bounds ? <span className="muted"> {bounds}</span> : null}
         </button>
       </div>
       {open && depth < 200
@@ -173,6 +198,8 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
   const [locatorBy, setLocatorBy] = useState<LocatorBy>('text')
   const [locator, setLocator] = useState('')
   const [matches, setMatches] = useState<LocatorMatch[] | null>(null)
+  /** 图像匹配的相关系数（vendor /templates/validate 的 scores，与 matches 对齐） */
+  const [scores, setScores] = useState<number[] | null>(null)
   const [validateNote, setValidateNote] = useState<string | null>(null)
   const [validateError, setValidateError] = useState<string | null>(null)
   const [wsStatus, setWsStatus] = useState<'idle' | 'connecting' | 'open' | 'closed'>('idle')
@@ -182,8 +209,16 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
   const [wsAttempt, setWsAttempt] = useState(0)
   const [wsNotice, setWsNotice] = useState<string | null>(null)
   const [closeError, setCloseError] = useState<string | null>(null)
+  /** 当前帧尺寸（设备像素）：命中框与框选都按它换算成百分比 */
+  const [frameSize, setFrameSize] = useState<FrameSize | null>(null)
+  /** 框选中的区域（设备像素），松手后落到 region */
+  const [region, setRegion] = useState<Region | null>(null)
+  const [dragging, setDragging] = useState<Region | null>(null)
+  const [newLogical, setNewLogical] = useState('')
+  const [templateError, setTemplateError] = useState<string | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
   /** 主动关闭标记：区别于服务端断开 */
   const closingRef = useRef(false)
   const wsRef = useRef<WebSocket | null>(null)
@@ -199,23 +234,29 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
     setTreeError(null)
     setSelected(null)
     setMatches(null)
+    setScores(null)
     setValidateNote(null)
     setValidateError(null)
     setWsStatus('idle')
     setWsNotice(null)
     setCloseError(null)
+    setFrameSize(null)
+    setRegion(null)
+    setDragging(null)
+    setNewLogical('')
+    setTemplateError(null)
   }, [])
 
   /** open 的 ref 镜像：mutation 回调里读 props 会拿到过期闭包 */
   const openRef = useRef(open)
   openRef.current = open
 
-  /** 打开抽屉 → 创建调试会话 */
+  /** 打开面板 → 创建调试会话 */
   const createMutation = useMutation({
     mutationFn: () => createDebugSession(target!.serial, '定位排查'),
     onSuccess: (created) => {
       if (!openRef.current) {
-        // 创建请求在途时抽屉已被关掉：立即释放，否则留下孤儿 active 会话占住设备租约
+        // 创建请求在途时面板已被关掉：立即释放，否则留下孤儿 active 会话占住设备租约
         void closeDebugSession(created.id).catch(() => undefined)
         return
       }
@@ -228,7 +269,7 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
     },
   })
 
-  /** 打开抽屉 → 自动创建调试会话（否则停留在空态，没有任何入口能发起） */
+  /** 打开面板 → 自动创建调试会话（否则停留在空态，没有任何入口能发起） */
   const createPendingRef = useRef(false)
   useEffect(() => {
     if (!open) {
@@ -290,6 +331,23 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
     void queryClient.invalidateQueries({ queryKey: ['resources'] })
   }, [closeMutation, onClose, queryClient, reset, teardownSocket])
 
+  /** 面板占住右侧工作区：给 body 打标记，让 .main 让出等宽内边距 */
+  useEffect(() => {
+    if (!open) return
+    document.body.classList.add('debug-pane-open')
+    return () => document.body.classList.remove('debug-pane-open')
+  }, [open])
+
+  /** Esc 关闭（原先是原生 <dialog> 自带的行为） */
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') handleClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [open, handleClose])
+
   /** WS 建立：vendor 下发 JSON 帧（jpeg_base64），解析后画到 canvas */
   useEffect(() => {
     if (!open || !session) return
@@ -321,7 +379,9 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
       }
       const kind = message.kind
       if (kind === 'frame' && typeof message.jpeg_base64 === 'string') {
-        drawFrame(canvasRef.current, message.jpeg_base64)
+        drawFrame(canvasRef.current, message.jpeg_base64, (size) => {
+          setFrameSize((prev) => (prev && prev.w === size.w && prev.h === size.h ? prev : size))
+        })
         return
       }
       if (kind === 'status') {
@@ -389,7 +449,7 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
     }
   }, [teardownSocket])
 
-  /** open 转 false 的兜底：抽屉仍挂载、但父组件清掉了 target（或任何不经
+  /** open 转 false 的兜底：面板仍挂载、但父组件清掉了 target（或任何不经
    *  handleClose 的关闭路径）时，活动会话必须就地释放，否则成为孤儿会话，
    *  一直占住设备租约到 expires_at。handleClose 已先清 sessionRef，不会重复关。 */
   useEffect(() => {
@@ -434,17 +494,41 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
 
   const tree = useMemo(() => buildTreeIndex(nodes ?? []), [nodes])
 
+  /** 会话必须 active 才能碰 vendor：opening 期间 /templates 一律
+   * `debug_session_not_active`，提前请求只会在界面上挂一条红字。 */
+  const sessionActive = detailQuery.data?.state === 'active'
+
+  /** 模板清单（图像识别）：按调试会话隔离，vendor 返回 {templates: [...]} */
+  const templatesQuery = useQuery({
+    queryKey: ['debug-templates', session?.id],
+    queryFn: ({ signal }) => fetchTemplates(session!.id, signal),
+    enabled: open && Boolean(session) && sessionActive,
+    retry: false,
+  })
+  const templates: TemplateRecord[] = useMemo(
+    () => (Array.isArray(templatesQuery.data?.templates) ? templatesQuery.data!.templates : []),
+    [templatesQuery.data],
+  )
+  const templatesError = templatesQuery.isError ? describeError(templatesQuery.error) : null
+
+  /** 定位验证（含图像模板匹配：by='image' 时 value 是模板逻辑名）。
+   * 图像目标必须走 /templates/validate：vendor 的 /locators/validate 对 image
+   * 目标解包 3 元组、实际返回 4 个值，稳定 500。 */
   const validateMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (input: { by: LocatorBy; value: string }) => {
       const id = sessionRef.current
       if (id === null) throw new Error('缺少调试会话')
-      if (!locator.trim()) throw new Error('定位值不能为空')
-      return validateLocator(id, { by: locatorBy, value: locator.trim() })
+      if (!input.value.trim()) throw new Error('定位值不能为空')
+      const target = { by: input.by, value: input.value.trim() }
+      return input.by === 'image'
+        ? validateTemplate(id, { target })
+        : validateLocator(id, target)
     },
     onSuccess: (result) => {
       setValidateError(null)
       const list = Array.isArray(result?.matches) ? result.matches : []
       setMatches(list)
+      setScores(Array.isArray(result?.scores) ? result.scores : null)
       setValidateNote(
         typeof result?.note === 'string'
           ? result.note
@@ -462,6 +546,34 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
     },
   })
 
+  /** 图像识别：从服务端保留的快照裁剪建档（vendor 不收浏览器图片） */
+  const createTemplateMutation = useMutation({
+    mutationFn: () => {
+      const id = sessionRef.current
+      if (id === null) throw new Error('缺少调试会话')
+      if (!snapshotId) throw new Error('先「采集快照」，模板只能从快照裁剪')
+      if (!region) throw new Error('先在画面上拖拽框选模板区域')
+      const logical = newLogical.trim()
+      if (!logical) throw new Error('模板逻辑名不能为空')
+      return createTemplate(id, {
+        snapshot_id: snapshotId,
+        region: [region.x, region.y, region.w, region.h],
+        logical,
+      })
+    },
+    onSuccess: (record) => {
+      setTemplateError(null)
+      toast.show('模板已登记：' + record.logical + '（v' + String(record.version_id ?? '').slice(0, 8) + '）')
+      setNewLogical('')
+      setRegion(null)
+      void templatesQuery.refetch()
+    },
+    onError: (error) => {
+      const described = describeError(error)
+      setTemplateError(described.code + '：' + described.message)
+    },
+  })
+
   const detailError = detailQuery.isError ? describeError(detailQuery.error) : null
   /** 上游不可达（viewer 未起）与无活动会话给出更具体的提示 */
   const upstreamHint = (error: ReturnType<typeof describeError> | null): string | null => {
@@ -471,60 +583,171 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
     return null
   }
 
+  // ---------------------------------------------------------------- 框选
+  /** 鼠标位置 → 设备像素。取 `.debug-frame` 的 rect：它收缩到 canvas 盒子
+   *  （stage 只负责居中，多出来的留白不能被算进比例）。 */
+  const pointToDevice = (event: React.MouseEvent): { x: number; y: number } | null => {
+    const frame = stageRef.current
+    if (!frame || !frameSize) return null
+    const rect = frame.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return null
+    const x = ((event.clientX - rect.left) / rect.width) * frameSize.w
+    const y = ((event.clientY - rect.top) / rect.height) * frameSize.h
+    return {
+      x: Math.min(Math.max(Math.round(x), 0), frameSize.w),
+      y: Math.min(Math.max(Math.round(y), 0), frameSize.h),
+    }
+  }
+
+  const handleStageDown = (event: React.MouseEvent) => {
+    const point = pointToDevice(event)
+    if (!point) return
+    setDragging({ x: point.x, y: point.y, w: 0, h: 0 })
+  }
+
+  const handleStageMove = (event: React.MouseEvent) => {
+    if (!dragging) return
+    const point = pointToDevice(event)
+    if (!point) return
+    setDragging(normalizeRegion(dragging.x, dragging.y, point.x, point.y))
+  }
+
+  const handleStageUp = () => {
+    if (!dragging) return
+    const box = dragging
+    setDragging(null)
+    // 太小的框多半是误点：清掉而不是留一个 1px 的模板区域
+    if (box.w < 8 || box.h < 8) return
+    setRegion(box)
+  }
+
+  const overlayRegion = dragging ?? region
+  const overlayBoxes = useMemo(() => {
+    if (!frameSize || !matches) return []
+    return matches
+      .map((match, index) => ({ match, index }))
+      .filter(({ match }) => typeof match.x === 'number' && typeof match.y === 'number'
+        && typeof match.width === 'number' && typeof match.height === 'number')
+      .map(({ match, index }) => ({
+        index,
+        left: ((match.x as number) / frameSize.w) * 100,
+        top: ((match.y as number) / frameSize.h) * 100,
+        width: ((match.width as number) / frameSize.w) * 100,
+        height: ((match.height as number) / frameSize.h) * 100,
+        // 图像匹配的分数在顶层 scores 里，元素匹配才有 match.confidence
+        confidence:
+          typeof match.confidence === 'number' ? match.confidence : scores?.[index] ?? null,
+      }))
+  }, [frameSize, matches, scores])
+
+  const wsText = wsStatus === 'open' ? '已连接' : wsStatus === 'connecting' ? '连接中' : '未连接'
+  const wsTone = wsStatus === 'open' ? 'green' : wsStatus === 'connecting' ? 'blue' : 'gray'
+
+  if (!open) return null
+
   return (
-    <Drawer
-      open={open}
-      onClose={handleClose}
-      title={target ? target.label + ' · 调试' : '设备调试'}
-      description={target ? 'serial ' + target.serial : undefined}
-      footer={
-        <>
-          <Button onClick={handleClose} disabled={closeMutation.isPending}>
-            {closeMutation.isPending ? '正在关闭…' : '关闭会话'}
-          </Button>
-        </>
-      }
-      footHint="关闭抽屉会同时关闭调试会话并释放资源租约"
+    <aside
+      className="debug-pane"
+      role="dialog"
+      aria-modal="false"
+      aria-label={target ? target.label + ' · 调试' : '设备调试'}
     >
-      {!target ? null : (
-        <>
-          {wsNotice ? (
-            <div className="mb">
-              <Notice tone="amber" title="调试会话">
-                {wsNotice}
-              </Notice>
-            </div>
-          ) : null}
-          {closeError ? (
-            <div className="mb">
-              <Notice tone="red" title="关闭失败">
-                {closeError}
-              </Notice>
-            </div>
-          ) : null}
+      <header className="debug-pane-head">
+        <div>
+          <h2>{target ? target.label + ' · 调试' : '设备调试'}</h2>
+          <p>
+            serial {target?.serial ?? DASH}
+            {session ? ' · 会话 ' + String(session.id).slice(0, 8) : ''}
+            {frameSize ? ' · 画面 ' + frameSize.w + '×' + frameSize.h : ''}
+          </p>
+        </div>
+        <div className="flex" style={{ gap: 8 }}>
+          <Badge tone={wsTone} dot>{wsText}</Badge>
+          <Button iconOnly icon="close" aria-label="关闭调试" onClick={handleClose} />
+        </div>
+      </header>
 
-          {!session && !createMutation.isPending && !wsNotice ? (
-            <Empty
-              icon="phone"
-              title="尚未建立调试会话"
-              description="POST /api/v1/debug-sessions 建立会话后，这里展示实时预览与快照树。"
-            />
-          ) : null}
-          {createMutation.isPending ? (
-            <Empty icon="phone" title="正在创建调试会话" description="正在请求 POST /api/v1/debug-sessions" />
-          ) : null}
+      <div className="debug-pane-body">
+        {wsNotice ? (
+          <div className="mb">
+            <Notice tone="amber" title="调试会话">{wsNotice}</Notice>
+          </div>
+        ) : null}
+        {closeError ? (
+          <div className="mb">
+            <Notice tone="red" title="关闭失败">{closeError}</Notice>
+          </div>
+        ) : null}
 
-          {session ? (
-            <div className="debug-grid">
-              {/* 栏一：实时预览 */}
-              <div>
-                <div className="flex" style={{ gap: 8, marginBottom: 6 }}>
-                  <strong className="small">实时预览</strong>
-                  <Badge tone={wsStatus === 'open' ? 'green' : wsStatus === 'connecting' ? 'blue' : 'gray'} dot>
-                    {wsStatus === 'open' ? '已连接' : wsStatus === 'connecting' ? '连接中' : '未连接'}
-                  </Badge>
+        {!target ? null : !session && !createMutation.isPending && !wsNotice ? (
+          <Empty
+            icon="phone"
+            title="尚未建立调试会话"
+            description="POST /api/v1/debug-sessions 建立会话后，这里展示实时预览、快照树、定位验证与图像识别。"
+          />
+        ) : null}
+        {createMutation.isPending ? (
+          <Empty icon="phone" title="正在创建调试会话" description="正在请求 POST /api/v1/debug-sessions" />
+        ) : null}
+
+        {session ? (
+          <div className="debug-work">
+            {/* 左栏：实时预览（命中框 / 框选都叠在这里） */}
+            <div>
+              <section className="debug-section">
+                <header>
+                  <h3>实时预览</h3>
+                  <span className="muted small">
+                    {matches ? '命中 ' + matches.length + ' 个' : '拖拽画面可框选模板区域'}
+                  </span>
+                </header>
+                <div
+                  className="debug-stage"
+                  onMouseDown={handleStageDown}
+                  onMouseMove={handleStageMove}
+                  onMouseUp={handleStageUp}
+                  onMouseLeave={handleStageUp}
+                >
+                  <div className="debug-frame" ref={stageRef} style={{ display: frameSize ? undefined : 'none' }}>
+                    <canvas ref={canvasRef} aria-label="设备画面预览" />
+                    {overlayBoxes.map((box) => (
+                      <div
+                        key={box.index}
+                        className="debug-box"
+                        style={{ left: box.left + '%', top: box.top + '%', width: box.width + '%', height: box.height + '%' }}
+                      >
+                        <span>
+                          #{box.index + 1}
+                          {typeof box.confidence === 'number' ? ' ' + box.confidence.toFixed(2) : ''}
+                        </span>
+                      </div>
+                    ))}
+                    {overlayRegion && frameSize ? (
+                      <div
+                        className="debug-box pick"
+                        style={{
+                          left: (overlayRegion.x / frameSize.w) * 100 + '%',
+                          top: (overlayRegion.y / frameSize.h) * 100 + '%',
+                          width: (overlayRegion.w / frameSize.w) * 100 + '%',
+                          height: (overlayRegion.h / frameSize.h) * 100 + '%',
+                        }}
+                      >
+                        <span>
+                          {overlayRegion.w}×{overlayRegion.h}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                  {!frameSize ? (
+                    <div className="debug-stage-empty">
+                      {wsStatus === 'open' ? '等待设备画面…' : '画面尚未连接（' + wsText + '）'}
+                    </div>
+                  ) : null}
                 </div>
-                <canvas ref={canvasRef} className="debug-canvas" aria-label="设备画面预览" />
+                <div className="debug-kv" style={{ marginTop: 8 }}>
+                  <span>绿框 = 最近一次定位命中</span>
+                  <span>橙框 = 框选区域（用于新建模板）</span>
+                </div>
                 {detailError ? (
                   <div className="mt">
                     <Notice tone="red" title={'会话详情获取失败（' + detailError.code + '）'}>
@@ -535,38 +758,88 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
                     </Notice>
                   </div>
                 ) : null}
-              </div>
+              </section>
 
-              {/* 栏二：快照层级树 */}
-              <div>
-                <div className="flex" style={{ gap: 8, alignItems: 'center' }}>
-                  <strong className="small">快照层级树</strong>
+              {/* 定位结果表放在画面下方：两栏都不挤，坐标一眼能读 */}
+              <section className="debug-section">
+                <header>
+                  <h3>定位结果</h3>
+                  <span className="muted small">{matches === null ? '尚未验证' : validateNote ?? ''}</span>
+                </header>
+                {validateError ? <Notice tone="red" title="验证失败">{validateError}</Notice> : null}
+                {matches !== null && !validateError ? (
+                  matches.length === 0 ? (
+                    <span className="muted small">{validateNote ?? '无匹配节点'}</span>
+                  ) : (
+                    <div className="table-wrap">
+                      <table className="task-table" aria-label="定位验证结果">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>x</th>
+                            <th>y</th>
+                            <th>宽</th>
+                            <th>高</th>
+                            <th>置信度</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {matches.map((match, index) => (
+                            <tr key={index}>
+                              <td>{index + 1}</td>
+                              <td className="mono">{match.x ?? DASH}</td>
+                              <td className="mono">{match.y ?? DASH}</td>
+                              <td className="mono">{match.width ?? DASH}</td>
+                              <td className="mono">{match.height ?? DASH}</td>
+                              <td className="mono">
+                                {typeof match.confidence === 'number'
+                                  ? match.confidence.toFixed(3)
+                                  : typeof scores?.[index] === 'number'
+                                    ? scores[index].toFixed(3)
+                                    : DASH}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                ) : (
+                  <span className="muted small">在右栏选节点或填表达式后点「验证定位」，命中框会画在画面上。</span>
+                )}
+              </section>
+            </div>
+
+            {/* 右栏：层级树 / 定位验证 / 图像识别 */}
+            <div>
+              <section className="debug-section">
+                <header>
+                  <h3>快照层级树</h3>
                   <Button
                     size="small"
                     icon="image"
-                    disabled={snapshotMutation.isPending}
+                    disabled={snapshotMutation.isPending || !sessionActive}
+                    title={sessionActive ? undefined : '调试会话尚未激活'}
                     onClick={() => snapshotMutation.mutate()}
                   >
                     {snapshotMutation.isPending ? '采集中…' : '采集快照'}
                   </Button>
-                </div>
+                </header>
                 {snapshotId ? (
-                  <div className="muted small mono" style={{ marginTop: 4 }}>
-                    snapshot {snapshotId}
-                  </div>
+                  <div className="muted small mono" style={{ marginBottom: 6 }}>snapshot {snapshotId}</div>
                 ) : null}
                 {treeError ? (
-                  <div className="mt">
+                  <div className="mb">
                     <Notice tone="red" title="快照 / 层级树获取失败">{treeError}</Notice>
                   </div>
                 ) : null}
-                <div className="debug-tree mt">
+                <div className="debug-tree">
                   {nodes === null ? (
-                    <span className="muted small">
+                    <span className="muted">
                       点「采集快照」后展示 vendor 采集的层级树（POST /snapshots → GET /tree）。
                     </span>
                   ) : nodes.length === 0 ? (
-                    <span className="muted small">该快照没有 UI 树（vendor 未采集或设备不支持）。</span>
+                    <span className="muted">该快照没有 UI 树（vendor 未采集或设备不支持）。</span>
                   ) : (
                     tree.roots.map((node) => (
                       <TreeBranch
@@ -589,12 +862,13 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
                     ))
                   )}
                 </div>
-              </div>
+              </section>
 
-              {/* 栏三：定位验证 */}
-              <div>
-                <strong className="small">定位验证</strong>
-                <div className="mt" style={{ display: 'grid', gap: 8 }}>
+              <section className="debug-section">
+                <header>
+                  <h3>定位验证</h3>
+                </header>
+                <div style={{ display: 'grid', gap: 10 }}>
                   <div className="muted small">
                     选中节点：
                     {selected ? (
@@ -607,86 +881,223 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
                       ' 未选择（在层级树中点击节点）'
                     )}
                   </div>
-                  <label className="small">
-                    定位方式
-                    <select
-                      className="search"
-                      style={{ width: '100%' }}
-                      value={locatorBy}
-                      onChange={(event) => setLocatorBy(event.target.value as LocatorBy)}
-                    >
-                      {LOCATOR_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="small">
-                    定位值
-                    <input
-                      className="search"
-                      style={{ width: '100%' }}
-                      value={locator}
-                      onChange={(event) => setLocator(event.target.value)}
-                      placeholder={locatorBy === 'image' ? '模板逻辑名，如 buttons/confirm.png' : '文本 / resource-id / xpath'}
-                    />
-                  </label>
+                  <div className="debug-form">
+                    <label>
+                      定位方式
+                      <select
+                        className="search"
+                        value={locatorBy}
+                        onChange={(event) => setLocatorBy(event.target.value as LocatorBy)}
+                      >
+                        {LOCATOR_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      定位值
+                      <input
+                        className="search"
+                        value={locator}
+                        onChange={(event) => setLocator(event.target.value)}
+                        placeholder={locatorBy === 'image' ? '模板逻辑名，如 buttons/confirm.png' : '文本 / resource-id / xpath'}
+                      />
+                    </label>
+                  </div>
                   <Button
                     kind="primary"
                     size="small"
                     icon="check"
                     disabled={!locator.trim() || validateMutation.isPending}
-                    onClick={() => validateMutation.mutate()}
+                    onClick={() => validateMutation.mutate({ by: locatorBy, value: locator })}
                   >
                     {validateMutation.isPending ? '验证中…' : '验证定位'}
                   </Button>
-                  {validateError ? (
-                    <Notice tone="red" title="验证失败">{validateError}</Notice>
-                  ) : null}
-                  {matches !== null && !validateError ? (
-                    matches.length === 0 ? (
-                      <span className="muted small">{validateNote ?? '无匹配节点'}</span>
-                    ) : (
-                      <>
-                        <span className="muted small">{validateNote}</span>
-                        <div className="table-wrap">
-                          <table className="task-table" aria-label="定位验证结果">
-                            <thead>
-                              <tr>
-                                <th>#</th>
-                                <th>x</th>
-                                <th>y</th>
-                                <th>宽</th>
-                                <th>高</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {matches.map((match, index) => (
-                                <tr key={index}>
-                                  <td>{index + 1}</td>
-                                  <td className="mono">{match.x ?? DASH}</td>
-                                  <td className="mono">{match.y ?? DASH}</td>
-                                  <td className="mono">{match.width ?? DASH}</td>
-                                  <td className="mono">{match.height ?? DASH}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </>
-                    )
-                  ) : null}
                 </div>
-              </div>
+              </section>
+
+              {/* 图像识别：模板库 + 从快照框选建档 + 图像匹配 */}
+              <section className="debug-section">
+                <header>
+                  <h3>图像识别（模板库）</h3>
+                  <Button
+                    size="small"
+                    icon="image"
+                    disabled={templatesQuery.isFetching}
+                    onClick={() => void templatesQuery.refetch()}
+                  >
+                    {templatesQuery.isFetching ? '刷新中…' : '刷新'}
+                  </Button>
+                </header>
+                {templatesError ? (
+                  <div className="mb">
+                    <Notice tone="red" title={'模板清单获取失败（' + templatesError.code + '）'}>
+                      {templatesError.message}
+                    </Notice>
+                  </div>
+                ) : null}
+                <div className="debug-list">
+                  {templates.length === 0 ? (
+                    <div className="muted small" style={{ padding: 10 }}>
+                      {!sessionActive
+                      ? '等待调试会话激活…'
+                      : templatesQuery.isLoading
+                        ? '正在加载模板…'
+                        : '该调试会话还没有模板：先在画面上框选区域并登记。'}
+                    </div>
+                  ) : (
+                    <table className="task-table" aria-label="模板清单">
+                      <thead>
+                        <tr>
+                          <th>逻辑名</th>
+                          <th>版本</th>
+                          <th>摘要</th>
+                          <th>操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {templates.map((template) => (
+                          <tr key={template.logical}>
+                            <td className="mono">{template.logical}</td>
+                            <td className="mono">{String(template.version_id ?? '').slice(0, 8) || DASH}</td>
+                            <td className="mono">{String(template.image_sha256 ?? '').slice(0, 10) || DASH}</td>
+                            <td>
+                              <Button
+                                size="small"
+                                icon="search"
+                                disabled={validateMutation.isPending}
+                                onClick={() => {
+                                  setLocatorBy('image')
+                                  setLocator(template.logical)
+                                  validateMutation.mutate({ by: 'image', value: template.logical })
+                                }}
+                              >
+                                图像匹配
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                <div className="debug-kv" style={{ margin: '10px 0 8px' }}>
+                  <span>
+                    快照：{snapshotId ? snapshotId.slice(0, 12) : '未采集（模板只能从服务端保留的快照裁剪）'}
+                  </span>
+                  <span>
+                    框选：{region ? `${region.x},${region.y} ${region.w}×${region.h}` : '未框选（在左侧画面上拖拽）'}
+                  </span>
+                </div>
+                <div className="debug-form">
+                  <label>
+                    x
+                    <input
+                      className="search"
+                      inputMode="numeric"
+                      value={region ? String(region.x) : ''}
+                      onChange={(event) => setRegion(editRegion(region, 'x', event.target.value))}
+                    />
+                  </label>
+                  <label>
+                    y
+                    <input
+                      className="search"
+                      inputMode="numeric"
+                      value={region ? String(region.y) : ''}
+                      onChange={(event) => setRegion(editRegion(region, 'y', event.target.value))}
+                    />
+                  </label>
+                  <label>
+                    宽
+                    <input
+                      className="search"
+                      inputMode="numeric"
+                      value={region ? String(region.w) : ''}
+                      onChange={(event) => setRegion(editRegion(region, 'w', event.target.value))}
+                    />
+                  </label>
+                  <label>
+                    高
+                    <input
+                      className="search"
+                      inputMode="numeric"
+                      value={region ? String(region.h) : ''}
+                      onChange={(event) => setRegion(editRegion(region, 'h', event.target.value))}
+                    />
+                  </label>
+                  <label className="full">
+                    模板逻辑名（.png，POSIX 相对路径）
+                    <input
+                      className="search"
+                      value={newLogical}
+                      onChange={(event) => setNewLogical(event.target.value)}
+                      placeholder="buttons/confirm.png"
+                    />
+                  </label>
+                </div>
+                {templateError ? (
+                  <div className="mt">
+                    <Notice tone="red" title="模板登记失败">{templateError}</Notice>
+                  </div>
+                ) : null}
+                <div className="flex" style={{ marginTop: 10, gap: 8 }}>
+                  <Button
+                    kind="primary"
+                    size="small"
+                    icon="plus"
+                    disabled={
+                      createTemplateMutation.isPending || !snapshotId || !region || !newLogical.trim()
+                    }
+                    onClick={() => createTemplateMutation.mutate()}
+                  >
+                    {createTemplateMutation.isPending ? '登记中…' : '从框选登记模板'}
+                  </Button>
+                  <Button size="small" onClick={() => setRegion(null)} disabled={!region}>
+                    清除框选
+                  </Button>
+                </div>
+              </section>
             </div>
-          ) : null}
-        </>
-      )}
-    </Drawer>
+          </div>
+        ) : null}
+      </div>
+
+      <footer className="debug-pane-foot">
+        <span className="foot-hint">关闭面板会同时关闭调试会话并释放资源租约</span>
+        <Button onClick={handleClose} disabled={closeMutation.isPending}>
+          {closeMutation.isPending ? '正在关闭…' : '关闭会话'}
+        </Button>
+      </footer>
+    </aside>
   )
 }
 
+/** 由拖拽起止点归一化出左上角 + 宽高（允许反向拖拽） */
+function normalizeRegion(x0: number, y0: number, x1: number, y1: number): Region {
+  return {
+    x: Math.min(x0, x1),
+    y: Math.min(y0, y1),
+    w: Math.abs(x1 - x0),
+    h: Math.abs(y1 - y0),
+  }
+}
+
+/** 手工编辑区域输入框：空串视为 0，非数字忽略 */
+function editRegion(region: Region | null, key: keyof Region, raw: string): Region | null {
+  const value = raw.trim()
+  if (value === '') return null
+  if (!/^\d+$/.test(value)) return region
+  return { ...(region ?? { x: 0, y: 0, w: 0, h: 0 }), [key]: Number(value) }
+}
+
 /** 把 vendor 的 base64 JPEG 帧画到 canvas；解码失败保留上一帧 */
-function drawFrame(canvas: HTMLCanvasElement | null, base64: string): void {
+function drawFrame(
+  canvas: HTMLCanvasElement | null,
+  base64: string,
+  onSize?: (size: FrameSize) => void,
+): void {
   if (!canvas) return
   const image = new Image()
   image.onload = () => {
@@ -694,6 +1105,7 @@ function drawFrame(canvas: HTMLCanvasElement | null, base64: string): void {
     canvas.height = image.naturalHeight
     const ctx = canvas.getContext('2d')
     ctx?.drawImage(image, 0, 0)
+    onSize?.({ w: image.naturalWidth, h: image.naturalHeight })
   }
   image.src = 'data:image/jpeg;base64,' + base64
 }

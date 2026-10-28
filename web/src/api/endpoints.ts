@@ -170,6 +170,22 @@ export function createTemplate(sessionId: string | number | null | undefined, bo
 }
 
 /**
+ * POST /api/v1/templates/validate —— IMAGE 定位验证（vendor 专用端点）。
+ * `/debug-sessions/{id}/locators/validate` 传 by='image' 会 500（vendor 解包 bug），
+ * 图像匹配必须走这里；响应额外带 `scores`（每次命中的相关系数）。
+ */
+export function validateTemplate(
+  sessionId: string | number | null | undefined,
+  body: { target: { by?: string; value: string; index?: number | null; confidence?: number | null; region?: number[] | null } },
+) {
+  return request<LocatorValidateResponse>('/templates/validate', {
+    method: 'POST',
+    body,
+    query: templateQuery(sessionId),
+  })
+}
+
+/**
  * PUT /api/v1/templates/{logical} —— 确认更新同名模板。
  * expected_old_sha256 必须等于当前版本摘要，否则 vendor 返回 409（乐观锁）。
  */

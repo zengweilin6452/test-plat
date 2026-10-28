@@ -40,6 +40,8 @@ export interface LocatorValidateResponse {
   captured_at?: string | null
   matches?: LocatorMatch[] | null
   count?: number | null
+  /** 图像模板匹配的相关系数（仅 /templates/validate 返回，与 matches 一一对应） */
+  scores?: number[] | null
   /** 唯一匹配才算通过；多匹配/零匹配 vendor 给 false */
   passed?: boolean | null
   note?: string | null

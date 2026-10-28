@@ -246,9 +246,12 @@ GET    /api/v1/templates               # 复用 vendor TemplateStore 清单
 POST   /api/v1/templates               # { logical_path, png_base64, confidence }
 PUT    /api/v1/templates/{logical:path}
 GET    /api/v1/templates/{logical:path}/image
+POST   /api/v1/templates/validate      # IMAGE 目标验证 -> { matches[], scores[], note }
 ```
 
 模板路径校验直接复用 vendor `validate_logical_path`（`store.py:56-69`）：拒绝 `..`、绝对路径、非法字符；同名冲突 409。
+
+图像目标必须走 `/templates/validate`，不能走 `/locators/validate`：vendor 的 `_query_payload` 对 image 目标返回 4 元组（带 scores），而 `capture_and_query_sync` 在 `with_scores=False` 时按 3 元组解包，`by='image'` 必 500（真机实测 2026-10-28）。`vendor/` 是只读源仓库，平台侧改转发 vendor 自己的 `/api/v1/templates/validate`。
 
 ### 2.8 元信息
 
