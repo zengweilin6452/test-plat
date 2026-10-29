@@ -6,7 +6,7 @@
 1. `docs/contracts/migration-baseline.json` 固定 0001 的 sha256；
    任何对 0001 的字节级修改都会让测试失败。
 2. 解析 versions/*.py 的 revision/down_revision，断言链是线性、无分支、
-   无重复，且 0002 是空骨架（不含任何 op.* DDL）。
+   无重复，且 0003 是空骨架（不含任何 op.* DDL）。
 
 真正的 DDL 可执行性仍由 test_migration_structure.py 与 CI 的 alembic upgrade 负责。
 """
@@ -42,6 +42,10 @@ def _revision_files() -> dict[str, Path]:
     for path in sorted(VERSIONS_DIR.glob("[0-9]*.py")):
         revision = _module_literals(path).get("revision")
         assert isinstance(revision, str), f"{path.name} 缺少字符串 revision"
+        # dict 覆盖会让重复 revision 静默消失，必须显式拦截。
+        assert revision not in out, (
+            f"revision 重复: {revision} 同时出现在 {out[revision].name} 与 {path.name}"
+        )
         out[revision] = path
     return out
 
@@ -52,7 +56,9 @@ def test_0001_byte_for_byte_unchanged() -> None:
     )
     expected = json.loads(BASELINE.read_text(encoding="utf-8"))
     target = VERSIONS_DIR / "0001_initial.py"
-    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    # 按规范化换行计算：Windows 与 Linux 的检出策略不应改变“内容未变”的结论。
+    normalized = target.read_bytes().replace(b"\r\n", b"\n")
+    digest = hashlib.sha256(normalized).hexdigest()
     assert digest == expected["0001_initial.py"]["sha256"], (
         "0001_initial.py 被修改了。已冻结的 0001 不允许改动；"
         "新结构请追加 0002+ 迁移。"
@@ -96,14 +102,14 @@ def test_revision_chain_is_linear_and_unique() -> None:
     )
 
 
-def test_0002_is_empty_append_only_skeleton() -> None:
-    """0002 只作为后续工单的追加锚点，不得包含任何 DDL。"""
-    path = VERSIONS_DIR / "0002_contract_baseline.py"
-    assert path.is_file(), "缺少 0002 迁移骨架"
+def test_0003_is_empty_append_only_skeleton() -> None:
+    """0003 只作为后续工单的追加锚点，不得包含任何 DDL。"""
+    path = VERSIONS_DIR / "0003_contract_baseline.py"
+    assert path.is_file(), "缺少 0003 迁移骨架"
 
     values = _module_literals(path)
-    assert values.get("revision") == "0002"
-    assert values.get("down_revision") == "0001"
+    assert values.get("revision") == "0003"
+    assert values.get("down_revision") == "0002"
 
     tree = ast.parse(path.read_text(encoding="utf-8"))
     op_calls: list[str] = []
@@ -113,7 +119,7 @@ def test_0002_is_empty_append_only_skeleton() -> None:
             if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
                 if func.value.id == "op":
                     op_calls.append(func.attr)
-    assert not op_calls, f"0002 是空骨架，不应包含 DDL 调用: {sorted(set(op_calls))}"
+    assert not op_calls, f"0003 是空骨架，不应包含 DDL 调用: {sorted(set(op_calls))}"
 
     # upgrade / downgrade 必须是 pass（或仅 docstring），保证无副作用。
     funcs = {
@@ -125,5 +131,5 @@ def test_0002_is_empty_append_only_skeleton() -> None:
     for name, func in funcs.items():
         body = [stmt for stmt in func.body if not isinstance(stmt, ast.Expr)]
         assert len(body) == 1 and isinstance(body[0], ast.Pass), (
-            f"0002.{name} 必须只有 pass"
+            f"0003.{name} 必须只有 pass"
         )
