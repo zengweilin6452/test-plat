@@ -59,6 +59,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+      - name: 契约测试（无需数据库，失败即阻断）
+        working-directory: server
+        run: >-
+          python -m pytest
+          tests/test_contract_openapi.py
+          tests/test_error_contract.py
+          tests/test_migration_append_only.py
+          -q
       - name: alembic 升级（建 24 表）
         working-directory: server
         run: python -m alembic upgrade head
@@ -74,8 +82,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: 安装依赖并构建
+      - name: 安装依赖、契约测试与构建
         working-directory: web
         run: |
           npm ci || npm install
+          npm run typecheck
+          npm test
           npm run build

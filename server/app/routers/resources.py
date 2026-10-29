@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..errors import CLIENT_HEADER, CLIENT_HEADER_VALUE, client_header_required, not_found
+from ..schemas import ResourcesOut
 from ..services import resources as resource_service
 
 router = APIRouter(tags=["resources"])
@@ -50,7 +51,7 @@ async def sync_resources(
     )
 
 
-@router.get("/resources")
+@router.get("/resources", response_model=ResourcesOut)
 async def list_resources(
     status: Annotated[str | None, Query()] = None,
     project_id: Annotated[str | None, Query()] = None,

@@ -304,7 +304,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
               <div className="rev-list">
                 {revisions.map((revision, index) => (
                   <div key={revision.id} className={'rev-row' + (index === 0 ? ' latest' : '')}>
-                    <span className="rev-no">{revision.revision === null ? DASH : `r${revision.revision}`}</span>
+                    <span className="rev-no">{`r${revision.revision}`}</span>
                     <div className="grow">
                       <div className="flex" style={{ gap: 8 }}>
                         <ReadinessBadge readiness={revision.readiness} />

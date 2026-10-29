@@ -19,7 +19,8 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import scheduler_enabled, settings
-from .errors import ApiError
+from .errors import ApiError, redact_sensitive
+from .schemas import ErrorEnvelope
 from .ws import hub as _hub
 from .routers import applications, debug as debug_router, overview, projects, resources, runs, suites, tasks
 from .routers import analyses, baselines, gate_policies
@@ -82,10 +83,33 @@ app = FastAPI(
     version="0.1.0",
     description="移动端 UI 自动化与性能测试平台",
     lifespan=lifespan,
+    # 统一错误信封写进 OpenAPI：每个操作都声明可能返回的 4xx/5xx 形状。
+    responses={
+        400: {"model": ErrorEnvelope, "description": "请求校验失败"},
+        409: {"model": ErrorEnvelope, "description": "并发或状态冲突"},
+        422: {"model": ErrorEnvelope, "description": "请求语义不满足"},
+        500: {"model": ErrorEnvelope, "description": "服务端内部错误"},
+    },
 )
 
 
 API_PREFIX = "/api/v1"
+
+
+@app.middleware("http")
+async def _request_id_middleware(request: Request, call_next):
+    """为每个请求分配可追溯的 request_id，并回带到响应头。
+
+    客户端可用 X-Request-Id 指定；未指定时生成 32 位 hex。错误信封与响应头
+    必须使用同一个值，前端/日志据此串起一次请求。
+    """
+    request_id = request.headers.get("X-Request-Id") or uuid.uuid4().hex
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-Id"] = request_id
+    return response
+
+
 app.include_router(overview.router, prefix=API_PREFIX)
 app.include_router(applications.router, prefix=API_PREFIX)
 app.include_router(projects.router, prefix=API_PREFIX)
@@ -102,17 +126,24 @@ app.include_router(suites.router, prefix=API_PREFIX)
 # {"detail": ...}，所以这里注册两个处理器：
 #   - ApiError：业务异常，自带 code / details
 #   - HTTPException：框架或旧路由抛的，按 status 映射到错误码表，避免出现裸 detail
-# request_id 目前取请求头 X-Request-Id，没有就临时生成；接入 trace 后换成中间件注入。
+# request_id 由 _request_id_middleware 注入 request.state 并回带 X-Request-Id 响应头；
+# _request_id 只做兜底，保证直接调用 handler 时也能拿到值。
 def _request_id(request: Request) -> str:
-    return request.headers.get("X-Request-Id") or uuid.uuid4().hex
+    """中间件注入的 request_id 优先；兜底兼容未经过中间件的直接调用。"""
+    return (
+        getattr(request.state, "request_id", None)
+        or request.headers.get("X-Request-Id")
+        or uuid.uuid4().hex
+    )
 
 
 def _envelope(request: Request, *, code: str, message: str, details: Any) -> dict[str, Any]:
+    # 错误信封可能带请求体片段、配置或上游 stderr；统一脱敏后再回显。
     return {
         "code": code,
-        "message": message,
+        "message": redact_sensitive(message),
         "request_id": _request_id(request),
-        "details": details,
+        "details": redact_sensitive(details),
     }
 
 
@@ -199,8 +230,8 @@ from .routers import internal as internal_router  # noqa: E402
 from .routers import ws as ws_router  # noqa: E402
 
 # /internal/* 是 runner 专用协议面（X-Control-Token 鉴权），不挂在 /api/v1 下：
-# 它不是对外契约，路径也不应该出现在公开 OpenAPI 里。
-app.include_router(internal_router.router)
+# 它不是对外契约，路径也不应该出现在公开 OpenAPI 里（include_in_schema=False）。
+app.include_router(internal_router.router, include_in_schema=False)
 # WS 契约在 api-design.md 里写作 /api/v1/ws/runs/{id}，而任务书写 /ws/runs/{id}。
 # 两个都挂（同一个 router 实例，行为完全一致），避免前端和验收各按一份文档。
 app.include_router(ws_router.router, prefix=API_PREFIX)

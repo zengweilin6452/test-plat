@@ -33,6 +33,7 @@ from ..domain import artifacts as artifacts_mod
 from ..domain import events as events_mod
 from ..domain import runs as runs_mod
 from ..errors import device_not_ready, not_found, readiness_incomplete, state_conflict, validation_error
+from ..schemas import RunsOut
 from ..ws import hub as hub_mod
 
 router = APIRouter(tags=["runs"])
@@ -67,7 +68,7 @@ _COMPONENT_SQL = """
 """
 
 
-@router.get("/runs")
+@router.get("/runs", response_model=RunsOut)
 async def list_runs(
     scope: Annotated[str | None, Query()] = None,
     state: Annotated[str | None, Query()] = None,
