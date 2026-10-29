@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 RunState = Literal[
     "queued", "dispatching", "running", "finalizing", "completed", "errored", "cancelled"
@@ -13,18 +13,32 @@ RunState = Literal[
 Outcome = Literal["passed", "failed", "not_tested"]
 
 
+def _as_text(value: Any) -> Any:
+    """把 PG 返回的 UUID 等对象规范成字符串（None 原样保留）。"""
+    return str(value) if value is not None else value
+
+
+#: 数据库 UUID 列在响应模型里的文本表示（OpenAPI 中仍是 string）。
+UuidStr = Annotated[str, BeforeValidator(_as_text)]
+
+
 class ErrorEnvelope(BaseModel):
-    """统一错误信封（api-design.md 8.1）。"""
+    """统一错误信封（api-design.md §1.2）。"""
+
+    model_config = ConfigDict(extra="allow")
 
     code: str
     message: str
     request_id: str
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class ResourceProfileOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: str
-    name: str
+    """资源档案视图（嵌套在 ResourceRecordOut.profile）。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str | None = None
     os_name: str | None = None
     os_version: str | None = None
     screen_resolution: str | None = None
@@ -72,6 +86,9 @@ class RunSummaryOut(BaseModel):
 
 
 class OverviewOut(BaseModel):
+    #: 显式 allow：响应模型不得沿用 pydantic 默认 extra=ignore 而静默丢字段。
+    model_config = ConfigDict(extra="allow")
+
     application_total: int
     resource_total: int
     resource_ready: int
@@ -350,4 +367,154 @@ class TaskRevisionListOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[TaskRevisionRecord]
+    total: int
+
+
+# --------------------------------------------------------------------------- #
+# 工单 01：现有只读端点的具名响应模型
+# --------------------------------------------------------------------------- #
+# 约定：
+#   - extra="allow"：响应模型只约束已声明字段，额外字段原样透传，不静默丢弃；
+#   - 字段集合与 server/app/routers/*.py 实际返回、web/src/types.ts 保持一致；
+#   - 前端契约测试（web/tests/contract.test.cjs）会逐字段比对 OpenAPI 与 TS。
+# 只在文件尾部追加，不重排既有内容。
+
+
+class ApplicationRecordOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: UuidStr
+    project_id: UuidStr
+    name: str
+    platform: str
+    identifier: str
+    task_count: int
+
+
+class ApplicationsOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    items: list[ApplicationRecordOut]
+    total: int
+    by_platform: dict[str, int]
+
+
+class LeaseOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    run_id: UuidStr | None = None
+    debug_session_id: UuidStr | None = None
+
+
+class ResourceRecordOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: UuidStr
+    project_id: UuidStr
+    node_id: UuidStr | None = None
+    name: str
+    resource_key: str
+    status: Literal["ready", "offline", "unauthorized", "draining"]
+    kind: str
+    platform: str
+    profile_id: UuidStr | None = None
+    last_seen_at: datetime | None = None
+    profile: ResourceProfileOut | None = None
+    busy: bool
+    lease: LeaseOut | None = None
+
+
+class ResourcesOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    items: list[ResourceRecordOut]
+    total: int
+    ready: int
+    summary: str
+
+
+class ProjectRecordOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: UuidStr
+    code: str
+    name: str
+    archived_at: datetime | None = None
+
+
+class ProjectsOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    items: list[ProjectRecordOut]
+    total: int
+
+
+class ApplicationRefOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: UuidStr
+    name: str
+
+
+class RunRecordOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: UuidStr
+    display_id: str
+    name: str
+    task_id: UuidStr | None = None
+    application: ApplicationRefOut
+    platform: str
+    test_type: TestType | None = None
+    state: RunState
+    outcome: Outcome | None = None
+    reason_code: str | None = None
+    not_tested_reason: str | None = None
+    #: 无组件时为 None（不伪造 0%）
+    progress: float | None = None
+    resource: str | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    created_at: datetime
+
+
+class RunsOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    items: list[RunRecordOut]
+    total: int
+
+
+class TaskRunRefOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: UuidStr
+    state: RunState
+    outcome: Outcome | None = None
+    created_at: datetime | None = None
+    ended_at: datetime | None = None
+    component_total: int | None = None
+
+
+class TaskRecordOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: UuidStr
+    display_id: str
+    name: str
+    test_type: TestType | None = None
+    lifecycle: Literal["draft", "ready", "archived"]
+    lock_version: int
+    application: ApplicationRefOut
+    platform: str
+    revision_id: UuidStr | None = None
+    readiness: Literal["draft", "validated"] | None = None
+    run: TaskRunRefOut | None = None
+    revision_count: int
+
+
+class TasksOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    items: list[TaskRecordOut]
     total: int

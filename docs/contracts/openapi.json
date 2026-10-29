@@ -1,0 +1,2788 @@
+{
+  "paths": {
+    "/api/v1/analyses": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "task_id",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response List Analyses Api V1 Analyses Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/applications": {
+      "get": {
+        "parameters": [],
+        "request": null,
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/ApplicationsOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/audit-events": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response List Audit Events Api V1 Audit Events Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/baselines": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "application_id",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "resource_profile_id",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response List Baselines Api V1 Baselines Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "post": {
+        "parameters": [],
+        "request": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "responses": {
+          "201": {
+            "additionalProperties": true,
+            "title": "Response Create Baseline Api V1 Baselines Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/baselines/{baseline_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "baseline_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Get Baseline Api V1 Baselines  Baseline Id  Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/baselines/{baseline_id}/snapshot": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "baseline_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Get Baseline Snapshot Api V1 Baselines  Baseline Id  Snapshot Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/debug-sessions": {
+      "post": {
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": {
+          "additionalProperties": true,
+          "title": "Body",
+          "type": "object"
+        },
+        "responses": {
+          "201": {
+            "additionalProperties": true,
+            "title": "Response Create Debug Session Api V1 Debug Sessions Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/debug-sessions/{session_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Delete Debug Session Api V1 Debug Sessions  Session Id  Delete",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Get Debug Session Api V1 Debug Sessions  Session Id  Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/debug-sessions/{session_id}/locators/validate": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/debug-sessions/{session_id}/snapshots": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/debug-sessions/{session_id}/snapshots/{snapshot_id}/image": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/debug-sessions/{session_id}/snapshots/{snapshot_id}/tree": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/gate-policies": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "application_id",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "latest_only",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response List Gate Policies Api V1 Gate Policies Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "post": {
+        "parameters": [],
+        "request": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "responses": {
+          "201": {
+            "additionalProperties": true,
+            "title": "Response Create Gate Policy Api V1 Gate Policies Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/gate-policies/{policy_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Get Gate Policy Api V1 Gate Policies  Policy Id  Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true
+          }
+        ],
+        "request": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Update Gate Policy Api V1 Gate Policies  Policy Id  Put",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "parameters": [],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Health Api V1 Health Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/overview": {
+      "get": {
+        "parameters": [],
+        "request": null,
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/OverviewOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/projects": {
+      "get": {
+        "parameters": [],
+        "request": null,
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/ProjectsOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/resources": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/ResourcesOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/resources/sync": {
+      "post": {
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": {
+          "$ref": "#/components/schemas/ResourceSyncIn"
+        },
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Sync Resources Api V1 Resources Sync Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/runs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/RunsOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "post": {
+        "parameters": [],
+        "request": {
+          "additionalProperties": true,
+          "title": "Body",
+          "type": "object"
+        },
+        "responses": {
+          "201": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/import": {
+      "post": {
+        "parameters": [],
+        "request": {
+          "additionalProperties": true,
+          "title": "Body",
+          "type": "object"
+        },
+        "responses": {
+          "201": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Get Run Api V1 Runs  Run Id  Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/artifacts": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response List Run Artifacts Api V1 Runs  Run Id  Artifacts Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/artifacts/{artifact_id}/download": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/cancel": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "202": {
+            "additionalProperties": true,
+            "title": "Response Cancel Run Api V1 Runs  Run Id  Cancel Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/events": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response List Run Events Api V1 Runs  Run Id  Events Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/gate-evaluations": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true
+          }
+        ],
+        "request": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "responses": {
+          "201": {
+            "additionalProperties": true,
+            "title": "Response Create Gate Evaluation Api V1 Runs  Run Id  Gate Evaluations Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/metrics": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Get Run Metrics Api V1 Runs  Run Id  Metrics Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/report": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Get Run Report Api V1 Runs  Run Id  Report Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/schema": {
+      "get": {
+        "parameters": [],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Get Schema Api V1 Schema Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/suites": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "test_type",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response List Suites Api V1 Suites Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/suites/{suite_id}/discover": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "suite_id",
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": {
+          "$ref": "#/components/schemas/SuiteDiscoverIn"
+        },
+        "responses": {
+          "201": {
+            "additionalProperties": true,
+            "title": "Response Discover Suite Api V1 Suites  Suite Id  Discover Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/suites/{suite_id}/versions": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "suite_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response List Suite Versions Api V1 Suites  Suite Id  Versions Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "test_type",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/TasksOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "request_key",
+            "required": false
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": {
+          "$ref": "#/components/schemas/TaskCreateIn"
+        },
+        "responses": {
+          "201": {
+            "additionalProperties": true,
+            "title": "Response Create Task Api V1 Tasks Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Get Task Api V1 Tasks  Task Id  Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": {
+          "$ref": "#/components/schemas/TaskPatchIn"
+        },
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Patch Task Api V1 Tasks  Task Id  Patch",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/archive": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Archive Task Api V1 Tasks  Task Id  Archive Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/revisions": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/TaskRevisionListOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/validate": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Validate Task Api V1 Tasks  Task Id  Validate Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/templates": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/templates/validate": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/templates/{logical}": {
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "logical",
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    }
+  },
+  "schemas": {
+    "ApplicationRecordOut": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "identifier": {
+          "title": "Identifier",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "platform": {
+          "title": "Platform",
+          "type": "string"
+        },
+        "project_id": {
+          "title": "Project Id",
+          "type": "string"
+        },
+        "task_count": {
+          "title": "Task Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "name",
+        "platform",
+        "identifier",
+        "task_count"
+      ],
+      "title": "ApplicationRecordOut",
+      "type": "object"
+    },
+    "ApplicationRefOut": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "ApplicationRefOut",
+      "type": "object"
+    },
+    "ApplicationsOut": {
+      "additionalProperties": true,
+      "properties": {
+        "by_platform": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "By Platform",
+          "type": "object"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/ApplicationRecordOut"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "total",
+        "by_platform"
+      ],
+      "title": "ApplicationsOut",
+      "type": "object"
+    },
+    "ErrorEnvelope": {
+      "additionalProperties": true,
+      "description": "统一错误信封（api-design.md §1.2）。",
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "request_id"
+      ],
+      "title": "ErrorEnvelope",
+      "type": "object"
+    },
+    "LeaseOut": {
+      "additionalProperties": true,
+      "properties": {
+        "debug_session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Debug Session Id"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Run Id"
+        }
+      },
+      "title": "LeaseOut",
+      "type": "object"
+    },
+    "OverviewOut": {
+      "additionalProperties": true,
+      "properties": {
+        "application_total": {
+          "title": "Application Total",
+          "type": "integer"
+        },
+        "failed": {
+          "title": "Failed",
+          "type": "integer"
+        },
+        "needs_attention": {
+          "title": "Needs Attention",
+          "type": "integer"
+        },
+        "not_tested": {
+          "title": "Not Tested",
+          "type": "integer"
+        },
+        "pass_rate": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pass Rate"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "integer"
+        },
+        "resource_ready": {
+          "title": "Resource Ready",
+          "type": "integer"
+        },
+        "resource_total": {
+          "title": "Resource Total",
+          "type": "integer"
+        },
+        "run_running": {
+          "title": "Run Running",
+          "type": "integer"
+        },
+        "run_total": {
+          "title": "Run Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "application_total",
+        "resource_total",
+        "resource_ready",
+        "run_total",
+        "run_running",
+        "passed",
+        "failed",
+        "not_tested",
+        "needs_attention"
+      ],
+      "title": "OverviewOut",
+      "type": "object"
+    },
+    "ProjectRecordOut": {
+      "additionalProperties": true,
+      "properties": {
+        "archived_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Archived At"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "code",
+        "name"
+      ],
+      "title": "ProjectRecordOut",
+      "type": "object"
+    },
+    "ProjectsOut": {
+      "additionalProperties": true,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/ProjectRecordOut"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "total"
+      ],
+      "title": "ProjectsOut",
+      "type": "object"
+    },
+    "ResourceProfileOut": {
+      "additionalProperties": true,
+      "description": "资源档案视图（嵌套在 ResourceRecordOut.profile）。",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        },
+        "os_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Os Name"
+        },
+        "os_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Os Version"
+        },
+        "screen_resolution": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Screen Resolution"
+        }
+      },
+      "title": "ResourceProfileOut",
+      "type": "object"
+    },
+    "ResourceRecordOut": {
+      "additionalProperties": true,
+      "properties": {
+        "busy": {
+          "title": "Busy",
+          "type": "boolean"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "last_seen_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Seen At"
+        },
+        "lease": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/LeaseOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Node Id"
+        },
+        "platform": {
+          "title": "Platform",
+          "type": "string"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/ResourceProfileOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "profile_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Profile Id"
+        },
+        "project_id": {
+          "title": "Project Id",
+          "type": "string"
+        },
+        "resource_key": {
+          "title": "Resource Key",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "offline",
+            "unauthorized",
+            "draining"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "name",
+        "resource_key",
+        "status",
+        "kind",
+        "platform",
+        "busy"
+      ],
+      "title": "ResourceRecordOut",
+      "type": "object"
+    },
+    "ResourceSyncIn": {
+      "description": "POST /resources/sync 请求体（§4.1）：两个键都可选，body 可为 {}。",
+      "properties": {
+        "node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Node Id"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Id"
+        }
+      },
+      "title": "ResourceSyncIn",
+      "type": "object"
+    },
+    "ResourcesOut": {
+      "additionalProperties": true,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/ResourceRecordOut"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "ready": {
+          "title": "Ready",
+          "type": "integer"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "total",
+        "ready",
+        "summary"
+      ],
+      "title": "ResourcesOut",
+      "type": "object"
+    },
+    "RunRecordOut": {
+      "additionalProperties": true,
+      "properties": {
+        "application": {
+          "$ref": "#/components/schemas/ApplicationRefOut"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "display_id": {
+          "title": "Display Id",
+          "type": "string"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ended At"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "not_tested_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Not Tested Reason"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "passed",
+                "failed",
+                "not_tested"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Outcome"
+        },
+        "platform": {
+          "title": "Platform",
+          "type": "string"
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Progress"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason Code"
+        },
+        "resource": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Resource"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Started At"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "dispatching",
+            "running",
+            "finalizing",
+            "completed",
+            "errored",
+            "cancelled"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Task Id"
+        },
+        "test_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "ui",
+                "performance",
+                "joint"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Test Type"
+        }
+      },
+      "required": [
+        "id",
+        "display_id",
+        "name",
+        "application",
+        "platform",
+        "state",
+        "created_at"
+      ],
+      "title": "RunRecordOut",
+      "type": "object"
+    },
+    "RunsOut": {
+      "additionalProperties": true,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/RunRecordOut"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "total"
+      ],
+      "title": "RunsOut",
+      "type": "object"
+    },
+    "SuiteDiscoverIn": {
+      "additionalProperties": false,
+      "description": "POST /suites/{id}/discover 请求体。\n\nsuite_root 是宿主路径。test_suites 表没有\"配置\"列（0001 真源），\nmanifest 又只存在于 suite_versions 上，所以路径只能由请求体给出；\n后续若要固化到 suite 上，需要 0002 加列，本阶段不做。",
+      "properties": {
+        "source_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Commit"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Ref"
+        },
+        "suite_root": {
+          "minLength": 1,
+          "title": "Suite Root",
+          "type": "string"
+        }
+      },
+      "required": [
+        "suite_root"
+      ],
+      "title": "SuiteDiscoverIn",
+      "type": "object"
+    },
+    "TaskCreateIn": {
+      "additionalProperties": false,
+      "description": "POST /tasks 请求体。\n\nbuild_id / suite_version_id 都允许为空：先建草稿、后补齐是主要流程\n（readiness='draft' 的 DB CHECK 只要求非 validated 时可以为空）。",
+      "properties": {
+        "application_id": {
+          "minLength": 1,
+          "title": "Application Id",
+          "type": "string"
+        },
+        "build_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Build Id"
+        },
+        "config": {
+          "additionalProperties": true,
+          "title": "Config",
+          "type": "object"
+        },
+        "environment_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Environment Id"
+        },
+        "name": {
+          "maxLength": 60,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "platform": {
+          "enum": [
+            "android",
+            "ios",
+            "web"
+          ],
+          "title": "Platform",
+          "type": "string"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Id"
+        },
+        "suite_version_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Suite Version Id"
+        },
+        "test_type": {
+          "enum": [
+            "ui",
+            "performance",
+            "joint"
+          ],
+          "title": "Test Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "test_type",
+        "platform",
+        "application_id"
+      ],
+      "title": "TaskCreateIn",
+      "type": "object"
+    },
+    "TaskPatchIn": {
+      "additionalProperties": false,
+      "description": "PATCH /tasks 请求体。\n\nlock_version 必填：这是乐观锁的 CAS 条件，缺了就无法区分\"读后写\"与\"盲写\"。\n其余字段为 None 表示\"不改\"（区分不了显式置空，需要清空时用 null 语义的字段除外，\n本阶段没有需要清空的字段，因此刻意不做 undefined 区分）。",
+      "properties": {
+        "build_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Build Id"
+        },
+        "config": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Config"
+        },
+        "environment_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Environment Id"
+        },
+        "lock_version": {
+          "minimum": 1.0,
+          "title": "Lock Version",
+          "type": "integer"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 60,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        },
+        "platform": {
+          "anyOf": [
+            {
+              "enum": [
+                "android",
+                "ios",
+                "web"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Platform"
+        },
+        "suite_version_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Suite Version Id"
+        },
+        "test_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "ui",
+                "performance",
+                "joint"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Test Type"
+        }
+      },
+      "required": [
+        "lock_version"
+      ],
+      "title": "TaskPatchIn",
+      "type": "object"
+    },
+    "TaskRecordOut": {
+      "additionalProperties": true,
+      "properties": {
+        "application": {
+          "$ref": "#/components/schemas/ApplicationRefOut"
+        },
+        "display_id": {
+          "title": "Display Id",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "ready",
+            "archived"
+          ],
+          "title": "Lifecycle",
+          "type": "string"
+        },
+        "lock_version": {
+          "title": "Lock Version",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "platform": {
+          "title": "Platform",
+          "type": "string"
+        },
+        "readiness": {
+          "anyOf": [
+            {
+              "enum": [
+                "draft",
+                "validated"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Readiness"
+        },
+        "revision_count": {
+          "title": "Revision Count",
+          "type": "integer"
+        },
+        "revision_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Revision Id"
+        },
+        "run": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/TaskRunRefOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "test_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "ui",
+                "performance",
+                "joint"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Test Type"
+        }
+      },
+      "required": [
+        "id",
+        "display_id",
+        "name",
+        "lifecycle",
+        "lock_version",
+        "application",
+        "platform",
+        "revision_count"
+      ],
+      "title": "TaskRecordOut",
+      "type": "object"
+    },
+    "TaskRevisionListOut": {
+      "additionalProperties": false,
+      "description": "GET /tasks/{id}/revisions 的响应体：items 按 revision 倒序。",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/TaskRevisionRecord"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "total"
+      ],
+      "title": "TaskRevisionListOut",
+      "type": "object"
+    },
+    "TaskRevisionRecord": {
+      "additionalProperties": false,
+      "description": "一条任务修订（不可变快照）。GET /tasks/{id}/revisions 的 items 元素。",
+      "properties": {
+        "build_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Build Id"
+        },
+        "config": {
+          "additionalProperties": true,
+          "title": "Config",
+          "type": "object"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "created_by": {
+          "title": "Created By",
+          "type": "string"
+        },
+        "environment_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Environment Id"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "readiness": {
+          "enum": [
+            "draft",
+            "validated"
+          ],
+          "title": "Readiness",
+          "type": "string"
+        },
+        "revision": {
+          "title": "Revision",
+          "type": "integer"
+        },
+        "suite_version_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Suite Version Id"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "test_type": {
+          "enum": [
+            "ui",
+            "performance",
+            "joint"
+          ],
+          "title": "Test Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "task_id",
+        "revision",
+        "test_type",
+        "readiness",
+        "build_id",
+        "suite_version_id",
+        "environment_id",
+        "config",
+        "created_by",
+        "created_at"
+      ],
+      "title": "TaskRevisionRecord",
+      "type": "object"
+    },
+    "TaskRunRefOut": {
+      "additionalProperties": true,
+      "properties": {
+        "component_total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Component Total"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Created At"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ended At"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "passed",
+                "failed",
+                "not_tested"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Outcome"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "dispatching",
+            "running",
+            "finalizing",
+            "completed",
+            "errored",
+            "cancelled"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "title": "TaskRunRefOut",
+      "type": "object"
+    },
+    "TasksOut": {
+      "additionalProperties": true,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/TaskRecordOut"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "total"
+      ],
+      "title": "TasksOut",
+      "type": "object"
+    }
+  }
+}

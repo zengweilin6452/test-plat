@@ -7,11 +7,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..schemas import ApplicationsOut
 
 router = APIRouter(tags=["applications"])
 
 
-@router.get("/applications")
+@router.get("/applications", response_model=ApplicationsOut)
 async def list_applications(session: AsyncSession = Depends(get_session)) -> dict[str, object]:
     sql = """
         SELECT a.id, a.project_id, a.name, a.platform, a.identifier,

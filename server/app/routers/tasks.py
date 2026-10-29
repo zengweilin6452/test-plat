@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..errors import CLIENT_HEADER, CLIENT_HEADER_VALUE, client_header_required
-from ..schemas import TaskCreateIn, TaskPatchIn
+from ..schemas import TaskCreateIn, TaskPatchIn, TaskRevisionListOut, TasksOut
 from ..services import tasks as task_service
 
 router = APIRouter(tags=["tasks"])
@@ -52,7 +52,7 @@ def require_client_header(
     return x_testdock_client.strip()
 
 
-@router.get("/tasks")
+@router.get("/tasks", response_model=TasksOut)
 async def list_tasks(
     test_type: Annotated[str | None, Query()] = None,
     q: Annotated[str | None, Query()] = None,
@@ -249,7 +249,7 @@ async def archive_task(
     return await task_service.archive_task(session, task_id=task_id)
 
 
-@router.get("/tasks/{task_id}/revisions")
+@router.get("/tasks/{task_id}/revisions", response_model=TaskRevisionListOut)
 async def list_task_revisions(
     task_id: str, session: AsyncSession = Depends(get_session)
 ) -> dict[str, Any]:

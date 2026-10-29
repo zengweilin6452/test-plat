@@ -13,11 +13,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..schemas import ProjectsOut
 
 router = APIRouter(tags=["projects"])
 
 
-@router.get("/projects")
+@router.get("/projects", response_model=ProjectsOut)
 async def list_projects(session: AsyncSession = Depends(get_session)) -> dict[str, Any]:
     rows = (
         await session.execute(

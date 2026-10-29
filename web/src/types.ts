@@ -158,7 +158,9 @@ export interface ListResponse<T> {
 export interface ApiErrorEnvelope {
   code: string
   message: string
-  request_id?: string
+  /** 服务端中间件始终回带；与响应头 X-Request-Id 一致 */
+  request_id: string
+  details?: Record<string, unknown>
 }
 
 /** ---- 以下为 P1 接入 /api/v1 后新增的后端响应类型（字段名与 server/app/routers/*.py 一致）---- */
@@ -306,6 +308,8 @@ export interface TaskRecord {
   name: string
   test_type: TestType | null
   lifecycle: TaskLifecycle
+  /** 乐观锁版本；写操作必须回带 */
+  lock_version: number
   application: { id: string; name: string }
   platform: Platform
   revision_id: string | null
@@ -363,24 +367,25 @@ export interface CreateTaskResponse {
 /**
  * GET /api/v1/tasks/{id}/revisions 的一行。
  *
- * 后端字段名尚未冻结，这里按 api-design.md 的命名习惯（snake_case）声明，
- * 同时把 P2 可能出现的等价写法标为可选 —— 渲染时用 asRevisionView 归一，
- * 缺失字段显示破折号，绝不猜值。
+ * 字段与后端严格模型 TaskRevisionRecord（extra="forbid"）逐字段一致：
+ * 可空字段的键一定存在（NULL 是合法值），前端可以无条件读取。
  */
 export interface TaskRevisionRecord {
   id: string
-  /** 修订号（revision 或 revision_no） */
-  revision: number | null
-  readiness: TaskReadiness | null
+  /** 所属任务 id */
+  task_id: string
+  /** 修订号，从 1 开始单调递增 */
+  revision: number
+  readiness: TaskReadiness
   /** 后端原始枚举：ui / performance / joint */
-  test_type: TestType | null
-  created_at: string | null
-  created_by?: string | null
-  build_id?: string | null
-  suite_version_id?: string | null
-  environment_id?: string | null
-  /** 脱敏配置快照 */
-  config?: Record<string, unknown> | null
+  test_type: TestType
+  created_at: string
+  created_by: string
+  build_id: string | null
+  suite_version_id: string | null
+  environment_id: string | null
+  /** 脱敏配置快照（整份替换语义） */
+  config: Record<string, unknown>
   /** 该修订是否已绑定运行（绑定后不可修改，api-design.md §1.3） */
   bound_run_id?: string | null
   note?: string | null
@@ -389,7 +394,7 @@ export interface TaskRevisionRecord {
 /** GET /api/v1/tasks/{id}/revisions 响应（列表） */
 export interface TaskRevisionsResponse {
   items: TaskRevisionRecord[]
-  total?: number
+  total: number
 }
 
 /**

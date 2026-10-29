@@ -11,6 +11,8 @@ status / code 的对应关系见 api-design.md §1.2 的表格；本模块只登
 
 from __future__ import annotations
 
+import re
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import HTTPException
@@ -18,6 +20,110 @@ from fastapi import HTTPException
 # web 写操作必须携带的客户端标识头（development-plan.md §8.1：防跨站表单）
 CLIENT_HEADER = "X-TestDock-Client"
 CLIENT_HEADER_VALUE = "web"
+
+# --------------------------------------------------------------------------- #
+# 统一错误码注册表（docs/plan/api-design.md §1.2 + 各阶段实际使用的码）
+# --------------------------------------------------------------------------- #
+#: 所有对外错误信封的 code 必须来自这里。测试会用 AST 扫描 app/ 源码，
+#: 发现文档外的字面量错误码即失败，避免同一语义出现多个名字。
+ERROR_CODES: frozenset[str] = frozenset(
+    {
+        # 通用 / 框架映射
+        "validation_error",
+        "unauthorized",
+        "forbidden",
+        "not_found",
+        "method_not_allowed",
+        "state_conflict",
+        "illegal_transition",
+        "internal_error",
+        "service_unavailable",
+        # 写操作守卫 / 并发 / 幂等
+        "client_header_required",
+        "stale_version",
+        "revision_locked",
+        "task_configuration_conflict",
+        "idempotency_conflict",
+        "invalid_cursor",
+        # 任务 / 套件
+        "task_not_ready",
+        "readiness_incomplete",
+        "discover_failed",
+        # 运行 / 租约 / 设备
+        "lease_conflict",
+        "fence_mismatch",
+        "device_not_ready",
+        "device_busy",
+        "runner_spawn_failed",
+        "control_token_invalid",
+        "run_without_resource",
+        # 调试 / 模板 / 元信息
+        "debug_session_not_active",
+        "viewer_unavailable",
+        "schema_doc_missing",
+        # 设备同步
+        "adb_unavailable",
+        "adb_probe_failed",
+    }
+)
+
+
+# --------------------------------------------------------------------------- #
+# 敏感值脱敏：错误 details / message 不得回显凭据
+# --------------------------------------------------------------------------- #
+#: 注意不要匹配 session_id：调试/运行信封里的 session_id 是可展示标识，不是凭据。
+SENSITIVE_KEY_RE = re.compile(
+    r"(password|passwd|secret|token|api[_-]?key|authorization|cookie|credential|dsn|database_url)",
+    re.IGNORECASE,
+)
+_REDACTED = "***"
+
+
+def _known_secrets() -> tuple[str, ...]:
+    """当前进程里绝不能被错误信封回显的已知敏感值。
+
+    只收集配置里的数据库连接串及其密码段；不读取 control.token 文件内容，
+    避免每次报错都做磁盘 I/O。
+    """
+    try:
+        from .config import settings
+
+        url = settings.database_url
+    except Exception:  # pragma: no cover - 配置损坏时不应让错误处理本身失败
+        return ()
+    secrets = [url]
+    match = re.search(r"://[^:/@]+:([^@]+)@", url)
+    if match:
+        secrets.append(match.group(1))
+    return tuple(value for value in secrets if value)
+
+
+def redact_sensitive(value: Any, *, _secrets: tuple[str, ...] | None = None) -> Any:
+    """递归脱敏。
+
+    - 键名命中 SENSITIVE_KEY_RE 的值整体替换为 "***"；
+    - 字符串里出现已知敏感值（数据库 URL / 密码）时做子串替换；
+    - list/tuple 逐项处理，其余原样返回。
+    """
+    secrets = _known_secrets() if _secrets is None else _secrets
+
+    if isinstance(value, Mapping):
+        out: dict[Any, Any] = {}
+        for key, item in value.items():
+            if SENSITIVE_KEY_RE.search(str(key)):
+                out[key] = _REDACTED
+            else:
+                out[key] = redact_sensitive(item, _secrets=secrets)
+        return out
+    if isinstance(value, (list, tuple)):
+        return [redact_sensitive(item, _secrets=secrets) for item in value]
+    if isinstance(value, str):
+        text = value
+        for secret in secrets:
+            if secret and secret in text:
+                text = text.replace(secret, _REDACTED)
+        return text
+    return value
 
 
 class ApiError(HTTPException):
