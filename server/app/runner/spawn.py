@@ -106,7 +106,13 @@ def build_env(*, run_id: str, project_root: Path | None = None) -> dict[str, str
             str(vendor / "mobile_perf" / "src"),
         ]
     )
-    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH",)}
+    # PYTEST_ADDOPTS / PYTEST_PLUGINS 会把宿主或套件的插件/参数带进 runner 的
+    # pytest 子进程；运行准备必须只读，不能借此隐式打开 mobile-perf 自愈。
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("PYTHONPATH", "PYTEST_ADDOPTS", "PYTEST_PLUGINS")
+    }
     env.update(
         {
             "TMP": str(tmp),

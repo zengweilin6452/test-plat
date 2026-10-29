@@ -103,12 +103,14 @@ class Lease:
     expires_at: Any
     serial: str | None = None
     platform: str | None = None
+    check_id: str | None = None
 
     def as_details(self) -> dict[str, Any]:
         return {
             "lease_id": self.id,
             "resource_id": self.resource_id,
             "run_id": self.run_id,
+            "check_id": self.check_id,
             "fencing_token": self.fencing_token,
             "holder_id": self.holder_id,
             "expires_at": self.expires_at,
@@ -211,18 +213,23 @@ async def verify_fence(
     *,
     run_id: str | uuid.UUID,
     token: int | None,
+    require_token: bool = False,
 ) -> dict[str, Any]:
     """校验 runner 带来的 fencing token 是否仍是当前活动租约的 token。
 
-    返回 {ok, checked, expected, provided, lease, resource_id}。token 为 None
-    （旧 runner / import 通道）时按"不校验"处理：ok=True 但 checked=False。
+    返回 {ok, checked, expected, provided, lease, resource_id}。
+
+    兼容语义（require_token=False）：token 为 None（旧 runner / import 通道）
+    时按"不校验"处理：ok=True 但 checked=False。HTTP 写入端点必须使用
+    require_token=True —— 缺失 token 一律拒绝，避免旧 token 重放或旧 runner
+    绕过 fence。
     """
     lease = await live_lease_for_run(session, run_id)
     expected = int(lease["fencing_token"]) if lease else None
     if token is None:
         return {
-            "ok": True,
-            "checked": False,
+            "ok": not require_token,
+            "checked": bool(require_token),
             "expected": expected,
             "provided": None,
             "lease": lease,
@@ -468,6 +475,284 @@ async def release_lease_for_debug(
     return dict(existing) if existing else None
 
 
+# --------------------------------------------------------------------------- #
+# 工单 02：短检查租约（resource_leases.check_id 通道）
+# --------------------------------------------------------------------------- #
+# 短检查与 run/debug 共用同一张 resource_leases：_PICK_SQL 的
+# "id NOT IN (活动租约)" + FOR UPDATE SKIP LOCKED 让三者天然互斥；
+# 部分唯一索引 leases_one_live_resource 是并发下的最后防线。
+# 检查租约默认很短（30s），但过期回收不能代替"确认设备访问已停止"：
+# 未确认停机时保留租约并把资源置 draining，宁可不分配也不谎报空闲。
+
+DEFAULT_CHECK_LEASE_SECONDS = 30
+
+_INSERT_CHECK_LEASE_SQL = text(
+    """
+    INSERT INTO resource_leases (
+        id, project_id, resource_id, check_id, fencing_token, holder_id, expires_at
+    ) VALUES (
+        :id, :project_id, :resource_id, :check_id, :fencing_token, :holder_id,
+        now() + make_interval(secs => :lease_seconds)
+    )
+    RETURNING id, project_id, resource_id, check_id, fencing_token, holder_id,
+              expires_at, released_at, release_reason, created_at
+    """
+)
+
+
+async def live_lease_for_check(
+    session: AsyncSession, check_id: str | uuid.UUID
+) -> dict[str, Any] | None:
+    """当前短检查的活动租约（未释放）。"""
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT rl.id, rl.project_id, rl.resource_id, rl.check_id,
+                       rl.fencing_token, rl.holder_id, rl.expires_at, rl.released_at,
+                       er.resource_key
+                  FROM resource_leases rl
+                  JOIN execution_resources er ON er.id = rl.resource_id
+                 WHERE rl.check_id = CAST(:cid AS uuid)
+                   AND rl.released_at IS NULL
+                 ORDER BY rl.created_at DESC
+                 LIMIT 1
+                """
+            ),
+            {"cid": str(check_id)},
+        )
+    ).mappings().first()
+    return dict(row) if row else None
+
+
+async def acquire_lease_for_check(
+    session: AsyncSession,
+    *,
+    project_id: str | uuid.UUID,
+    check_id: str | uuid.UUID,
+    resource_id: str | uuid.UUID,
+    holder_id: str,
+    lease_seconds: int = DEFAULT_CHECK_LEASE_SECONDS,
+) -> Lease | None:
+    """在调用方事务里为一次短检查领取**指定**设备的租约。
+
+    返回 None 表示设备当前不可领（不存在 / 非 ready / 已有活动租约）。
+    调用方必须先插入 device_checks 行（复合外键要求）。
+    """
+    picked = (
+        await session.execute(
+            _PICK_SQL,
+            {
+                "project_id": str(project_id),
+                "resource_id": str(resource_id),
+                "platform": None,
+            },
+        )
+    ).mappings().first()
+    if picked is None:
+        return None
+
+    rid = str(picked["id"])
+    fence = (await session.execute(_BUMP_FENCE_SQL, {"resource_id": rid})).scalar_one()
+    row = (
+        await session.execute(
+            _INSERT_CHECK_LEASE_SQL,
+            {
+                "id": str(uuid.uuid4()),
+                "project_id": str(project_id),
+                "resource_id": rid,
+                "check_id": str(check_id),
+                "fencing_token": int(fence),
+                "holder_id": holder_id,
+                "lease_seconds": int(lease_seconds),
+            },
+        )
+    ).mappings().first()
+
+    return Lease(
+        id=str(row["id"]),
+        project_id=str(row["project_id"]),
+        resource_id=str(row["resource_id"]),
+        run_id=None,
+        fencing_token=int(row["fencing_token"]),
+        holder_id=row["holder_id"],
+        expires_at=row["expires_at"],
+        serial=picked["resource_key"],
+        platform=picked["platform"],
+        check_id=str(row["check_id"]),
+    )
+
+
+async def record_check_result(
+    session: AsyncSession,
+    *,
+    check_id: str | uuid.UUID,
+    token: int,
+    state: str,
+    result: dict[str, Any] | None = None,
+    error_code: str | None = None,
+) -> bool:
+    """带 fence 写入检查结果；租约已转手/释放时拒绝写入。
+
+    SQL 里的 EXISTS 同时承担"是否仍是拥有者"的判定：只有 check_id 对应且
+    未释放、fencing_token 匹配的租约才允许 UPDATE device_checks。
+    """
+    import json
+
+    row = (
+        await session.execute(
+            text(
+                """
+                UPDATE device_checks dc
+                   SET state = :state,
+                       result = CAST(:result AS jsonb),
+                       error_code = :error_code,
+                       finished_at = now()
+                 WHERE dc.id = CAST(:cid AS uuid)
+                   AND EXISTS (
+                         SELECT 1
+                           FROM resource_leases rl
+                          WHERE rl.check_id = dc.id
+                            AND rl.released_at IS NULL
+                            AND rl.fencing_token = CAST(:token AS bigint)
+                       )
+                RETURNING dc.id
+                """
+            ),
+            {
+                "cid": str(check_id),
+                "token": int(token),
+                "state": state,
+                "result": json.dumps(result, ensure_ascii=False, default=str)
+                if result is not None
+                else None,
+                "error_code": error_code,
+            },
+        )
+    ).first()
+    return row is not None
+
+
+async def mark_resource_draining(
+    session: AsyncSession, *, resource_id: str | uuid.UUID
+) -> None:
+    """把资源标记为不可分配（停止未确认时的隔离态）。"""
+    await session.execute(
+        text(
+            "UPDATE execution_resources SET status = 'draining'"
+            " WHERE id = CAST(:rid AS uuid) AND status = 'ready'"
+        ),
+        {"rid": str(resource_id)},
+    )
+
+
+async def release_lease_for_check(
+    session: AsyncSession,
+    *,
+    check_id: str | uuid.UUID,
+    reason: str,
+    token: int | None = None,
+    stopped_confirmed: bool = True,
+) -> dict[str, Any] | None:
+    """释放短检查租约（幂等）。
+
+    stopped_confirmed=False 时**不释放**：保留租约并把资源置 draining，
+    返回 None。短检查的命令是同步子进程，正常情况下超时会杀掉子进程，
+    因此调用方可以确认停止；只有无法证明停止时才走隔离分支。
+    """
+    if not stopped_confirmed:
+        lease = await live_lease_for_check(session, check_id)
+        if lease is not None:
+            await mark_resource_draining(session, resource_id=lease["resource_id"])
+        return None
+
+    row = (
+        await session.execute(
+            text(
+                """
+                UPDATE resource_leases
+                   SET released_at = now(),
+                       release_reason = :reason
+                 WHERE check_id = CAST(:cid AS uuid)
+                   AND released_at IS NULL
+                   AND (CAST(:token AS bigint) IS NULL OR fencing_token = CAST(:token AS bigint))
+                RETURNING id, resource_id, check_id, fencing_token, released_at,
+                          release_reason
+                """
+            ),
+            {
+                "cid": str(check_id),
+                "reason": reason,
+                "token": int(token) if token is not None else None,
+            },
+        )
+    ).mappings().first()
+    if row is not None:
+        return dict(row)
+
+    existing = (
+        await session.execute(
+            text(
+                """
+                SELECT id, resource_id, check_id, fencing_token, released_at,
+                       release_reason
+                  FROM resource_leases
+                 WHERE check_id = CAST(:cid AS uuid)
+                 ORDER BY created_at DESC
+                 LIMIT 1
+                """
+            ),
+            {"cid": str(check_id)},
+        )
+    ).mappings().first()
+    return dict(existing) if existing else None
+
+
+async def release_lease_if_stopped(
+    session: AsyncSession,
+    *,
+    run_id: str | uuid.UUID,
+    reason: str,
+    token: int | None = None,
+    stopped_confirmed: bool,
+) -> dict[str, Any] | None:
+    """只在确认设备访问已停止时释放运行租约。
+
+    stopped_confirmed=False：保留租约、把资源置 draining，返回 None。调用方
+    （reconciler / finalize 安全网）不能把设备显示为空闲候选。
+    stopped_confirmed=True：正常释放；若资源此前因隔离处于 draining 且已无
+    活动租约，则恢复 ready。
+    """
+    if not stopped_confirmed:
+        lease = await live_lease_for_run(session, run_id)
+        if lease is not None:
+            await mark_resource_draining(session, resource_id=lease["resource_id"])
+        return None
+
+    released = await release_lease(session, run_id=run_id, reason=reason, token=token)
+    # release_lease 在 token 不匹配时会回读最近一条历史行；只有真正释放
+    # （released_at 非空）才算确认收口，否则不能恢复 ready。
+    if released is None or released.get("released_at") is None:
+        return None
+    await session.execute(
+        text(
+            """
+            UPDATE execution_resources er
+               SET status = 'ready'
+             WHERE er.id = CAST(:rid AS uuid)
+               AND er.status = 'draining'
+               AND NOT EXISTS (
+                     SELECT 1 FROM resource_leases rl
+                      WHERE rl.resource_id = er.id
+                        AND rl.released_at IS NULL
+                   )
+            """
+        ),
+        {"rid": str(released["resource_id"])},
+    )
+    return released
+
+
 async def release_stale_leases(
     session: AsyncSession, *, stale_seconds: int
 ) -> list[dict[str, Any]]:
@@ -491,15 +776,22 @@ async def release_stale_leases(
 
 
 __all__ = [
+    "DEFAULT_CHECK_LEASE_SECONDS",
     "DEFAULT_LEASE_SECONDS",
     "Lease",
     "acquire_lease",
+    "acquire_lease_for_check",
     "acquire_lease_for_debug",
     "extend_lease",
+    "live_lease_for_check",
     "live_lease_for_debug",
     "live_lease_for_run",
+    "mark_resource_draining",
+    "record_check_result",
     "release_lease",
+    "release_lease_for_check",
     "release_lease_for_debug",
+    "release_lease_if_stopped",
     "release_stale_leases",
     "verify_fence",
 ]

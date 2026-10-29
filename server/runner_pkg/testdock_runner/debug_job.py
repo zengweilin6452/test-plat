@@ -108,11 +108,14 @@ def run_perf_job(options: UiJobOptions, context: RunnerContext) -> UiJobResult:
         if not context.check_fence():
             return UiJobResult(5, "fence_mismatch", fence_lost=True)
         vendor_root = Path(options.vendor_dir) if options.vendor_dir else Path(__file__).resolve().parents[3] / "vendor"
+        # 运行准备不调用 PerfKit.ensure_ready：它的 Keeper.run() 在离线/doctor
+        # 失败时会执行 adb tcpip / connect 自愈，违反规格 §6.6。只读预检由平台
+        # readiness 入口在派发前完成；这里只负责采集窗口本身。
+        # foreground_restore=False 阻止采集收口时额外还原前台。
         kit = PerfKit(serial=options.serial, repo_root=vendor_root / "mobile_perf",
                       runs_dir=artifacts_dir / "perf", db_path=artifacts_dir / "perf.sqlite3",
-                      keep_runs=1, keep_days=36500)
+                      keep_runs=1, keep_days=36500, foreground_restore=False)
         context.set_stage("ready", 20, stage=1)
-        kit.ensure_ready()
         context.set_stage("collect", 40, stage=2)
         emit_stage("collect", 40)
         with kit.collect(target=options.app_package, items=items, host_run_id=options.run_id,
