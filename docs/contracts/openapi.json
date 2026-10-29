@@ -718,6 +718,44 @@
         }
       }
     },
+    "/api/v1/resources/{resource_id}/readiness": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "resource_id",
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": {
+          "$ref": "#/components/schemas/ReadinessCheckIn"
+        },
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Check Resource Readiness Api V1 Resources  Resource Id  Readiness Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
     "/api/v1/runs": {
       "get": {
         "parameters": [
@@ -1812,6 +1850,34 @@
         "total"
       ],
       "title": "ProjectsOut",
+      "type": "object"
+    },
+    "ReadinessCheckIn": {
+      "description": "POST /resources/{id}/readiness 请求体。",
+      "properties": {
+        "app_package": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "App Package"
+        },
+        "test_type": {
+          "default": "ui",
+          "enum": [
+            "ui",
+            "performance",
+            "joint"
+          ],
+          "title": "Test Type",
+          "type": "string"
+        }
+      },
+      "title": "ReadinessCheckIn",
       "type": "object"
     },
     "ResourceProfileOut": {
