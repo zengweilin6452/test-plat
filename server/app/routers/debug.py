@@ -160,7 +160,7 @@ async def _busy_holder(session: AsyncSession, resource_id: str) -> dict[str, Any
         await session.execute(
             text(
                 """
-                SELECT rl.run_id, rl.debug_session_id, rl.holder_id,
+                SELECT rl.run_id, rl.debug_session_id, rl.check_id, rl.holder_id,
                        COALESCE(er.resource_key, '') AS display_id
                   FROM resource_leases rl
                   LEFT JOIN execution_resources er ON er.id = rl.resource_id

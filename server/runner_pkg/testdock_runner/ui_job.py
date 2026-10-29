@@ -20,6 +20,7 @@ import threading
 import signal
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -130,6 +131,12 @@ def build_pytest_command(
         serial or "fake-serial",
         "-p",
         "testdock_runner.pytest_plugin",
+        # 平台只读纪律：套件不能通过 pytest.ini / addopts 隐式打开
+        # mobile-perf（其 perf.session 会调用 PerfKit.ensure_ready 自愈）。
+        "-p",
+        "no:mobile-perf",
+        "-o",
+        "addopts=",
         "--junit-xml",
         str(junit),
         "-p",
@@ -138,6 +145,20 @@ def build_pytest_command(
     ]
     argv.extend(test_paths or list(DEFAULT_TEST_PATHS))
     return argv
+
+
+def build_pytest_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """构造 pytest 子进程环境：不继承调用方注入的插件/参数。
+
+    PYTEST_ADDOPTS 会在命令行参数之前生效，套件或宿主可以借此重新打开
+    --mobile-perf；PYTEST_PLUGINS 则会隐式加载插件。两者都从环境中移除，
+    插件阻断由 build_pytest_command 的 `-p no:mobile-perf` 兜底。
+    """
+    env = dict(base if base is not None else os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env.pop("PYTEST_ADDOPTS", None)
+    env.pop("PYTEST_PLUGINS", None)
+    return env
 
 
 def _lock_dir() -> Path:
@@ -298,8 +319,7 @@ def _run_pytest(
         return UiJobResult(exit_code=3, reason="plugin_unavailable", message=problems)
     context.set_stage("pytest", 40, stage=2)
     deadline = Deadline(options.timeout)
-    env = dict(os.environ)
-    env["PYTHONIOENCODING"] = "utf-8"
+    env = build_pytest_env()
     import json
     env["TESTDOCK_JOB_CONFIG"] = json.dumps({
         "serial": serial, "artifacts_dir": str(artifacts_dir),
@@ -411,6 +431,7 @@ __all__ = [
     "UiJobOptions",
     "UiJobResult",
     "build_pytest_command",
+    "build_pytest_env",
     "resolve_test_paths",
     "run_ui_job",
 ]

@@ -76,7 +76,8 @@ def test_perf_job_collects_and_archives_vendor_report(tmp_path, monkeypatch):
         def __init__(self, **kwargs):
             calls.append(("init", kwargs))
         def ensure_ready(self):
-            calls.append(("ready",))
+            # 工单 02：运行准备不再调用 vendor 自愈入口
+            raise AssertionError("ensure_ready must not be called")
         def collect(self, **kwargs):
             calls.append(("collect", kwargs))
             return Scope()
@@ -95,9 +96,10 @@ def test_perf_job_collects_and_archives_vendor_report(tmp_path, monkeypatch):
     context = RunnerContext(run_id="perf-test", fencing_token=1, artifacts_dir=tmp_path)
     result = run_perf_job(options, context)
     assert result.exit_code == 0, result.message
-    assert [call[0] for call in calls] == ["init", "ready", "collect", "release"]
-    assert calls[2][1]["target"] == "com.example.perf"
-    assert calls[2][1]["host_run_id"] == "perf-test"
+    assert [call[0] for call in calls] == ["init", "collect", "release"]
+    assert calls[0][1]["foreground_restore"] is False
+    assert calls[1][1]["target"] == "com.example.perf"
+    assert calls[1][1]["host_run_id"] == "perf-test"
     assert json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))["metricsSummary"] == report["metricsSummary"]
     assert result.outcome == "not_tested"  # 没有门禁策略不伪装性能通过
 
