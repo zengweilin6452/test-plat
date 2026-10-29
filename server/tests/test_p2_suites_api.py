@@ -3,8 +3,8 @@
 覆盖：
   - GET  /suites                列表 + ?test_type= 精确过滤 + 非法枚举 400
   - GET  /suites/{id}/versions  未知 id -> 404 信封
-  - POST /suites/{id}/discover  宿主子进程 pytest --collect-only
-        * 成功 201：新增 version=1、case_count、manifest.cases、suite_root 留痕
+  - POST /suites/{id}/discover  固定副本上跑 pytest --collect-only
+        * 成功 201：新增 version=1、case_count、manifest.cases、code_copy 摘要
         * 再次 discover 追加 version=2（版本不可变，旧版本保留）
         * 缺 X-TestDock-Client -> 428
         * suite_root 不存在 -> 422 discover_failed（带 stderr 尾巴字段）
@@ -16,6 +16,7 @@ discover 的子进程会跑真正的 pytest；为了快且可重复，这里用�
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -53,7 +54,10 @@ class TestGroup:
 
 
 @pytest.fixture()
-def suite_root(tmp_path):
+def suite_root(tmp_path, monkeypatch):
+    # 工单 03 起来源必须落在预配置可信根内；发现与执行使用平台固定副本。
+    monkeypatch.setenv("TESTDOCK_TRUSTED_SUITE_ROOTS", str(tmp_path))
+    monkeypatch.setenv("TESTDOCK_CODE_COPIES_DIR", str(tmp_path / "code-copies"))
     root = tmp_path / "suite_min"
     root.mkdir()
     (root / "test_min.py").write_text(_MINIMAL_SUITE, encoding="utf-8")
@@ -136,7 +140,12 @@ def test_discover_creates_first_version(api_client, seed, suite_root):
     assert body["source_ref"] == f"suite:{seed['suite_id']}"
     assert body["source_commit"] == "local"
     assert body["manifest"]["schema_version"] == 1
-    assert body["manifest"]["suite_root"] == str(suite_root.resolve())
+    # 不向浏览器回显宿主绝对路径；manifest 只保留相对文件清单与摘要。
+    assert "suite_root" not in body["manifest"]
+    code_copy = body["manifest"]["code_copy"]
+    assert code_copy["file_count"] == 2
+    assert len(code_copy["tree_sha256"]) == 64
+    assert str(suite_root.resolve()) not in json.dumps(body["manifest"])
 
     keys = body["case_keys"]
     assert len(keys) == 3
@@ -200,7 +209,8 @@ def test_discover_unknown_suite_is_404(api_client, suite_root):
     assert resp.json()["code"] == "not_found"
 
 
-def test_discover_missing_root_is_422(api_client, seed, tmp_path):
+def test_discover_missing_root_is_422(api_client, seed, tmp_path, monkeypatch):
+    monkeypatch.setenv("TESTDOCK_TRUSTED_SUITE_ROOTS", str(tmp_path))
     resp = api_client.post(
         f"/api/v1/suites/{seed['suite_id']}/discover",
         json={"suite_root": str(tmp_path / "no-such-dir")},
@@ -213,7 +223,9 @@ def test_discover_missing_root_is_422(api_client, seed, tmp_path):
     assert "details" in envelope
 
 
-def test_discover_root_without_tests_is_422(api_client, seed, tmp_path):
+def test_discover_root_without_tests_is_422(api_client, seed, tmp_path, monkeypatch):
+    monkeypatch.setenv("TESTDOCK_TRUSTED_SUITE_ROOTS", str(tmp_path))
+    monkeypatch.setenv("TESTDOCK_CODE_COPIES_DIR", str(tmp_path / "code-copies"))
     empty = tmp_path / "empty_suite"
     empty.mkdir()
     (empty / "pytest.ini").write_text("[pytest]\naddopts =\n", encoding="utf-8")
@@ -227,7 +239,8 @@ def test_discover_root_without_tests_is_422(api_client, seed, tmp_path):
     assert resp.json()["code"] == "discover_failed"
 
 
-def test_discover_failure_does_not_create_version(api_client, seed, tmp_path):
+def test_discover_failure_does_not_create_version(api_client, seed, tmp_path, monkeypatch):
+    monkeypatch.setenv("TESTDOCK_TRUSTED_SUITE_ROOTS", str(tmp_path))
     api_client.post(
         f"/api/v1/suites/{seed['suite_id']}/discover",
         json={"suite_root": str(tmp_path / "nope")},

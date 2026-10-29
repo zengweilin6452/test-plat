@@ -629,30 +629,23 @@ def _snapshot_metrics(snapshot: Any) -> dict[str, Any]:
     return {}
 
 
-@router.post("/runs/{run_id}/gate-evaluations", status_code=201)
-async def create_gate_evaluation(
+async def evaluate_run_original(
+    session: AsyncSession,
     run_id: str,
-    payload: dict[str, Any],
-    session: AsyncSession = Depends(get_session),
+    *,
+    request_key: str,
+    policy_id: Any = None,
+    baseline_run_id: Any = None,
+    run_complete: bool | None = None,
 ) -> dict[str, Any]:
-    """试算 = 新增 mode='reanalysis' 行。**绝不 UPDATE original 行。**
+    """原始判定核心（路由与 finalizing 事务共用）。
 
-    请求体（docs/plan/api-design.md:201）：`{request_key, policy_id, baseline_run_id}`。
-    - request_key 幂等：同 project 下重复 request_key 直接返回已存在的那一行；
-    - 该组件还没有 original 行 → 本次落 mode='original'（「首次判定」）；
-      已有 original → 本次落 mode='reanalysis'（「改阈值重算」），
-      两条路径都只 INSERT，绝不 UPDATE 既有行；
-    - policy_id / baseline_run_id 缺省时由平台补：取该应用最新策略版本，
-      基线取同档案的最新基线（没有同档案基线则退回最新基线，判定自然给出 profile_mismatch）；
-      两者都补不出来 → not_tested + gate_policy_missing（不是「通过」）；
-    - 档案不可比不拦截为 422，判定照做（not_tested + profile_mismatch），
-      因为「跨档案」本身就是要记录的事实。
+    `run_complete=None` 时按库内 state 判断（外部试算路径）；finalizing 内调用
+    必须显式传 `run_complete=True`，因为此时 run 还没有 transition 到 completed。
+    只 INSERT 判定行，绝不 UPDATE 既有 original。
     """
-    request_key = payload.get("request_key")
     if not request_key or not isinstance(request_key, str):
         raise HTTPException(status_code=422, detail="request_key 必填")
-    policy_id = payload.get("policy_id")
-    baseline_run_id = payload.get("baseline_run_id")
 
     run = await _load_run(session, run_id)
     existing = (
@@ -770,7 +763,7 @@ async def create_gate_evaluation(
     outcome = gate_outcome(
         report=report,
         spec=spec,
-        run_complete=_is_complete(run),
+        run_complete=_is_complete(run) if run_complete is None else bool(run_complete),
         policy_rules=policy["rules"],
         run_profile=(run["profile_spec"] or run_profile),
         baseline_profile=baseline_profile,
@@ -821,6 +814,37 @@ async def create_gate_evaluation(
         )
     ).scalar()
     return await _evaluation_response(session, row, created=True)
+
+
+@router.post("/runs/{run_id}/gate-evaluations", status_code=201)
+async def create_gate_evaluation(
+    run_id: str,
+    payload: dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """试算 = 新增判定行。**绝不 UPDATE original 行。**
+
+    请求体（docs/plan/api-design.md:201）：`{request_key, policy_id, baseline_run_id}`。
+    - request_key 幂等：同 project 下重复 request_key 直接返回已存在的那一行；
+    - 该组件还没有 original 行 → 本次落 mode='original'（「首次判定」）；
+      已有 original → 本次落 mode='reanalysis'（「改阈值重算」），
+      两条路径都只 INSERT，绝不 UPDATE 既有行；
+    - policy_id / baseline_run_id 缺省时由平台补：取该应用最新策略版本，
+      基线取同档案的最新基线（没有同档案基线则退回最新基线，判定自然给出 profile_mismatch）；
+      两者都补不出来 → not_tested + gate_policy_missing（不是「通过」）；
+    - 档案不可比不拦截为 422，判定照做（not_tested + profile_mismatch），
+      因为「跨档案」本身就是要记录的事实。
+    """
+    request_key = payload.get("request_key")
+    if not request_key or not isinstance(request_key, str):
+        raise HTTPException(status_code=422, detail="request_key 必填")
+    return await evaluate_run_original(
+        session,
+        run_id,
+        request_key=request_key,
+        policy_id=payload.get("policy_id"),
+        baseline_run_id=payload.get("baseline_run_id"),
+    )
 
 
 def _json(value: Any) -> str:
