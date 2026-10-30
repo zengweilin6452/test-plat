@@ -30,6 +30,7 @@ export function AppsPage() {
   const error = appsQuery.isError ? describeError(appsQuery.error) : null
   const all = appsQuery.data?.items ?? []
   const rows = all.filter((app) => targetScope === 'all' || app.platform === targetScope)
+  // 工单 19：从应用行携带应用身份进入工作区（AC-APP-01）
 
   const columns: Column<ApplicationRecord>[] = [
     {
@@ -59,6 +60,19 @@ export function AppsPage() {
         <Badge tone={row.platform === 'android' ? 'green' : 'gray'}>
           {TARGET_CATALOG[row.platform]?.capability ?? '未接入'}
         </Badge>
+      ),
+    },
+    {
+      key: 'enter',
+      header: '工作区',
+      render: (row) => (
+        <a
+          className="link-btn"
+          href={`#/ui?app=${row.id}`}
+          aria-label={`进入 ${row.name} 工作区`}
+        >
+          进入工作区 ›
+        </a>
       ),
     },
   ]
