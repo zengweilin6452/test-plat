@@ -44,6 +44,7 @@ from ..db import get_sessionmaker
 from ..domain import events as events_mod
 from ..domain import leases as leases_mod
 from ..domain import runs as runs_mod
+from ..domain.templates import pinned_templates, verify_template_pins
 from ..integrations import leases as local_leases
 from ..runner import dispatch_runner
 
@@ -335,6 +336,18 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
             lease=lease_details,
         )
         return DispatchOutcome(run_id=rid, ok=False, reason="identity_mismatch")
+
+    # 工单 25：执行锁定模板版本——修订 config.image_templates 声明的
+    # logical/version_id/sha256 与共享模板库当前版本逐条核对；缺失或不符
+    # 一律 errored，绝不静默改用别的版本。
+    pin_result = verify_template_pins(pinned_templates(config))
+    if pin_result["verdict"] in ("mismatch", "missing"):
+        await mark_spawn_failed(
+            rid,
+            error="template_pin_mismatch: " + str(pin_result.get("detail"))[:400],
+            lease=lease_details,
+        )
+        return DispatchOutcome(run_id=rid, ok=False, reason="template_pin_mismatch")
 
     # 事务已提交：此时镜像里一定有"租约 + dispatching"。spawn 放在事务外，
     # 因为拉起子进程是不可回滚的副作用，绝不能让它发生在一个还会回滚的事务里。
