@@ -41,6 +41,7 @@ from ..domain.gates import (
 )
 from ..domain.gates import build_report_view as _build_report_view
 from ..domain.gates import (
+    REASON_BASELINE_MISSING,
     REASON_DEVICE_DEGRADED,
     REASON_GATE_POLICY_MISSING,
     REASON_METRIC_MISSING,
@@ -246,7 +247,9 @@ async def get_run_metrics(
     }
 
 
-async def _analysis_for_run(session: AsyncSession, run: dict[str, Any]) -> dict[str, Any]:
+async def _analysis_for_run(
+    session: AsyncSession, run: dict[str, Any], *, evaluation_id: str | None = None
+) -> dict[str, Any]:
     components = await _load_components(session, run["id"])
     component_ids = [c["id"] for c in components]
     by_component = await _load_metrics(session, component_ids)
@@ -263,9 +266,15 @@ async def _analysis_for_run(session: AsyncSession, run: dict[str, Any]) -> dict[
         if row["mode"] == "original":
             original = row
             break
-    # evaluations 已按 created_at DESC 排序：第一个 reanalysis 就是最新一次试算
-    latest_reanalysis = next((row for row in evaluations if row["mode"] == "reanalysis"), None)
-    chosen = latest_reanalysis or original
+    # AC-CONTRACT-04：默认展示**原始判定**；最新试算不会悄悄顶掉它。
+    # 只有调用方显式给 evaluation_id 才切换到那条判定（通常是一次 reanalysis）。
+    chosen = original
+    if evaluation_id:
+        chosen = next(
+            (row for row in evaluations if str(row["id"]) == str(evaluation_id)), None
+        )
+        if chosen is None:
+            raise HTTPException(status_code=404, detail="evaluation not found for this run")
 
     device_profile, profile_error = _profile_of(run["profile_spec"])
     perf_component = next(
@@ -315,6 +324,9 @@ async def _analysis_for_run(session: AsyncSession, run: dict[str, Any]) -> dict[
         },
         "verdict": chosen["verdict"] if chosen else None,
         "mode": chosen["mode"] if chosen else None,
+        # 缺 original 时不兜底 reanalysis：明确告诉前端"还没有原始判定"
+        "original_missing": original is None,
+        "selected_evaluation_id": str(chosen["id"]) if chosen else None,
         "reason": chosen["reason_code"] if chosen else None,
         "reason_text": _reason_text_from_checks(chosen["checks"]) if chosen else None,
         "checks": (chosen["checks"] if chosen and isinstance(chosen["checks"], list) else []),
@@ -398,10 +410,16 @@ async def _baseline_options(
 async def list_analyses(
     run_id: Annotated[str | None, Query()] = None,
     task_id: Annotated[str | None, Query()] = None,
+    evaluation_id: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 20,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """分析页数据：`?run_id=` 单次运行，`?task_id=` 该任务最近若干次运行的趋势。"""
+    """分析页数据：`?run_id=` 单次运行，`?task_id=` 该任务最近若干次运行的趋势。
+
+    默认展示原始判定；`?evaluation_id=` 显式选择某条判定（通常是一次试算）。
+    """
+    if evaluation_id and task_id and not run_id:
+        raise HTTPException(status_code=422, detail="evaluation_id 只能与 run_id 搭配使用")
     if not run_id and not task_id:
         raise HTTPException(status_code=422, detail="必须提供 run_id 或 task_id")
     if run_id and task_id:
@@ -411,7 +429,7 @@ async def list_analyses(
         run = await _load_run(session, run_id)
         # run_id 是「单次运行分析页」，直接返回该分析本身（docs/plan/api-design.md:195）；
         # task_id 是「趋势列表」，返回 {items, total}。
-        return await _analysis_for_run(session, run)
+        return await _analysis_for_run(session, run, evaluation_id=evaluation_id)
 
     ids = [
         row["id"]
@@ -690,8 +708,9 @@ async def evaluate_run_original(
         baseline_run_id = await _default_baseline_run_id(
             session, run["project_id"], run["application_id"], run["profile_spec"]
         )
-    if not policy_id or not baseline_run_id:
-        # 缺策略/缺基线不是「通过」，而是 not_tested（三态门禁不压二态）。
+    # 缺策略/缺基线不是「通过」，而是 not_tested（三态门禁不压二态）。
+    # 两者原因分开报告（工单 12）：补策略和补基线是两条完全不同的排查路径。
+    if not policy_id:
         return await _not_tested_evaluation(
             session,
             run=run,
@@ -700,7 +719,18 @@ async def evaluate_run_original(
             request_key=request_key,
             policy_id=policy_id,
             reason_code=REASON_GATE_POLICY_MISSING,
-            reason_text="缺少门禁策略或可比基线，无法判定",
+            reason_text="缺少门禁策略，无法判定",
+        )
+    if not baseline_run_id:
+        return await _not_tested_evaluation(
+            session,
+            run=run,
+            component=component,
+            mode=mode,
+            request_key=request_key,
+            policy_id=policy_id,
+            reason_code=REASON_BASELINE_MISSING,
+            reason_text="缺少可比基线，无法判定",
         )
 
     policy = await _policy_row(session, str(policy_id), run["application_id"])
