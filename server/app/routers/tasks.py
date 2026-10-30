@@ -29,12 +29,10 @@ router = APIRouter(tags=["tasks"])
 
 #: 缺省 actor（created_by 两列都是 NOT NULL）。真实身份接入 P3 的鉴权后再替换。
 DEFAULT_ACTOR = "web-client"
-#: 幂等键请求头：同一 key + 同一路径的重复提交返回首次结果
+#: 幂等键请求头：同一 key + 同一路径的重复提交返回首次结果。
+#: 键的持久化在 services/tasks.py（task_request_keys 表，0005 迁移），
+#: 不再依赖进程内字典 —— 重启与多进程下都必须复用同一对象（spec §9.1）。
 IDEMPOTENCY_HEADER = "Idempotency-Key"
-#: 进程内的幂等缓存：{key: (task_id, status_code)}。
-#: 之所以不用 DB 表：0001 已经冻结（不能新增表），而 P2 只需覆盖"前端双击提交"这个窗口。
-#: 单进程 uvicorn 下足够；横向扩容前必须迁到 DB 或 Redis（已在 docstring 里标注）。
-_IDEMPOTENT_TASKS: dict[str, str] = {}
 
 
 def require_client_header(
@@ -146,42 +144,24 @@ async def create_task(
 ) -> dict[str, Any]:
     """创建任务与第一条 draft 修订。
 
-    两级去重，都在返回 200（而不是 201）+ 既有任务：
+    两级去重都在 service 内、与建任务同一事务（见 task_service.create_task）：
 
-    1. **请求级幂等**：客户端用 `?request_key=` 或 `Idempotency-Key` 头声明
-       "这是同一个请求的重发"。DB 里没有可写的幂等表（0001 已冻结），
-       所以用一个进程内表记首次创建的 task_id；单进程 uvicorn 足够，
-       横向扩容前必须迁到 DB 或 Redis。
-    2. **业务级判重**：同一 `application_id` 下同名且未归档的任务直接返回既有的那条。
-       前端双击、浏览器重试、用户从列表再提交一次，都不该多出一条任务
-       （每建一次任务就多一条修订，重复会污染时间线）。归档过的同名任务另算：
-       允许再建，所以查询只认未归档的那些。
+    1. **请求级幂等**：`?request_key=` 或 `Idempotency-Key` 头声明"这是同一个请求"，
+       键绑定规范化创建内容并持久化；同键同内容返回 200 + 原任务，
+       同键不同内容 409 idempotency_conflict。
+    2. **业务级判重**：同应用同名同内容复用原任务（200）；同名不同配置
+       409 task_configuration_conflict，附 existing_task_id 与差异字段名。
+
+    新建返回 201；复用既有对象返回 200。
     """
     key = (request_key or request.headers.get(IDEMPOTENCY_HEADER) or "").strip()
-    if key:
-        existing_id = _IDEMPOTENT_TASKS.get(key)
-        if existing_id:
-            task = await task_service.get_task(session, existing_id)
-            return _reused(task)
-
-    if body.application_id and body.name:
-        existing_id = await task_service.find_task_by_name(
-            session, application_id=body.application_id, name=body.name
-        )
-        if existing_id:
-            task = await task_service.get_task(session, existing_id)
-            if key:
-                _IDEMPOTENT_TASKS[key] = task["id"]
-            return _reused(task)
-
-    task = await task_service.create_task(
+    task, duplicate = await task_service.create_task(
         session,
         payload=body.model_dump(),
         created_by=DEFAULT_ACTOR,
+        request_key=key or None,
     )
-    if key:
-        _IDEMPOTENT_TASKS[key] = task["id"]
-    return task
+    return _reused(task) if duplicate else task
 
 
 def _reused(task: dict[str, Any]) -> JSONResponse:

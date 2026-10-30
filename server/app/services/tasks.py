@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..domain import suite as suite_domain
 from ..domain import task as task_domain
-from ..errors import not_found, stale_version, validation_error
+from ..errors import conflict, not_found, stale_version, validation_error
 from ..schemas import TaskRevisionListOut, TaskRevisionRecord
 
 #: 任务详情/列表共用投影：任务 + 应用（拿平台）
@@ -365,14 +365,119 @@ async def find_task_by_name(
 # --------------------------------------------------------------------------- #
 # 创建
 # --------------------------------------------------------------------------- #
-async def create_task(
-    session: AsyncSession, *, payload: dict[str, Any], created_by: str
+async def _lock_request_key(session: AsyncSession, project_id: str, request_key: str) -> None:
+    """事务级 advisory lock：同一个键的并发请求串行化到本事务提交为止。
+
+    没有它，两个并发请求会同时读到"键不存在"，然后一个撞唯一约束、另一个成功；
+    有了它，第二个请求在锁上等待，醒来后读到的就是已提交的键行。锁随事务
+    commit/rollback 自动释放，不需要显式解锁。
+    """
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
+        {"scope": f"task_request_key:{project_id}:{request_key}"},
+    )
+
+
+async def _lookup_request_key(
+    session: AsyncSession, project_id: str, request_key: str
+) -> Any | None:
+    return (
+        await session.execute(
+            text(
+                "SELECT request_key, fingerprint, task_id FROM task_request_keys "
+                " WHERE project_id = :pid AND request_key = :key"
+            ),
+            {"pid": project_id, "key": request_key},
+        )
+    ).mappings().first()
+
+
+async def _record_request_key(
+    session: AsyncSession,
+    *,
+    project_id: str,
+    request_key: str,
+    fingerprint: str,
+    task_id: str,
+) -> None:
+    await session.execute(
+        text(
+            """
+            INSERT INTO task_request_keys
+                (id, project_id, request_key, fingerprint, task_id)
+            VALUES (:id, :pid, :key, :fp, :tid)
+            """
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "pid": project_id,
+            "key": request_key,
+            "fp": fingerprint,
+            "tid": task_id,
+        },
+    )
+
+
+def _create_content(
+    *,
+    application_id: str,
+    name: str,
+    platform: str,
+    test_type: str,
+    build_id: str | None,
+    suite_version_id: str | None,
+    environment_id: str | None,
+    config: dict[str, Any],
 ) -> dict[str, Any]:
+    """创建请求的规范化业务内容（spec §9.1：应用、名称、类型、平台、构建、套件、环境、config）。"""
+    return {
+        "application_id": application_id,
+        "name": name,
+        "platform": platform,
+        "test_type": test_type,
+        "build_id": build_id,
+        "suite_version_id": suite_version_id,
+        "environment_id": environment_id,
+        "config": config,
+    }
+
+
+def _existing_content(task: dict[str, Any]) -> dict[str, Any]:
+    """既有任务的最新修订折算成同一形状，供同名/同键的内容比较。"""
+    revision = task.get("revision") or {}
+    return {
+        "application_id": task["application"]["id"],
+        "name": task["name"],
+        "platform": task.get("platform"),
+        "test_type": task.get("test_type"),
+        "build_id": revision.get("build_id"),
+        "suite_version_id": revision.get("suite_version_id"),
+        "environment_id": revision.get("environment_id"),
+        "config": revision.get("config") or {},
+    }
+
+
+async def create_task(
+    session: AsyncSession,
+    *,
+    payload: dict[str, Any],
+    created_by: str,
+    request_key: str | None = None,
+) -> tuple[dict[str, Any], bool]:
     """创建任务 + 第一条 draft 修订（同一事务）。
 
-    重复提交的处理放在路由层：request_key / Idempotency-Key 头是"同一个请求"，
-    find_task_by_name 是"同一个业务对象"。这里只负责"真的建一条"，
-    这样 service 的语义单一：调用成功就一定新增了一行。
+    返回 (task, duplicate)。duplicate=True 表示没有新建，复用了既有任务
+    （路由据此回 200 而不是 201）。
+
+    两层去重都在本函数内、与建任务同一事务，保证"判定 + 落库"原子：
+
+    1. **请求级幂等**：request_key / Idempotency-Key 是"同一个请求"。键绑定
+       规范化创建内容（应用、名称、类型、平台、构建、套件、环境、config）：
+       同键同内容复用首次的任务，同键不同内容 409 idempotency_conflict 且不产生
+       任何副作用。键落在 task_request_keys 表，跨进程、跨重启有效。
+    2. **业务级判重**：同一应用下同名且未归档的任务，内容完全一致才复用；
+       换构建/套件/类型/config 的同名请求 409 task_configuration_conflict，
+       附 existing_task_id 与差异字段名，绝不悄悄返回旧配置（spec §9.1）。
     """
     application_id = as_uuid(payload.get("application_id"))
     if application_id is None:
@@ -395,6 +500,64 @@ async def create_task(
     )
     if payload.get("suite_version_id") and suite_version is None:
         raise validation_error([f"suite_version_id {payload['suite_version_id']} 不属于该应用"])
+    suite_version_id = str(suite_version["id"]) if suite_version is not None else None
+
+    config = dict(payload.get("config") or {})
+    # 建任务时把应用平台写进 config 快照：任务平台与应用平台不一致是允许的（文档允许
+    # 非 android 端建任务），但 validate 会因此失败，留痕便于前端解释原因。
+    config.setdefault("application_platform", application["platform"])
+
+    content = _create_content(
+        application_id=application_id,
+        name=payload["name"],
+        platform=payload["platform"],
+        test_type=test_type,
+        build_id=build_id,
+        suite_version_id=suite_version_id,
+        environment_id=environment_id,
+        config=config,
+    )
+    fingerprint = task_domain.create_content_fingerprint(content)
+
+    key = (request_key or "").strip()
+    if key:
+        # 先拿锁再读键：读到的键行一定是已提交的，不需要处理"唯一约束竞争"。
+        await _lock_request_key(session, project_id, key)
+        hit = await _lookup_request_key(session, project_id, key)
+        if hit is not None:
+            if hit["fingerprint"] != fingerprint:
+                raise conflict(
+                    "idempotency_conflict",
+                    "同一幂等键提交了不同内容；原请求已生效，本次未执行",
+                    {"request_key": key, "existing_task_id": str(hit["task_id"])},
+                )
+            return await get_task(session, str(hit["task_id"])), True
+
+    existing_id = await find_task_by_name(
+        session, application_id=application_id, name=payload["name"]
+    )
+    if existing_id is not None:
+        existing = await get_task(session, existing_id)
+        differing = task_domain.create_content_diff(_existing_content(existing), content)
+        if differing:
+            raise conflict(
+                "task_configuration_conflict",
+                "同一应用下已有同名任务但配置不同；请选择原任务或另起名称",
+                {
+                    "existing_task_id": existing_id,
+                    "existing_name": existing["name"],
+                    "fields": differing,
+                },
+            )
+        if key:
+            await _record_request_key(
+                session,
+                project_id=project_id,
+                request_key=key,
+                fingerprint=fingerprint,
+                task_id=existing_id,
+            )
+        return existing, True
 
     task_id = str(uuid.uuid4())
     await session.execute(
@@ -417,11 +580,6 @@ async def create_task(
         },
     )
 
-    config = dict(payload.get("config") or {})
-    # 建任务时把应用平台写进 config 快照：任务平台与应用平台不一致是允许的（文档允许
-    # 非 android 端建任务），但 validate 会因此失败，留痕便于前端解释原因。
-    config.setdefault("application_platform", application["platform"])
-
     await _insert_revision(
         session,
         project_id=project_id,
@@ -429,16 +587,26 @@ async def create_task(
         task_id=task_id,
         environment_id=environment_id,
         build_id=build_id,
-        suite_version_id=str(suite_version["id"]) if suite_version is not None else None,
+        suite_version_id=suite_version_id,
         test_type=test_type,
         readiness=task_domain.readiness_after_patch(),
         config=config,
         created_by=created_by,
     )
 
+    if key:
+        # 键行与任务同一事务：任务建失败时键行一起回滚，不会留下指向半成品的键。
+        await _record_request_key(
+            session,
+            project_id=project_id,
+            request_key=key,
+            fingerprint=fingerprint,
+            task_id=task_id,
+        )
+
     bundle = await _fetch_task_bundle(session, task_id)
     assert bundle is not None  # 刚插入，必然存在
-    return bundle
+    return bundle, False
 
 
 # --------------------------------------------------------------------------- #

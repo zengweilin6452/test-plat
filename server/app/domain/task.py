@@ -20,8 +20,10 @@ readiness 校验返回 missing / invalid 两组原因而不是单个布尔：前
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 #: test_tasks.lifecycle 的合法值（与 CHECK 一致）
 LIFECYCLES = ("draft", "ready", "archived")
@@ -174,3 +176,44 @@ def config_merged(old: dict[str, Any] | None, patch: dict[str, Any] | None) -> d
     if patch is None:
         return dict(old or {})
     return dict(patch)
+
+
+# --------------------------------------------------------------------------- #
+# 创建身份：同名复用 / 幂等键的内容比较（spec §9.1）
+# --------------------------------------------------------------------------- #
+#: 决定"是不是同一个创建请求"的字段（应用与名称由查询条件保证相同，不重复比较）。
+#: 键的顺序就是差异字段的输出顺序，前端按它渲染"哪几项不同"。
+CREATE_IDENTITY_FIELDS = (
+    "platform",
+    "test_type",
+    "build_id",
+    "suite_version_id",
+    "environment_id",
+    "config",
+)
+
+
+def canonical_content(value: Any) -> str:
+    """规范化 JSON：对象键顺序不产生新内容（spec §9.1）。
+
+    sort_keys 递归生效，所以 config 里嵌套对象的键序也不影响比较；
+    ensure_ascii=False 让中文按原文参与摘要，避免不同编码方式产生不同指纹。
+    """
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def create_content_fingerprint(content: Mapping[str, Any]) -> str:
+    """创建内容的摘要：幂等键用它判断"同键是否同内容"。"""
+    return hashlib.sha256(canonical_content(dict(content)).encode("utf-8")).hexdigest()
+
+
+def create_content_diff(existing: Mapping[str, Any], requested: Mapping[str, Any]) -> list[str]:
+    """同名任务与本次创建请求的差异字段名（空列表表示同内容，可复用）。
+
+    只返回字段名，不回传字段值：错误 details 里不能出现配置内容（spec §9.1）。
+    """
+    return [
+        name
+        for name in CREATE_IDENTITY_FIELDS
+        if canonical_content(existing.get(name)) != canonical_content(requested.get(name))
+    ]

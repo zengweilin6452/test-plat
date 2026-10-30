@@ -391,14 +391,19 @@ def test_revisions_service_uses_the_frozen_record():
 # 同名任务判重（P2 验收项）
 # --------------------------------------------------------------------------- #
 def test_create_task_dedups_by_application_and_name():
-    """路由层必须有按 (application_id, name) 查既有的分支。"""
+    """service 层必须有按 (application_id, name) 查既有并比较内容的分支。
+
+    工单 07 把判重从路由层移进 create_task：内容比较必须与建任务同一事务，
+    否则"判定通过 → 另一个请求插入 → 再插入"会多出一条任务。
+    """
     import inspect
 
     from app.routers import tasks as tasks_router
     from app.services import tasks as task_service
 
-    router_source = inspect.getsource(tasks_router.create_task)
-    assert "find_task_by_name" in router_source
+    create_source = inspect.getsource(task_service.create_task)
+    assert "find_task_by_name" in create_source
+    assert "create_content_diff" in create_source
     # 命中时用 200（既有）与 201（新建）区分
     assert "status_code=200" in inspect.getsource(tasks_router._reused)
 
