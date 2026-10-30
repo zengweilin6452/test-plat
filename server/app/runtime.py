@@ -62,9 +62,12 @@ async def _run_row(session, run_id: str) -> dict[str, Any] | None:
         await session.execute(
             text(
                 """
-                SELECT id, project_id, state, outcome, resource_id, revision_id,
-                       application_id, started_at
-                  FROM test_runs WHERE id = :id
+                SELECT tr.id, tr.project_id, tr.state, tr.outcome, tr.resource_id,
+                       tr.revision_id, tr.application_id, tr.started_at,
+                       COALESCE(rev.test_type, 'ui') AS test_type
+                  FROM test_runs tr
+                  LEFT JOIN task_revisions rev ON rev.id = tr.revision_id
+                 WHERE tr.id = :id
                 """
             ),
             {"id": str(run_id)},
@@ -173,46 +176,104 @@ def derive_outcome(
     return runs_mod.OUTCOME_NOT_TESTED
 
 
-async def _record_results(session, row: dict, artifacts_dir, extra_event) -> bool:
-    """登记组件、用例及性能摘要；返回是否需要执行原始性能门禁。"""
-    components = list((extra_event or {}).get("components") or [])
-    report = None
-    if artifacts_dir is not None:
-        path = Path(artifacts_dir) / "report.json"
-        if path.is_file():
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                # report.json 损坏（半截写入/编码坏）不该让整个 finalize 崩掉：
-                # 按"没有性能报告"处理，组件与用例仍从事件登记，指标缺失由
-                # metric_summaries.missing_reason 表达，而不是 500。
-                payload = None
-            if isinstance(payload, dict) and "metricsSummary" in payload:
-                report = payload
-    if report is not None and not any(c.get("kind") == "performance" for c in components):
-        components.append({"kind": "performance", "outcome": "not_tested", "reason_code": "gate_policy_missing"})
+def read_report_payload(artifacts_dir: Path | str | None) -> dict[str, Any] | None:
+    """读取 report.json；损坏/缺失按"没有性能报告"处理，不让 finalize 崩掉。"""
+    if artifacts_dir is None:
+        return None
+    path = Path(artifacts_dir) / "report.json"
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) and "metricsSummary" in payload else None
+
+
+def _component_state(component: Mapping[str, Any], overall_state: str) -> str:
+    """组件状态：优先采用 runner 上报值，缺省按整体终态映射。
+
+    非 completed 组件不得携带 outcome（DB CHECK），调用方据此清空结论，
+    但 state / reason_code / summary 仍如实保留（取消/错误不丢组件事实）。
+    """
+    reported = str(component.get("state") or "").strip()
+    if reported in ("pending", "running", "completed", "errored", "cancelled"):
+        return reported
+    return "completed" if overall_state == runs_mod.STATE_COMPLETED else "errored"
+
+
+async def _record_results(
+    session,
+    row: dict,
+    *,
+    components: list[dict[str, Any]],
+    cases: list[dict[str, Any]],
+    report: dict[str, Any] | None,
+    overall_state: str,
+) -> bool:
+    """登记组件、用例及性能摘要；返回是否存在 performance 组件。
+
+    所有终态都登记组件事实；不再把组件 state 硬编码成 completed，也不只在
+    completed 时登记。返回的布尔值表示是否存在性能组件（而非是否有报告）。
+    """
+    items = [dict(c) for c in components if isinstance(c, Mapping)]
+    if (
+        report is not None
+        and overall_state == runs_mod.STATE_COMPLETED
+        and not any(c.get("kind") == "performance" for c in items)
+    ):
+        # 有 report.json 却没上报 performance 组件：按性能组件登记，避免指标丢失。
+        items.append(
+            {
+                "kind": "performance",
+                "state": "completed",
+                "outcome": "not_tested",
+                "reason_code": "gate_policy_missing",
+            }
+        )
+
     has_perf = False
-    for component in components:
+    for component in items:
         kind = component.get("kind")
         if kind not in ("ui", "performance"):
             continue
-        outcome = component.get("outcome") or "not_tested"
-        reason = component.get("reason_code") or ("gate_policy_missing" if kind == "performance" else "no_tests")
+        state = _component_state(component, overall_state)
+        outcome = component.get("outcome")
+        if state == runs_mod.STATE_COMPLETED:
+            outcome = outcome if outcome in runs_mod.ALL_OUTCOMES else "not_tested"
+        else:
+            outcome = None
+        reason = component.get("reason_code")
+        if state == runs_mod.STATE_COMPLETED:
+            if outcome == runs_mod.OUTCOME_NOT_TESTED:
+                reason = reason or (
+                    "gate_policy_missing" if kind == "performance" else "no_tests"
+                )
+            else:
+                reason = None
+        else:
+            reason = reason or None
         cid = (await session.execute(text(
             "INSERT INTO run_components (id, project_id, run_id, kind, adapter_key, adapter_version, state, outcome, reason_code, summary) "
-            "VALUES (gen_random_uuid(), :pid, :rid, :kind, :adapter, '1', 'completed', :outcome, :reason, CAST(:summary AS jsonb)) "
-            "ON CONFLICT (project_id, run_id, kind) DO UPDATE SET summary = EXCLUDED.summary RETURNING id"
+            "VALUES (gen_random_uuid(), :pid, :rid, :kind, :adapter, '1', :state, :outcome, :reason, CAST(:summary AS jsonb)) "
+            "ON CONFLICT (project_id, run_id, kind) DO UPDATE SET state = EXCLUDED.state, "
+            "outcome = EXCLUDED.outcome, reason_code = EXCLUDED.reason_code, summary = EXCLUDED.summary "
+            "RETURNING id"
         ), {"pid": row["project_id"], "rid": row["id"], "kind": kind,
-            "adapter": "mobile_perf" if kind == "performance" else "mobile_auto", "outcome": outcome,
-            "reason": reason if outcome == "not_tested" else None,
+            "adapter": "mobile_perf" if kind == "performance" else "mobile_auto",
+            "state": state, "outcome": outcome,
+            "reason": reason,
             "summary": json.dumps(report if kind == "performance" and report is not None else component.get("summary") or {}, ensure_ascii=False)})).scalar_one()
         if kind == "ui":
-            for case in (extra_event or {}).get("cases") or []:
+            for case in cases:
+                if not isinstance(case, Mapping) or not case.get("case_key"):
+                    continue
                 await session.execute(text(
                     "INSERT INTO case_results (id, project_id, component_id, case_key, outcome, duration_ms, error_summary) "
                     "VALUES (gen_random_uuid(), :pid, :cid, :key, :outcome, :duration, :error) "
                     "ON CONFLICT (project_id, component_id, case_key, attempt) DO NOTHING"
-                ), {"pid": row["project_id"], "cid": cid, "key": case["case_key"], "outcome": case["outcome"],
+                ), {"pid": row["project_id"], "cid": cid, "key": case["case_key"],
+                    "outcome": case.get("outcome") or "errored",
                     "duration": case.get("duration_ms"), "error": case.get("error_summary")})
         else:
             has_perf = True
@@ -227,6 +288,75 @@ async def _record_results(session, row: dict, artifacts_dir, extra_event) -> boo
                         ":statistic, :sample_count, :value, :missing_reason, :missing_reason_text) ON CONFLICT DO NOTHING"
                     ), {"pid": row["project_id"], "cid": cid, "version": mapped.metric_version, **metric.as_dict()})
     return has_perf
+
+
+async def _aggregate_component_outcome(session, run_id: str) -> tuple[str | None, str | None]:
+    """组件结论 -> 整体结论（failed > not_tested > passed），并给出 not_tested 原因。"""
+    rows = (
+        await session.execute(
+            text(
+                "SELECT state, outcome, reason_code FROM run_components "
+                "WHERE run_id = :rid ORDER BY kind"
+            ),
+            {"rid": run_id},
+        )
+    ).mappings().all()
+    if not rows:
+        return None, None
+    # 组件没正常完成（errored/cancelled/pending）时，整体不能伪装成 passed。
+    incomplete = [row for row in rows if row["state"] != runs_mod.STATE_COMPLETED]
+    if incomplete:
+        reason = next(
+            (row["reason_code"] for row in incomplete if row["reason_code"]),
+            "component_not_completed",
+        )
+        return runs_mod.OUTCOME_NOT_TESTED, reason
+    outcomes = [str(row["outcome"]) for row in rows if row["outcome"]]
+    if not outcomes:
+        return None, None
+    if runs_mod.OUTCOME_FAILED in outcomes:
+        return runs_mod.OUTCOME_FAILED, None
+    if runs_mod.OUTCOME_NOT_TESTED in outcomes:
+        reason = next(
+            (
+                row["reason_code"]
+                for row in rows
+                if row["outcome"] == runs_mod.OUTCOME_NOT_TESTED and row["reason_code"]
+            ),
+            None,
+        )
+        return runs_mod.OUTCOME_NOT_TESTED, reason
+    return runs_mod.OUTCOME_PASSED, None
+
+
+async def _apply_original_gate(session, run_id: str) -> dict[str, Any]:
+    """在 finalizing 事务内计算原始判定，并同步 performance 组件结论。
+
+    必须在 transition 到 completed 之前调用：门禁显式接收 run_complete=True，
+    不再依赖"先把 run 写成 completed 再直接 UPDATE outcome"的路径。
+    """
+    from .routers.analyses import evaluate_run_original
+
+    evaluation = await evaluate_run_original(
+        session,
+        run_id,
+        request_key="original:" + run_id,
+        run_complete=True,
+    )
+    await session.execute(
+        text(
+            "UPDATE run_components SET outcome = :outcome, reason_code = :reason "
+            "WHERE run_id = :rid AND kind = 'performance'"
+        ),
+        {
+            "rid": run_id,
+            "outcome": evaluation["verdict"],
+            "reason": evaluation["reason_code"]
+            if evaluation["verdict"] == runs_mod.OUTCOME_NOT_TESTED
+            else None,
+        },
+    )
+    return evaluation
 
 
 async def finalize_run(
@@ -266,101 +396,191 @@ async def finalize_run(
             already_terminal=True,
         )
 
-    sha_map: dict[str, str] = {}
-    artifact_count = 0
+    # 磁盘侧（扫描 / 哈希 / junit / report 读取）放在事务外，避免长事务读大文件；
+    # 对应的数据库行在下面的事务里登记，保证"产物 + 结论 + 终态 + 事件"原子可见。
+    scanned = (
+        artifacts_mod.scan_artifacts(Path(artifacts_dir))
+        if artifacts_dir is not None and Path(artifacts_dir).is_dir()
+        else []
+    )
+    artifact_count = len(scanned)
+    sha_map: dict[str, str] = {item.relative_key: item.sha256 for item in scanned}
     junit: dict[str, Any] = {"present": False}
-
+    report: dict[str, Any] | None = None
     if artifacts_dir is not None and Path(artifacts_dir).is_dir():
         junit = read_junit_summary(Path(artifacts_dir) / "junit.xml")
+        report = read_report_payload(artifacts_dir)
 
-    final_outcome = derive_outcome(
-        state=state, explicit_outcome=outcome, junit=junit, reason=reason
-    )
+    components = list((extra_event or {}).get("components") or [])
+    cases = list((extra_event or {}).get("cases") or [])
+    target_state = state
+    final_outcome: str | None = None
+    not_tested_reason: str | None = None
 
-    # 1) 先在**独立事务**里登记产物：产物只依赖磁盘，不依赖状态机的并发结果。
-    #    即使后面 transition 因并发 409 失败，产物行也是幂等的（logical_key 去重）。
-    if artifacts_dir is not None and Path(artifacts_dir).is_dir():
-        async with sessionmaker() as session:
-            async with session.begin():
-                result = await artifacts_mod.finalize_artifacts(
+    # 事件 + 组件/用例/指标 + 原始判定 + 终态 + 租约释放：同一个事务。
+    async with sessionmaker() as session:
+        async with session.begin():
+            locked_row = (
+                await session.execute(
+                    text(
+                        "SELECT state, outcome FROM test_runs WHERE id = :id FOR UPDATE"
+                    ),
+                    {"id": rid},
+                )
+            ).mappings().one()
+            locked_state = str(locked_row["state"])
+            if locked_state in runs_mod.TERMINAL_STATES:
+                return FinalizeResult(
+                    rid,
+                    locked_state,
+                    locked_row["outcome"],
+                    artifact_count,
+                    sha_map,
+                    already_terminal=True,
+                )
+
+            if scanned:
+                await artifacts_mod.register_files(
                     session,
                     project_id=pid,
                     run_id=rid,
-                    artifacts_dir=artifacts_dir,
+                    files=scanned,
                     artifacts_root=settings.artifacts_dir,
                 )
-        artifact_count = int(result["files"])
-        sha_map = dict(result["sha256s"])
 
-    not_tested_reason = reason if final_outcome == runs_mod.OUTCOME_NOT_TESTED else None
+            has_perf = await _record_results(
+                session,
+                row,
+                components=components,
+                cases=cases,
+                report=report,
+                overall_state=target_state,
+            )
 
-    # 2) 事件 + 状态 + 租约释放放在同一事务里
-    async with sessionmaker() as session:
-        async with session.begin():
-            locked = (await session.execute(text("SELECT state FROM test_runs WHERE id = :id FOR UPDATE"), {"id": rid})).scalar_one()
-            if locked in runs_mod.TERMINAL_STATES:
-                return FinalizeResult(rid, locked, row["outcome"], artifact_count, sha_map, already_terminal=True)
-            has_perf = await _record_results(session, row, artifacts_dir, extra_event) if state == runs_mod.STATE_COMPLETED else False
-            payload = {
-                "stage": "finish",
-                "state": state,
-                "outcome": final_outcome,
-                "reason": reason,
-                "artifact_count": artifact_count,
-                "junit": junit,
-            }
+            # 按测试类型强制：performance/joint 的 completed 必须有性能组件；
+            # 否则降级为 errored，绝不产生"completed 缺 original"的新性能运行。
+            perf_count = (
+                await session.execute(
+                    text(
+                        "SELECT count(*) FROM run_components "
+                        "WHERE run_id = :rid AND kind = 'performance'"
+                    ),
+                    {"rid": rid},
+                )
+            ).scalar_one()
+            if target_state == runs_mod.STATE_COMPLETED:
+                # 数据库里已有性能组件也算（例如重试时组件先于判定写入过）。
+                has_perf = has_perf or int(perf_count) > 0
+                if str(row["test_type"]) in ("performance", "joint") and int(perf_count) == 0:
+                    target_state = runs_mod.STATE_ERRORED
+                    final_outcome = None
+                    not_tested_reason = None
+                    reason = "missing_performance_component"
+                    has_perf = False
+
+            if target_state == runs_mod.STATE_COMPLETED:
+                if has_perf:
+                    # finalizing 内完成原始判定（显式 run_complete=True），
+                    # 再把组件结论与整体聚合一起收敛；失败会回滚整个事务。
+                    evaluation = await _apply_original_gate(session, rid)
+                    original_count = (
+                        await session.execute(
+                            text(
+                                "SELECT count(*) FROM gate_evaluations e "
+                                "JOIN run_components rc ON rc.id = e.component_id "
+                                "WHERE rc.run_id = :rid AND e.mode = 'original'"
+                            ),
+                            {"rid": rid},
+                        )
+                    ).scalar_one()
+                    if int(original_count) == 0:
+                        # 理论上不可达；宁可 errored 也不能 completed 缺 original。
+                        target_state = runs_mod.STATE_ERRORED
+                        final_outcome = None
+                        reason = "original_missing"
+                        not_tested_reason = None
+                    else:
+                        final_outcome, component_reason = await _aggregate_component_outcome(
+                            session, rid
+                        )
+                        if final_outcome is None:
+                            final_outcome = evaluation["verdict"]
+                        if final_outcome == runs_mod.OUTCOME_NOT_TESTED:
+                            not_tested_reason = (
+                                component_reason
+                                or evaluation.get("reason_code")
+                                or reason
+                                or "not_tested"
+                            )
+                            reason = not_tested_reason
+                        else:
+                            not_tested_reason = None
+                else:
+                    # UI-only（或没有性能组件）：优先用组件聚合，其次 junit/显式结论。
+                    final_outcome, component_reason = await _aggregate_component_outcome(
+                        session, rid
+                    )
+                    if final_outcome is None:
+                        final_outcome = derive_outcome(
+                            state=target_state,
+                            explicit_outcome=outcome,
+                            junit=junit,
+                            reason=reason,
+                        )
+                        component_reason = None
+                    if final_outcome == runs_mod.OUTCOME_NOT_TESTED:
+                        not_tested_reason = component_reason or reason or "not_tested"
+                        reason = not_tested_reason
+                    else:
+                        not_tested_reason = None
+
+            payload: dict[str, Any] = {}
             if extra_event:
                 payload.update({str(k): v for k, v in extra_event.items()})
+            # 收敛事实最后写入：extra_event 不能覆盖 state/outcome/证据计数。
+            payload.update(
+                {
+                    "stage": "finish",
+                    "state": target_state,
+                    "outcome": final_outcome,
+                    "reason": reason,
+                    "artifact_count": artifact_count,
+                    "junit": junit,
+                }
+            )
+
             # 收敛目标可能是多步之外的终态（runner 崩溃时停留在 dispatching），
             # 先沿正向边推到前驱，再由 transition 做最后一步，绝不跳过状态机。
             current = await _advance_to(
-                session, rid, str(locked), state, reason=reason, actor=actor
+                session, rid, locked_state, target_state, reason=reason, actor=actor
             )
             await runs_mod.transition(
                 session,
                 rid,
                 current,
-                state,
-                outcome=final_outcome,
+                target_state,
+                outcome=final_outcome if target_state == runs_mod.STATE_COMPLETED else None,
                 reason=not_tested_reason or reason,
                 actor=actor,
             )
-            if has_perf:
-                # 判定必须在运行已是 completed 之后：gate 把未完成的运行视为 run_incomplete。
-                from .routers.analyses import create_gate_evaluation
-                evaluation = await create_gate_evaluation(rid, {"request_key": "original:" + rid}, session)
-                await session.execute(text(
-                    "UPDATE run_components SET outcome = :outcome, reason_code = :reason "
-                    "WHERE run_id = :rid AND kind = 'performance'"
-                ), {"rid": rid, "outcome": evaluation["verdict"], "reason": evaluation["reason_code"]})
-                component_outcomes = (await session.execute(text(
-                    "SELECT outcome FROM run_components WHERE run_id = :rid"
-                ), {"rid": rid})).scalars().all()
-                final_outcome = ("failed" if "failed" in component_outcomes else
-                                 "not_tested" if "not_tested" in component_outcomes else "passed")
-                reason = evaluation["reason_code"] if final_outcome == "not_tested" else None
-                await session.execute(text(
-                    "UPDATE test_runs SET outcome = :outcome, reason_code = :reason, not_tested_reason = :reason "
-                    "WHERE id = :rid"
-                ), {"rid": rid, "outcome": final_outcome, "reason": reason})
-                payload.update(outcome=final_outcome, reason=reason)
             await events_mod.append_event(
                 session, project_id=pid, run_id=rid,
                 source_key=events_mod.SOURCE_RECONCILER if actor == "reconciler" else "runtime",
-                source_event_id=events_mod.event_id_for("finish", rid, state, reason),
-                event_type="error" if state == runs_mod.STATE_ERRORED else "finish", payload=payload,
+                source_event_id=events_mod.event_id_for("finish", rid, target_state, reason),
+                event_type="error" if target_state == runs_mod.STATE_ERRORED else "finish",
+                payload=payload,
             )
             if release_lease_reason:
                 await leases_mod.release_lease(
                     session, run_id=rid, reason=release_lease_reason
                 )
 
-    # 3) 设备本机锁收尾（DB 租约已释放，本地锁也要清，否则下次派发会被误判 busy）
+    # 设备本机锁收尾（DB 租约已释放，本地锁也要清，否则下次派发会被误判 busy）
     await release_local_lock_for_run(rid)
 
     return FinalizeResult(
         run_id=rid,
-        state=state,
+        state=target_state,
         outcome=final_outcome,
         artifact_count=artifact_count,
         sha256s=sha_map,
