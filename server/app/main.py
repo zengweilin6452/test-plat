@@ -12,7 +12,10 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .db import get_session
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -242,11 +245,31 @@ __all__ = ["app", "main", "lifespan"]
 
 
 @app.get("/api/v1/health")
-async def health() -> dict[str, object]:
+async def health(session: AsyncSession = Depends(get_session)) -> dict[str, object]:
+    """存活与能力探测分开呈现（工单 21、AC-INT-02/03）：
+
+    - db：SELECT 1 实测，ok/fail；
+    - vendor：两个 vendor 目录是否就位，present/missing；
+    - runner：API 视角无法确认执行侧数量，恒为 null（未知 ≠ 失败）；
+    - 不输出数据库主机（无凭据/拓扑泄露），不启动运行、不占设备。
+    """
+    from sqlalchemy import text
+
+    try:
+        await session.execute(text("SELECT 1"))
+        db_state = "ok"
+    except Exception:  # noqa: BLE001 - 探测把失败如实呈现，不抛 500
+        db_state = "fail"
+    vendor = {
+        name: "present" if (settings.vendor_dir / name).is_dir() else "missing"
+        for name in ("mobile_auto", "mobile_perf")
+    }
     return {
-        "status": "ok",
+        "status": "ok" if db_state == "ok" else "degraded",
         "version": app.version,
-        "database_target": settings.database_url.split("@")[-1],
+        "db": db_state,
+        "vendor": vendor,
+        "runners": {"active": None},
     }
 
 
