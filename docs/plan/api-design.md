@@ -128,6 +128,13 @@ POST   /api/v1/tasks/{id}/suites/discover  # pytest --collect-only
 ### 2.4 运行
 
 ```http
+GET /api/v1/runs?state=completed&test_type=ui&q=RUN-47&cursor=…&limit=50
+// -> { items, total, next_cursor, has_more }
+```
+
+过滤与分页（spec §9.3）：`scope`（android/ios/web）、`state`（七态）、`application_id`、`test_type`（ui/performance/joint）；`q` 在**完整过滤集合**里按文字包含匹配 display_id / 任务名 / 应用名（`position()` 实现，`%`/`_` 按字面处理，不解释为 SQL 通配）。游标 `cursor` 封了过滤条件快照与创建水位（`display_no`），换过滤条件带旧游标或非法游标返回 400 `validation_error`；翻页沿 `next_cursor` 直到 `has_more=false`。报告中心传 `state=completed`，只取完成报告。
+
+```http
 POST /api/v1/runs
 { "request_key": "…", "application_id": "…", "platform": "android",
   "task_id": 12, "revision_id": 7,          // revision_id 可省略

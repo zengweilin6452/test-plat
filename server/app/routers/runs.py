@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import shutil
@@ -82,33 +83,85 @@ _EVENT_PROGRESS_SQL = """
 async def list_runs(
     scope: Annotated[str | None, Query()] = None,
     state: Annotated[str | None, Query()] = None,
+    application_id: Annotated[str | None, Query()] = None,
+    test_type: Annotated[str | None, Query()] = None,
+    q: Annotated[str | None, Query()] = None,
+    cursor: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, object]:
-    """运行列表。scope 只接受 android / ios / web，其他值 422（与 /resources 一致）。"""
+    """运行列表（报告中心传 state=completed 只取完成报告）。
+
+    过滤：scope（android/ios/web）、state（七态）、application_id、test_type，
+    q 在**完整过滤集合**里按文字包含匹配 display_id / 任务名 / 应用名
+    （position() 不解释 % 和 _，输入不会被当成 SQL 通配符）。
+
+    游标分页：`display_no` 是创建时持久分配的全局序号，天然就是"创建水位"。
+    cursor 里同时封了过滤条件签名，换一组过滤条件带旧游标 → 422，不会拼出
+    两个过滤集合的混合页（spec §9.3、AC-FILTER-01）。
+    """
+    if scope and scope not in ("android", "ios", "web"):
+        raise validation_error([f"scope 只支持 android / ios / web，收到 {scope!r}"])
+    if state and state not in runs_mod.ALL_STATES:
+        raise validation_error(
+            [f"state 只支持 {' / '.join(runs_mod.ALL_STATES)}，收到 {state!r}"]
+        )
+    if test_type and test_type not in ("ui", "performance", "joint"):
+        raise validation_error(["test_type 只支持 ui / performance / joint"])
+    if application_id:
+        try:
+            uuid.UUID(str(application_id))
+        except ValueError:
+            raise validation_error(["application_id 必须是 uuid"])
+
+    filters = {
+        "scope": scope,
+        "state": state,
+        "application_id": application_id,
+        "test_type": test_type,
+        "q": q,
+    }
     where: list[str] = []
     params: dict[str, object] = {"limit": limit}
 
     if scope:
-        if scope not in {"android", "ios", "web"}:
-            from fastapi import HTTPException
-
-            raise HTTPException(
-                status_code=422,
-                detail=f"scope 只支持 android / ios / web，收到 {scope!r}",
-            )
         where.append("n.platform = :scope")
         params["scope"] = scope
     if state:
         where.append("n.state = :state")
         params["state"] = state
+    if application_id:
+        where.append("n.application_id = CAST(:aid AS uuid)")
+        params["aid"] = str(application_id)
+    if test_type:
+        where.append("tr.test_type = :tt")
+        params["tt"] = test_type
+    if q:
+        q = str(q).strip()
+        if q:
+            params["q"] = q
+            where.append(
+                "(position(lower(:q) IN lower('RUN-' || lpad(n.display_no::text, 4, '0'))) > 0"
+                " OR position(lower(:q) IN lower(COALESCE(t.name, ''))) > 0"
+                " OR position(lower(:q) IN lower(a.name)) > 0)"
+            )
+        else:
+            filters["q"] = None
+    if cursor:
+        where.append("n.display_no < :before_no")
+        params["before_no"] = _parse_cursor(cursor, filters)
 
     sql = _RUNS_SQL
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY n.created_at DESC, n.id DESC LIMIT :limit"
+    # display_no 唯一且随创建递增：排序稳定，分页水位就是它自己
+    sql += " ORDER BY n.display_no DESC LIMIT :limit"
 
+    # 多取一条判断 has_more，客户端不用再空跑一页
+    params["limit"] = limit + 1
     rows = (await session.execute(text(sql), params)).mappings().all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
     run_ids = [row["id"] for row in rows]
     progress: dict[object, int] = {}
     if run_ids:
@@ -140,7 +193,37 @@ async def list_runs(
                 "created_at": row["created_at"],
             }
         )
-    return {"items": items, "total": len(items)}
+    return {
+        "items": items,
+        "total": len(items),
+        # cursor 指向本页最后一条的水位；翻页原样传回即可，尽头/空页为 None
+        "next_cursor": _cursor_token(filters, int(rows[-1]["display_no"]))
+        if has_more and rows
+        else None,
+        "has_more": has_more,
+    }
+
+
+#: cursor = base64url(json{f: 过滤条件快照, n: 水位 display_no})。
+#: 过滤条件封进 token：带旧游标换过滤条件必须 422，不能静默混页。
+def _cursor_token(filters: dict[str, object], display_no: int) -> str:
+    payload = json.dumps({"f": filters, "n": display_no}, ensure_ascii=False, sort_keys=True)
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+
+
+def _parse_cursor(cursor: str, filters: dict[str, object]) -> int:
+    try:
+        data = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")))
+        if (
+            isinstance(data, dict)
+            and isinstance(data.get("n"), int)
+            and not isinstance(data.get("n"), bool)
+            and data.get("f") == filters
+        ):
+            return int(data["n"])
+    except Exception:  # noqa: BLE001 - 任何解析失败都按非法游标处理
+        pass
+    raise validation_error(["cursor 非法或不匹配当前过滤条件，请从头开始浏览"])
 
 
 @router.get("/runs/{run_id}")

@@ -543,6 +543,9 @@ class RunsOut(BaseModel):
 
     items: list[RunRecordOut]
     total: int
+    #: 下一页游标（封了过滤条件与创建水位）；尽头/空页为 None
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class TaskRunRefOut(BaseModel):

@@ -438,8 +438,8 @@ def make_run(sync_engine):
                     "         CASE WHEN :needs_start THEN now() ELSE NULL END,"
                     "         CASE WHEN :terminal THEN now() ELSE NULL END,"
                     # ck_test_runs_state_outcome_pair: completed 行必须自带 outcome，
-                    # 否则 INSERT 本身就违反 CHECK（测试稍后自会 UPDATE 覆盖）。
-                    "         CASE WHEN :terminal THEN 'passed' ELSE NULL END)"
+                    # errored/cancelled 行必须 outcome 为 NULL（否则 INSERT 违反 CHECK）。
+                    "         CASE WHEN :state = 'completed' THEN 'passed' ELSE NULL END)"
                     " RETURNING id"
                 ),
                 {

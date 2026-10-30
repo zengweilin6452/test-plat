@@ -909,6 +909,26 @@
           },
           {
             "in": "query",
+            "name": "application_id",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "test_type",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false
+          },
+          {
+            "in": "query",
             "name": "limit",
             "required": false
           }
@@ -3066,12 +3086,28 @@
     "RunsOut": {
       "additionalProperties": true,
       "properties": {
+        "has_more": {
+          "default": false,
+          "title": "Has More",
+          "type": "boolean"
+        },
         "items": {
           "items": {
             "$ref": "#/components/schemas/RunRecordOut"
           },
           "title": "Items",
           "type": "array"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Next Cursor"
         },
         "total": {
           "title": "Total",
