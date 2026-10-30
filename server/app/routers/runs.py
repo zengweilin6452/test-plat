@@ -476,9 +476,29 @@ async def _insert_run(session: AsyncSession, body: Mapping, *, internal: bool = 
             raise device_not_ready(str(resource_id), resource["status"])
         resource_profile_id = resource["profile_id"]
 
+    # AC-GATE-01：排队即固定默认策略（id+版本+规则快照）。跑完前改策略版本
+    # 不影响这次执行的判定依据；快照里的 rules 只是审计副本，判定按 id 读行。
+    policy_snapshot = (
+        await session.execute(
+            text(
+                "SELECT id, version, rules FROM gate_policies"
+                " WHERE application_id = :aid"
+                " ORDER BY version DESC, created_at DESC, id DESC LIMIT 1"
+            ),
+            {"aid": application_id},
+        )
+    ).mappings().first()
+
     snapshot = {
         **revision_config,
         "request_key": request_key,
+        "gate_policy": {
+            "id": str(policy_snapshot["id"]),
+            "version": int(policy_snapshot["version"]),
+            "rules": policy_snapshot["rules"],
+        }
+        if policy_snapshot
+        else None,
         "platform": platform,
         "application_id": application_id,
         "module": "perf" if revision["test_type"] == "performance" else revision["test_type"],

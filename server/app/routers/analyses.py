@@ -56,7 +56,7 @@ router = APIRouter(tags=["analyses"])
 _RUN_SQL = """
     SELECT r.id, r.project_id, r.application_id, r.platform, r.revision_id,
            r.state, r.outcome, r.reason_code, r.not_tested_reason,
-           r.started_at, r.ended_at, r.created_at, r.profile_id,
+           r.started_at, r.ended_at, r.created_at, r.profile_id, r.config_snapshot,
            a.name AS application_name,
            tr.task_id, tr.test_type,
            t.name AS task_name,
@@ -488,8 +488,10 @@ async def _default_baseline_run_id(
         if run_profile and profile and profile == run_profile:
             chosen = row
             break
+    # 工单 13：没有同档案基线就记录缺失，不回退跨档案——跨档案比较没有可比性，
+    # 交给判定流程报 baseline_missing / profile_mismatch，而不是悄悄比一个错误档案。
     if chosen is None:
-        chosen = rows[0]
+        return None
     snapshot = chosen["metrics_snapshot"]
     run_ids = _snapshot_run_ids(snapshot)
     if not run_ids:
@@ -601,21 +603,6 @@ async def _missing_policy_placeholder(session: AsyncSession, application_id: Any
     ).scalar()
 
 
-async def _policy_row(session: AsyncSession, policy_id: str, application_id: Any):
-    row = (
-        await session.execute(
-            text(
-                "SELECT id, project_id, application_id, name, version, rules "
-                "FROM gate_policies WHERE id::text = :policy_id"
-            ),
-            {"policy_id": policy_id},
-        )
-    ).mappings().first()
-    if row is None:
-        raise HTTPException(status_code=404, detail="gate policy not found")
-    return dict(row)
-
-
 async def _baseline_row(session: AsyncSession, baseline_id: str):
     row = (
         await session.execute(
@@ -702,38 +689,61 @@ async def evaluate_run_original(
     ).first() is not None
     mode = "reanalysis" if original_exists else "original"
 
+    explicit_policy = bool(policy_id)
     if not policy_id:
-        policy_id = await _latest_policy_id(session, run["application_id"])
-    if not baseline_run_id:
-        baseline_run_id = await _default_baseline_run_id(
-            session, run["project_id"], run["application_id"], run["profile_spec"]
+        # AC-GATE-01：排队时固定在 config_snapshot.gate_policy 的策略版本，
+        # 排队期间新版本不影响这次执行的判定依据；旧运行没有快照才回退"最新"。
+        snapshot_policy = run.get("config_snapshot")
+        snapshot_policy = (
+            snapshot_policy.get("gate_policy")
+            if isinstance(snapshot_policy, dict)
+            else None
         )
+        if isinstance(snapshot_policy, dict) and snapshot_policy.get("id"):
+            policy_id = snapshot_policy["id"]
+        else:
+            policy_id = await _latest_policy_id(session, run["application_id"])
     # 缺策略/缺基线不是「通过」，而是 not_tested（三态门禁不压二态）。
-    # 两者原因分开报告（工单 12）：补策略和补基线是两条完全不同的排查路径。
-    if not policy_id:
+    # 两者原因分开报告（工单 12）；策略先核验再谈基线：not_tested 行的 policy_id
+    # 必须是真实存在的行，显式给来的失效 id 不能被引用进判定记录。
+    policy = (
+        await session.execute(
+            text(
+                "SELECT id, project_id, application_id, name, version, rules "
+                "FROM gate_policies WHERE id::text = :policy_id"
+            ),
+            {"policy_id": str(policy_id)},
+        )
+    ).mappings().first()
+    if policy is None:
+        if explicit_policy:
+            # 显式指定的策略版本失效：按不存在拒绝，绝不偷偷替换成最新版本
+            raise HTTPException(status_code=404, detail="gate policy not found")
         return await _not_tested_evaluation(
             session,
             run=run,
             component=component,
             mode=mode,
             request_key=request_key,
-            policy_id=policy_id,
+            policy_id=None,
             reason_code=REASON_GATE_POLICY_MISSING,
             reason_text="缺少门禁策略，无法判定",
         )
     if not baseline_run_id:
+        baseline_run_id = await _default_baseline_run_id(
+            session, run["project_id"], run["application_id"], run["profile_spec"]
+        )
+    if not baseline_run_id:
         return await _not_tested_evaluation(
             session,
             run=run,
             component=component,
             mode=mode,
             request_key=request_key,
-            policy_id=policy_id,
+            policy_id=policy["id"],
             reason_code=REASON_BASELINE_MISSING,
             reason_text="缺少可比基线，无法判定",
         )
-
-    policy = await _policy_row(session, str(policy_id), run["application_id"])
     baseline_run = await _load_run(session, str(baseline_run_id))
 
     baseline_component = next(
@@ -902,7 +912,7 @@ async def _evaluation_response(session: AsyncSession, evaluation_id: Any, *, cre
         )
     ).mappings().first()
     checks = row["checks"] if isinstance(row["checks"], list) else []
-    return {
+    payload = {
         "id": _text_id(row["id"]),
         "evaluation_id": _text_id(row["id"]),
         "mode": row["mode"],
@@ -921,3 +931,10 @@ async def _evaluation_response(session: AsyncSession, evaluation_id: Any, *, cre
         "note": "试算不改写历史报告",
         "profile_mismatch_reason": REASON_PROFILE_MISMATCH,
     }
+    # 幂等重放用 200 与"真的新建了"的 201 区分（api-design.md §1.3 同一约定）
+    if created:
+        return payload
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(status_code=200, content=jsonable_encoder(payload))

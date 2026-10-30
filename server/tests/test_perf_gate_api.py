@@ -700,7 +700,8 @@ def test_evaluation_request_key_is_idempotent(client, seed):
     }
     first = client.post(f"{API}/runs/{seed['runs']['head']}/gate-evaluations", json=payload)
     second = client.post(f"{API}/runs/{seed['runs']['head']}/gate-evaluations", json=payload)
-    assert first.status_code == second.status_code == 201
+    # 工单 13：幂等重放用 200 与"真的新建了"的 201 区分（api-design.md §1.3）
+    assert first.status_code == 201 and second.status_code == 200
     assert first.json()["id"] == second.json()["id"]
     assert second.json()["created"] is False
 
