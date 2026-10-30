@@ -303,7 +303,11 @@ def test_report_endpoint_returns_artifact_metrics(
     response = api_client.get(f"/api/v1/runs/{run_id}/report", headers=CLIENT_HEADERS)
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["runId"] == run_id
+    # 报告里的编号是持久展示编号（工单 09），精确身份仍是 UUID
+    assert body["id"] == run_id
+    detail = api_client.get(f"/api/v1/runs/{run_id}").json()
+    assert body["runId"] == detail["display_id"]
+    assert body["runId"].startswith("RUN-")
     assert body["metricsSummary"]["cpu_process_pct"]["median"] == 20.0
     assert body["junit"]["tests"] == 2
     assert body["verdict"] == "not_tested"

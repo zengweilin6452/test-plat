@@ -156,6 +156,8 @@ GET  /api/v1/runs/47
 
 `stage`（1-4）规则与原型一致：`progress<40`→1、`<85`→2、`==100`→3、终态→4。`progress` 由 run_events 的阶段权重算（ui：就绪 20 / pytest 80 / 归档 100；perf：就绪 15 / 采集 75 / 判定 100）。
 
+`display_id`（`RUN-0001`）由 `test_runs.display_no` **持久分配**：新增运行、过滤、分页、历史数据回填或删除都不重编号，同一个运行在任务列表、运行列表/详情、WS 快照、报告与导出里永远是同一个字符串。`id`（UUID）才是精确身份——路径参数只接受 UUID，`GET /runs/RUN-0001` 返回 404。
+
 ```http
 POST /api/v1/runs/47/cancel
 // 202 -> { "id": 47, "state": "running", "cancel_requested": true,

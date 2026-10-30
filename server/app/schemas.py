@@ -549,6 +549,8 @@ class TaskRunRefOut(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: UuidStr
+    #: 运行的持久展示编号（RUN-0001），与运行页/报告同一字符串
+    display_id: str | None = None
     state: RunState
     outcome: Outcome | None = None
     created_at: datetime | None = None
