@@ -51,3 +51,10 @@ def test_schema_groups_are_consistent_with_tables(client):
 
 def tables_set(body: dict) -> set[str]:
     return {table["name"] for table in body["tables"]}
+
+
+def test_schema_tables_carry_group_for_page_grouping(client):
+    """数据设计页按 table.group 分组：API 必须给每张表带上分组名（工单 23 走查发现）。"""
+    body = client.get("/api/v1/schema").json()
+    assert all(table.get("group") for table in body["tables"]), "每张表都必须带分组"
+    assert not any(table["group"] == "未分组" for table in body["tables"])

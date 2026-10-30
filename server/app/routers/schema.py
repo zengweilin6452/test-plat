@@ -46,6 +46,16 @@ async def get_schema() -> dict[str, Any]:
         }
         for g in doc["groups"]
     ]
+    # 每张表带上自己的分组名：数据设计页按 table.group 分组展示（工单 22/23），
+    # 没有这个字段全部表都会落进"未分组"。
+    group_of = {
+        table: group["name"] for group in groups for table in group["tables"]
+    }
+    tables = []
+    for table in doc["tables"]:
+        row = dict(table)
+        row.setdefault("group", group_of.get(table["name"]))
+        tables.append(row)
     return {
         "version": doc["version"],
         "table_count": doc["table_count"],
@@ -54,5 +64,5 @@ async def get_schema() -> dict[str, Any]:
         "groups": groups,
         "lanes": doc["lanes"],
         "flows": doc["flows"],
-        "tables": doc["tables"],
+        "tables": tables,
     }
