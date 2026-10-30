@@ -102,7 +102,10 @@ def check_readiness(
       2. 任务平台必须与应用的 platform 一致；
       3. DB 有一条跨列 CHECK「readiness='validated' 要求 build_id 与
          suite_version_id 都非空」(ck_task_revisions_readiness_requires_build_and_suite)。
-         不在这里挡住，UPDATE 就会撞 500，所以缺 build 时明确报 missing。
+         不在这里挡住，UPDATE 就会撞 500，所以缺 build 时明确报 missing；
+      4. UI / joint 套件版本必须保留固定代码副本（spec §6.5）。旧版本只有
+         local 标记或原目录时标“未保留固定代码”，新运行前须显式创建新版本，
+         不追认旧运行使用了新代码。performance 声明式场景不需要代码副本。
 
     suite_version 为 None 表示"填了 id 但库里查不到"，属 invalid 而非 missing。
     """
@@ -116,6 +119,12 @@ def check_readiness(
         invalid.append("suite_version_id: 该套件版本不存在")
     elif case_total <= 0:
         invalid.append("suite_version_id: 该套件版本没有收集到任何用例")
+    else:
+        test_type = str(revision.get("test_type") or "")
+        manifest = suite_version.get("manifest")
+        manifest = manifest if isinstance(manifest, dict) else {}
+        if test_type in ("ui", "joint") and not isinstance(manifest.get("code_copy"), dict):
+            invalid.append("suite_version_id: 该套件版本未保留固定代码副本，请重新发现并创建新版本")
 
     if not revision.get("build_id"):
         missing.append("build_id")

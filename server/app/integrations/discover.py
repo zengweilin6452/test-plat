@@ -18,6 +18,8 @@ locale、logging、事件的全局钩子。子进程是唯一的隔离边界。
 --------
 - TESTDOCK_TRUSTED_SUITE_ROOTS：预配置可信根，os.pathsep 分隔；缺省仓库根。
 - TESTDOCK_CODE_COPIES_DIR：固定副本根目录；缺省 <data_dir>/code-copies。
+- TESTDOCK_SUITE_SOURCES：预配置来源（JSON 数组），浏览器只传 source_id；
+  未配置时来源列表为空，登记/发现一律拒绝（不回退到任意宿主路径）。
 """
 
 from __future__ import annotations
@@ -137,6 +139,110 @@ def configured_code_copies_root() -> Path:
     from ..config import settings
 
     return (settings.data_dir / "code-copies").resolve()
+
+
+#: 预配置套件来源（JSON 数组）。浏览器只认 source_id，永远不传宿主路径。
+#: 形状：[{"id": "demo-ui", "name": "演示 UI 套件", "path": "D:/suites/demo-ui",
+#:        "test_types": ["ui", "joint"]}]
+SUITE_SOURCES_ENV = "TESTDOCK_SUITE_SOURCES"
+
+
+@dataclass(frozen=True)
+class SuiteSource:
+    """一条预配置来源。path 只在本进程内使用，对外视图必须剔除。"""
+
+    id: str
+    name: str
+    path: Path
+    test_types: tuple[str, ...]
+
+    def public_view(self) -> dict[str, Any]:
+        return {"id": self.id, "name": self.name, "test_types": list(self.test_types)}
+
+
+def configured_suite_sources() -> list[SuiteSource]:
+    """解析 TESTDOCK_SUITE_SOURCES；未配置返回空列表（不是错误）。"""
+    raw = os.environ.get(SUITE_SOURCES_ENV, "").strip()
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except ValueError as exc:
+        raise SourceBoundaryError(
+            "source_config_invalid", f"{SUITE_SOURCES_ENV} 不是合法 JSON"
+        ) from exc
+    if not isinstance(payload, list):
+        raise SourceBoundaryError(
+            "source_config_invalid", f"{SUITE_SOURCES_ENV} 必须是数组"
+        )
+
+    sources: list[SuiteSource] = []
+    seen: set[str] = set()
+    for item in payload:
+        if not isinstance(item, dict):
+            raise SourceBoundaryError(
+                "source_config_invalid", f"{SUITE_SOURCES_ENV} 的每一项都必须是对象"
+            )
+        source_id = str(item.get("id") or "").strip()
+        raw_path = str(item.get("path") or "").strip()
+        if not source_id or not raw_path:
+            raise SourceBoundaryError(
+                "source_config_invalid", "来源必须同时提供 id 与 path"
+            )
+        if source_id in seen:
+            raise SourceBoundaryError(
+                "source_config_invalid", f"来源 id 重复：{source_id}"
+            )
+        seen.add(source_id)
+        test_types = item.get("test_types") or ["ui", "performance", "joint"]
+        if not isinstance(test_types, list) or not test_types:
+            raise SourceBoundaryError(
+                "source_config_invalid", f"来源 {source_id} 的 test_types 必须是非空数组"
+            )
+        sources.append(
+            SuiteSource(
+                id=source_id,
+                name=str(item.get("name") or source_id),
+                path=Path(os.path.expanduser(raw_path)),
+                test_types=tuple(str(t) for t in test_types),
+            )
+        )
+    return sources
+
+
+def list_suite_sources() -> list[dict[str, Any]]:
+    """对外视图：只给 source_id / 显示名 / 适用类型，不含宿主绝对路径。"""
+    return [source.public_view() for source in configured_suite_sources()]
+
+
+def resolve_configured_source(
+    source_id: str, *, test_type: str | None = None
+) -> ResolvedSource:
+    """按 source_id 取预配置来源，再做与 resolve_source 相同的边界校验。"""
+    wanted = (source_id or "").strip()
+    if not wanted:
+        raise SourceBoundaryError("source_missing", "source_id 不能为空")
+    sources = {source.id: source for source in configured_suite_sources()}
+    source = sources.get(wanted)
+    if source is None:
+        raise SourceBoundaryError(
+            "source_not_configured",
+            f"来源 {wanted!r} 不在预配置来源列表内",
+            source_id=wanted,
+        )
+    if test_type and test_type not in source.test_types:
+        raise SourceBoundaryError(
+            "source_type_mismatch",
+            f"来源 {wanted!r} 不适用于 {test_type} 套件",
+            source_id=wanted,
+        )
+    resolved = resolve_source(str(source.path), trusted_roots=[source.path.parent])
+    return ResolvedSource(
+        source_id=source.id,
+        path=resolved.path,
+        trusted_root=resolved.trusted_root,
+        identity=resolved.identity,
+    )
 
 
 # --------------------------------------------------------------------------- #

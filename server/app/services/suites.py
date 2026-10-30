@@ -22,7 +22,14 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..domain import suite as suite_domain
-from ..errors import bad_request, discover_failed, not_found, validation_error
+from ..errors import (
+    ApiError,
+    bad_request,
+    conflict,
+    discover_failed,
+    not_found,
+    validation_error,
+)
 from ..integrations import discover as discover_integration
 from .tasks import as_uuid
 
@@ -77,6 +84,7 @@ def _suite_dict(row: Any) -> dict[str, Any]:
 
 def _version_dict(row: Any) -> dict[str, Any]:
     manifest = row["manifest"] or {}
+    code_copy = manifest.get("code_copy") if isinstance(manifest, dict) else None
     return {
         "id": str(row["id"]),
         "suite_id": str(row["suite_id"]),
@@ -85,6 +93,9 @@ def _version_dict(row: Any) -> dict[str, Any]:
         "source_commit": row["source_commit"],
         "case_count": suite_domain.case_total(manifest),
         "case_keys": suite_domain.case_keys(manifest),
+        # 旧版本可能只有 local 标记或原目录：明确标“未保留固定代码”，
+        # 而不是让调用方从 manifest 里猜（spec §6.5）。
+        "has_code_copy": isinstance(code_copy, dict),
         "manifest": manifest,
         "created_at": row["created_at"],
     }
@@ -140,6 +151,179 @@ def _code_copy_api_error(exc: discover_integration.CodeCopyError):
     error = discover_failed(exc.message, [], None)
     error.extra_details = {**error.extra_details, "reason": exc.code, **exc.details}
     return error
+
+
+# --------------------------------------------------------------------------- #
+# 受控来源 -> 固定副本 -> 发现（工单 05）
+# --------------------------------------------------------------------------- #
+#: 来源配置类错误属于请求问题（400），边界类错误属于来源不可用（422）。
+_SOURCE_REQUEST_CODES = frozenset(
+    {"source_not_configured", "source_type_mismatch", "source_config_invalid"}
+)
+
+
+def _source_api_error(exc: discover_integration.SourceBoundaryError):
+    """SourceBoundaryError -> 400/422；错误里只带 source_id，不回显宿主路径。"""
+    details: dict[str, Any] = {"reason": exc.code}
+    if exc.source_id:
+        details["source_id"] = exc.source_id
+    if exc.code in _SOURCE_REQUEST_CODES:
+        return ApiError(400, "validation_error", exc.message, details)
+    error = discover_failed(exc.message, [], None)
+    error.extra_details = {**error.extra_details, **details}
+    return error
+
+
+def _discover_failure(
+    result: discover_integration.DiscoverResult, *, source_id: str
+):
+    """collect 失败 -> 422 discover_failed；消息只用 source_id，不暴露副本路径。"""
+    kind = result.error
+    if kind == discover_integration.DiscoverErrorKind.ROOT_MISSING:
+        message = f"来源 {source_id!r} 的固定副本不存在"
+    elif kind == discover_integration.DiscoverErrorKind.ROOT_NOT_DIR:
+        message = f"来源 {source_id!r} 的固定副本不是目录"
+    elif kind == discover_integration.DiscoverErrorKind.TIMEOUT:
+        message = (
+            f"用例收集超时（{discover_integration.DISCOVER_TIMEOUT_S}s）：来源 {source_id!r}"
+        )
+    elif kind == discover_integration.DiscoverErrorKind.NO_TESTS:
+        message = f"来源 {source_id!r} 未收集到任何用例"
+    elif kind == discover_integration.DiscoverErrorKind.PYTEST_MISSING:
+        message = "宿主解释器缺少 pytest，无法收集用例"
+    else:
+        message = f"pytest --collect-only 失败（退出码 {result.returncode}）：来源 {source_id!r}"
+    error = discover_failed(message, result.stderr_tail, result.returncode)
+    error.extra_details = {**error.extra_details, "source_id": source_id}
+    return error
+
+
+async def _load_application(session: AsyncSession, application_id: str) -> dict[str, Any]:
+    aid = as_uuid(application_id)
+    if aid is None:
+        raise not_found("application", application_id)
+    row = (
+        await session.execute(
+            text("SELECT id, project_id, name, platform FROM applications WHERE id = :aid"),
+            {"aid": aid},
+        )
+    ).mappings().first()
+    if row is None:
+        raise not_found("application", application_id)
+    return dict(row)
+
+
+def _prepare_source_copy(
+    source_id: str, *, test_type: str
+) -> tuple[discover_integration.ResolvedSource, dict[str, Any], list[str]]:
+    """解析预配置来源 -> 复制固定副本 -> 在副本上 collect。
+
+    顺序是硬要求：先复制再发现，发现读的是副本而不是可变来源目录。
+    副本在发现失败时保留（spec §6.5：本期不自动清理），但不发布版本。
+    """
+    try:
+        source = discover_integration.resolve_configured_source(source_id, test_type=test_type)
+    except discover_integration.SourceBoundaryError as exc:
+        raise _source_api_error(exc) from exc
+    try:
+        copy_root, code_copy = discover_integration.copy_source(source)
+    except discover_integration.CodeCopyError as exc:
+        raise _code_copy_api_error(exc) from exc
+    result = discover_integration.collect_suite(copy_root)
+    if not result.ok:
+        raise _discover_failure(result, source_id=source.source_id)
+    return source, code_copy, result.node_ids
+
+
+async def create_suite(
+    session: AsyncSession,
+    *,
+    application_id: str,
+    name: str,
+    test_type: str,
+    source_id: str,
+    source_ref: str | None = None,
+    source_commit: str | None = None,
+) -> dict[str, Any]:
+    """登记套件并发布 V1：来源 -> 固定副本 -> 发现 -> 套件 + 首版本（同一事务）。"""
+    if test_type not in suite_domain.TEST_TYPES:
+        raise validation_error(
+            [f"test_type 只支持 {' / '.join(suite_domain.TEST_TYPES)}，收到 {test_type!r}"]
+        )
+    application = await _load_application(session, application_id)
+    project_id = str(application["project_id"])
+
+    duplicate = (
+        await session.execute(
+            text(
+                "SELECT 1 FROM test_suites "
+                " WHERE project_id = :pid AND application_id = :aid AND name = :name"
+            ),
+            {"pid": project_id, "aid": str(application["id"]), "name": name},
+        )
+    ).first()
+    if duplicate is not None:
+        raise conflict(
+            "state_conflict",
+            f"应用内已存在同名套件：{name}",
+            {"name": name, "application_id": str(application["id"])},
+        )
+
+    source, code_copy, node_ids = _prepare_source_copy(source_id, test_type=test_type)
+
+    suite_id = str(uuid.uuid4())
+    inserted = (
+        await session.execute(
+            text(
+                """
+                INSERT INTO test_suites (id, project_id, application_id, name, test_type)
+                VALUES (CAST(:id AS uuid), CAST(:pid AS uuid), CAST(:aid AS uuid), :name, :tt)
+                RETURNING id, project_id, application_id, name, test_type
+                """
+            ),
+            {
+                "id": suite_id,
+                "pid": project_id,
+                "aid": str(application["id"]),
+                "name": name,
+                "tt": test_type,
+            },
+        )
+    ).mappings().first()
+    if inserted is None:  # pragma: no cover
+        raise bad_request("创建套件失败")
+
+    version = await create_version(
+        session,
+        suite_row=dict(inserted),
+        node_ids=node_ids,
+        source_ref=source_ref or source.source_id,
+        source_commit=source_commit,
+        extra={"code_copy": code_copy, "source_id": source.source_id},
+    )
+    row = await get_suite(session, suite_id)
+    return {**_suite_dict(row), "created_version": version}
+
+
+async def discover_version(
+    session: AsyncSession,
+    *,
+    suite_row: Any,
+    source_id: str,
+    source_ref: str | None = None,
+    source_commit: str | None = None,
+) -> dict[str, Any]:
+    """对既有套件追加一个版本：来源 -> 新固定副本 -> 发现（不覆盖旧版本）。"""
+    test_type = str(suite_row["test_type"])
+    source, code_copy, node_ids = _prepare_source_copy(source_id, test_type=test_type)
+    return await create_version(
+        session,
+        suite_row=suite_row,
+        node_ids=node_ids,
+        source_ref=source_ref or source.source_id,
+        source_commit=source_commit,
+        extra={"code_copy": code_copy, "source_id": source.source_id},
+    )
 
 
 def _resolve_code_copy(

@@ -1269,6 +1269,29 @@
         }
       }
     },
+    "/api/v1/suite-sources": {
+      "get": {
+        "parameters": [],
+        "request": null,
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/SuiteSourcesOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
     "/api/v1/suites": {
       "get": {
         "parameters": [
@@ -1283,6 +1306,37 @@
           "200": {
             "additionalProperties": true,
             "title": "Response List Suites Api V1 Suites Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": {
+          "$ref": "#/components/schemas/SuiteCreateIn"
+        },
+        "responses": {
+          "201": {
+            "additionalProperties": true,
+            "title": "Response Create Suite Api V1 Suites Post",
             "type": "object"
           },
           "400": {
@@ -2958,10 +3012,21 @@
       "title": "RunsOut",
       "type": "object"
     },
-    "SuiteDiscoverIn": {
+    "SuiteCreateIn": {
       "additionalProperties": false,
-      "description": "POST /suites/{id}/discover 请求体。\n\nsuite_root 是宿主路径。test_suites 表没有\"配置\"列（0001 真源），\nmanifest 又只存在于 suite_versions 上，所以路径只能由请求体给出；\n后续若要固化到 suite 上，需要 0002 加列，本阶段不做。",
+      "description": "POST /suites：从预配置来源登记套件并发布 V1。\n\n浏览器只提交 source_id；宿主路径由服务端配置决定，不接受任意路径。",
       "properties": {
+        "application_id": {
+          "minLength": 1,
+          "title": "Application Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
         "source_commit": {
           "anyOf": [
             {
@@ -2972,6 +3037,11 @@
             }
           ],
           "title": "Source Commit"
+        },
+        "source_id": {
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
         },
         "source_ref": {
           "anyOf": [
@@ -2984,16 +3054,109 @@
           ],
           "title": "Source Ref"
         },
-        "suite_root": {
-          "minLength": 1,
-          "title": "Suite Root",
+        "test_type": {
+          "enum": [
+            "ui",
+            "performance",
+            "joint"
+          ],
+          "title": "Test Type",
           "type": "string"
         }
       },
       "required": [
-        "suite_root"
+        "application_id",
+        "name",
+        "test_type",
+        "source_id"
+      ],
+      "title": "SuiteCreateIn",
+      "type": "object"
+    },
+    "SuiteDiscoverIn": {
+      "additionalProperties": false,
+      "description": "POST /suites/{id}/discover 请求体。\n\n只接受预配置 source_id（spec §9.2）：浏览器不能传任意宿主路径，\n服务端按配置解析来源、复制固定副本，再在副本上发现。",
+      "properties": {
+        "source_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Commit"
+        },
+        "source_id": {
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Ref"
+        }
+      },
+      "required": [
+        "source_id"
       ],
       "title": "SuiteDiscoverIn",
+      "type": "object"
+    },
+    "SuiteSourceOut": {
+      "additionalProperties": false,
+      "description": "GET /suite-sources 的单项：只有 source_id、显示名与适用类型。",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "test_types": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Test Types",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "SuiteSourceOut",
+      "type": "object"
+    },
+    "SuiteSourcesOut": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/SuiteSourceOut"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total"
+      ],
+      "title": "SuiteSourcesOut",
       "type": "object"
     },
     "TaskCreateIn": {
