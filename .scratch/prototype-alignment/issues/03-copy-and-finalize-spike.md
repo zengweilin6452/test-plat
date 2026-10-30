@@ -4,10 +4,14 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
 - [ ] 路径越界、符号链接逃逸、来源替换被拒绝
 - [ ] 复制中来源变化可检测；摘要损坏或缺失阻断
 - [ ] 发现与执行读取同一固定副本，不读工作目录最新代码
 - [ ] finalizing 内完成原始判定、组件聚合与终态，单事务提交
 - [ ] 不产生 completed 缺 original；阶段预算不被总超时截断
+
+## Comments
+
+- 已合并（3cc7075、4125c05）：可信根/固定副本/摘要、finalizing 原子收敛、阶段预算；未新增迁移。
