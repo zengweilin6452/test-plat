@@ -7,14 +7,18 @@
  * - junit 未产出（present=false）时显示破折号，不把「没跑」写成 0 个失败；
  * - 证据下载地址由后端 download_url 给出，前端不自己拼路径。
  */
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { describeError } from '../api/client'
-import { fetchRunArtifacts, fetchRunReport } from '../api/endpoints'
+import { createRun, fetchRunArtifacts, fetchRunReport } from '../api/endpoints'
 import type { RunArtifact, RunReport } from '../api/types'
 import { StatusBadge } from './Badge'
+import { Button, LinkButton } from './Button'
 import { Drawer } from './Dialog'
 import { Empty } from './Empty'
 import { Notice } from './Notice'
+import { useToast } from './Toast'
 import { DASH, fmtDateTime, fmtDuration, fmtNumber } from '../lib/fmt'
 import { displayStatus } from '../lib/display'
 import type { RunRecord, RunState } from '../types'
@@ -82,6 +86,8 @@ interface ReportDrawerProps {
 
 export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
   const runId = run?.id ?? ''
+  const toast = useToast()
+  const navigate = useNavigate()
   const reportQuery = useQuery({
     queryKey: ['run-report', runId],
     queryFn: ({ signal }) => fetchRunReport(runId, signal),
@@ -101,6 +107,32 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
   const metrics = Object.entries(report?.metricsSummary ?? {})
   const junit = junitCounts(report)
   const artifacts = artifactsQuery.data?.items ?? []
+
+  // 重跑：POST /runs 引用原输入（同修订/同应用/同任务），parent_run_id 指回原运行；
+  // 原记录不改写，历史报告不受影响（AC-REP-04、spec §9.3 重跑语义）。
+  const [rerunning, setRerunning] = useState(false)
+  async function rerun() {
+    if (!run || !report?.revision) return
+    setRerunning(true)
+    try {
+      const created = await createRun({
+        application_id: run.application.id,
+        task_id: run.task_id ?? '',
+        revision_id: report.revision.id,
+        platform: run.platform,
+        request_key: crypto.randomUUID(),
+        parent_run_id: run.id,
+      })
+      toast.show('重跑已创建：' + created.display_id + '，可在运行页跟踪')
+      onClose()
+      navigate('/ui')
+    } catch (error) {
+      const e = describeError(error)
+      toast.show('重跑失败（' + e.code + '）：' + e.message)
+    } finally {
+      setRerunning(false)
+    }
+  }
 
   return (
     <Drawer
@@ -163,6 +195,15 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
                   <dt>判定时间</dt>
                   <dd>{fmtDateTime(report.evaluatedAt ?? run.ended_at)}</dd>
                 </dl>
+                <div className="toolbar">
+                  <Button disabled={rerunning || !report?.revision} onClick={rerun}>
+                    重跑（引用原输入）
+                  </Button>
+                  <LinkButton onClick={() => navigate('/perf')}>性能分析 ›</LinkButton>
+                  <a className="link-btn" href={`/api/v1/runs/${run.id}/report/export`}>
+                    导出 JSON
+                  </a>
+                </div>
               </div>
 
               <div className="drawer-section">

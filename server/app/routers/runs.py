@@ -23,7 +23,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query, Response
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -856,11 +857,16 @@ async def download_run_artifact(
     )
 
 
-@router.get("/runs/{run_id}/report")
-async def get_run_report(
-    run_id: str, session: AsyncSession = Depends(get_session)
-) -> dict:
-    """平台计算的报告（不是 vendor 报告原样透传）。"""
+async def _report_view(session: AsyncSession, run_id: str) -> dict:
+    """报告快照（GET /report 与 /report/export 共用同一份，工单 11）。
+
+    可追溯性纪律（spec §9.3、AC-REP-04）：
+    - resource_profiles 是不可变档案（内容变化 = 新增行），报告引用运行时挂在
+      test_runs.profile_id 上的档案就永远不会被"改档案"改写；缺失明确为 null，
+      不用设备 serial 冒充档案。
+    - gate_evaluations 行不可变，跑完后改策略不回溯历史报告。
+    - evidence 只给 id/kind/可用性；storage_key（宿主存储路径）不出报告。
+    """
     from .. import runtime as runtime_mod
 
     view = await _run_view(session, run_id)
@@ -875,6 +881,70 @@ async def get_run_report(
     source = await runtime_mod.read_report_source(str(run_id)) or {}
     snapshot = view["config_snapshot"] or {}
     mode = "imported" if snapshot.get("source") == "import" else "live"
+
+    revision = None
+    if view["revision_id"]:
+        revision = dict(
+            (
+                await session.execute(
+                    text(
+                        "SELECT tr.id, tr.readiness, tr.test_type, tr.environment_id,"
+                        "       ab.id AS build_id, ab.version AS build_version,"
+                        "       ab.build_key AS build_key, ab.source_commit AS build_commit,"
+                        "       ab.sha256 AS build_sha256"
+                        "  FROM task_revisions tr"
+                        "  LEFT JOIN app_builds ab ON ab.id = tr.build_id"
+                        " WHERE tr.id = CAST(:rid AS uuid)"
+                    ),
+                    {"rid": str(view["revision_id"])},
+                )
+            ).mappings().one()
+        )
+
+    profile = (
+        await session.execute(
+            text(
+                "SELECT rp.id, rp.name, rp.fingerprint, rp.spec"
+                "  FROM test_runs tr JOIN resource_profiles rp ON rp.id = tr.profile_id"
+                " WHERE tr.id = CAST(:rid AS uuid)"
+            ),
+            {"rid": str(run_id)},
+        )
+    ).mappings().first()
+
+    gates = (
+        await session.execute(
+            text(
+                "SELECT ge.mode, ge.verdict, ge.reason_code, ge.created_at"
+                "  FROM gate_evaluations ge"
+                "  JOIN run_components rc"
+                "    ON rc.project_id = ge.project_id AND rc.id = ge.component_id"
+                " WHERE rc.run_id = CAST(:rid AS uuid)"
+                " ORDER BY ge.created_at"
+            ),
+            {"rid": str(run_id)},
+        )
+    ).mappings().all()
+
+    evidence = []
+    for item in items:
+        evidence.append(
+            {
+                "id": str(item["id"]),
+                "kind": item["kind"],
+                "logical_key": item["logical_key"],
+                "mime_type": item.get("mime_type"),
+                "byte_size": item.get("byte_size"),
+                "sha256": item.get("sha256"),
+                "availability": item["availability"],
+                "created_at": item.get("created_at"),
+                # 只有 available 给下载入口；missing/expired 不提供假链接（AC-REP-03）
+                "download_url": f"/api/v1/runs/{run_id}/artifacts/{item['id']}/download"
+                if item["availability"] == "available"
+                else None,
+            }
+        )
+
     return {
         # 报告里的编号与页面、导出、告警同源：都是持久分配的 display_id；
         # 精确身份仍由 id（UUID）承载（INV-10）。
@@ -885,13 +955,43 @@ async def get_run_report(
         "projectId": view["project_id"],
         "applicationId": view["application_id"],
         "platform": view["platform"],
-        "environmentId": None,
+        "environmentId": str(revision["environment_id"]) if revision else None,
         "resourceId": view["resource_id"],
+        "resourceName": view["resource_name"],
         "module": view["module"],
         "status": view["state"],
         "verdict": view["outcome"],
         "target": view["application"],
-        "deviceProfile": view["resource_name"],
+        # 运行时档案（不可变行的内容）；没有就明说 null，不用设备 serial 冒充
+        "resourceProfile": dict(profile) if profile else None,
+        "deviceProfile": profile["name"] if profile else None,
+        "revision": {
+            "id": str(revision["id"]),
+            "readiness": revision["readiness"],
+            "test_type": revision["test_type"],
+        }
+        if revision
+        else None,
+        "build": {
+            "id": str(revision["build_id"]),
+            "version": revision["build_version"],
+            "build_key": revision["build_key"],
+            "source_commit": revision["build_commit"],
+            "sha256": revision["build_sha256"],
+        }
+        if revision and revision["build_id"]
+        else None,
+        "components": view["components"],
+        "gateEvaluations": [
+            {
+                "mode": g["mode"],
+                "verdict": g["verdict"],
+                "reason_code": g["reason_code"],
+                "created_at": g["created_at"],
+            }
+            for g in gates
+        ],
+        "evidence": evidence,
         "durationS": view["duration_s"],
         "metricsSummary": source.get("metricsSummary") or {},
         "thresholdsAtRun": source.get("thresholdsAtRun") or {},
@@ -902,6 +1002,30 @@ async def get_run_report(
         "vendorReports": vendor_reports,
         "junit": source.get("junit") or {},
     }
+
+
+@router.get("/runs/{run_id}/report")
+async def get_run_report(
+    run_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """平台计算的报告（不是 vendor 报告原样透传）。"""
+    return await _report_view(session, run_id)
+
+
+@router.get("/runs/{run_id}/report/export")
+async def export_run_report(
+    run_id: str, session: AsyncSession = Depends(get_session)
+) -> Response:
+    """服务端导出：与报告快照同一份内容，稳定文件名，不含凭据或宿主路径。"""
+    report = await _report_view(session, run_id)
+    # 与 GET /report 走同一个 JSON 编码器：两边逐字段一致，导出才配叫"同一份快照"
+    payload = json.dumps(jsonable_encoder(report), ensure_ascii=False)
+    filename = "TestDock-%s.json" % report["runId"]
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _import_artifacts_dir(run_id: str, source: Path) -> Path:

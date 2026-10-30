@@ -193,6 +193,13 @@ GET /api/v1/runs/47/events?after=0&limit=200
 
 平台汇总报告（对齐原型 `exportReport`，去掉 `prototype:true`）：
 
+GET /api/v1/runs/47/report/export
+// -> JSON 下载，Content-Disposition 文件名 TestDock-RUN-0047.json；
+//    内容与 GET /report 同一份快照（同一编码器逐字段一致），不含凭据或宿主存储路径。
+```
+
+报告快照可追溯（spec §9.3、AC-REP-04）：`revision`（id/readiness/test_type）、`build`（version/build_key/source_commit/sha256）、`environmentId`、`resourceProfile`（id/name/fingerprint/spec，来自运行时绑定的不可变档案行）、`components`、`gateEvaluations`（不可变判定行，改策略不回溯）、`evidence`（id/kind/可用性/sha256；**只有 available 给 download_url**，missing/expired 不提供假入口；storage_key 不出报告）。缺失字段一律为 null，不用设备 serial 冒充档案。重跑：`POST /runs` 带 `parent_run_id` 引用原输入并形成新运行，原记录一行不改。
+
 ```json
 { "runId": "RUN-47", "hostRunId": "RUN-47", "name": "首页滑动性能巡检",
   "projectId": "xinghe", "applicationId": "xinghe-android", "platform": "android",
