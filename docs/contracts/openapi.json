@@ -15,6 +15,11 @@
           },
           {
             "in": "query",
+            "name": "evaluation_id",
+            "required": false
+          },
+          {
+            "in": "query",
             "name": "limit",
             "required": false
           }

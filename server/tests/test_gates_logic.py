@@ -257,6 +257,7 @@ def test_all_reason_codes_are_in_platform_enum():
         "metric_missing",
         "device_degraded",
         "gate_policy_missing",
+        "baseline_missing",
         "run_incomplete",
     }
 
