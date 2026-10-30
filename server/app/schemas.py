@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 RunState = Literal[
     "queued", "dispatching", "running", "finalizing", "completed", "errored", "cancelled"
@@ -517,4 +517,164 @@ class TasksOut(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     items: list[TaskRecordOut]
+    total: int
+
+
+# --------------------------------------------------------------------------- #
+# 工单 04：构建登记与设备身份核对
+# --------------------------------------------------------------------------- #
+# 构建逻辑身份 = 项目 + 应用 + build_key；version 是业务版本。
+# identity_state 在用户显式确认前保持 pending；确认后 baseline 固定，
+# 不再从另一台设备静默更新。核对记录存在 app_builds.metadata.identity 下，
+# 不新增表（工单约束）。
+
+
+class BuildCreateIn(BaseModel):
+    """POST /builds 请求体（§9.2：version/build_key，可选 source_commit/sha256）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    application_id: str
+    version: str
+    build_key: str
+    source_commit: str | None = None
+    sha256: str | None = None
+
+    @field_validator("version", "build_key")
+    @classmethod
+    def _required_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("不能为空")
+        return text
+
+    @field_validator("source_commit")
+    @classmethod
+    def _optional_commit(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        return text or None
+
+    @field_validator("sha256")
+    @classmethod
+    def _sha256_hex64(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        if len(text) != 64 or any(char not in "0123456789abcdef" for char in text):
+            raise ValueError("sha256 必须是 64 位小写十六进制")
+        return text
+
+
+class IdentityCheckIn(BaseModel):
+    """POST /builds/{id}/identity-checks 请求体。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resource_id: str
+    purpose: Literal["manual", "pre_run"] = "manual"
+    test_type: Literal["ui", "performance", "joint"] = "ui"
+
+
+class ConfirmIdentityIn(BaseModel):
+    """POST /builds/{id}/confirm-identity 请求体：显式提交该构建的核对结果。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    check_id: str
+
+
+class BuildIdentityItemOut(BaseModel):
+    """单个固定核对项的预期 / 观测 / 结果。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    status: Literal["match", "conflict", "unknown", "observed"]
+    expected: Any = None
+    observed: Any = None
+    reason: str | None = None
+
+
+class BuildIdentityBlockingOut(BaseModel):
+    """阻断原因：冲突或不可读。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    check: str
+    reason: str
+    detail: dict[str, Any] | None = None
+
+
+class BuildIdentityBaselineOut(BaseModel):
+    """已固定的设备安装身份基准。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    package_name: str
+    version_name: str
+    version_code: int
+    resource: dict[str, Any]
+    check_id: str
+    confirmed_at: str
+
+
+class BuildIdentityCheckOut(BaseModel):
+    """一次设备身份核对记录：设备、时间、预期、观测、结果。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    check_id: str
+    purpose: Literal["manual", "pre_run"]
+    test_type: Literal["ui", "performance", "joint"]
+    checked_at: str
+    resource: dict[str, Any]
+    device: dict[str, Any]
+    expected: dict[str, Any]
+    observed: dict[str, Any]
+    items: list[BuildIdentityItemOut]
+    result: Literal["match", "conflict", "unknown"]
+    blocking: list[BuildIdentityBlockingOut]
+    execution_allowed: bool
+    identity_state: Literal["pending", "confirmed"]
+    verification_level: str
+    apk_digest_verified: bool
+    verification_note: str
+    superseded_by: str | None = None
+    superseded_at: str | None = None
+
+
+class BuildRecordOut(BaseModel):
+    """构建视图：声明身份 + 核对状态 + 固定基准 + 最近一次核对。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: UuidStr
+    project_id: UuidStr
+    application_id: UuidStr
+    application_name: str | None = None
+    platform: str | None = None
+    package_name: str | None = None
+    version: str
+    build_key: str
+    source_commit: str | None = None
+    sha256: str | None = None
+    created_at: datetime | None = None
+    identity_state: Literal["pending", "confirmed"] = "pending"
+    verification_level: str = "none"
+    apk_digest_verified: bool = False
+    verification_note: str
+    baseline: BuildIdentityBaselineOut | None = None
+    latest_check: BuildIdentityCheckOut | None = None
+    checks: list[BuildIdentityCheckOut] = Field(default_factory=list)
+    duplicate: bool = False
+
+
+class BuildsOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    items: list[BuildRecordOut]
     total: int

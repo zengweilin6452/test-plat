@@ -23,7 +23,7 @@ from .errors import ApiError, redact_sensitive
 from .schemas import ErrorEnvelope
 from .ws import hub as _hub
 from .routers import applications, debug as debug_router, overview, projects, resources, runs, suites, tasks
-from .routers import analyses, baselines, gate_policies
+from .routers import analyses, baselines, builds, gate_policies
 
 
 def _install_windows_event_loop_policy() -> None:
@@ -112,6 +112,7 @@ async def _request_id_middleware(request: Request, call_next):
 
 app.include_router(overview.router, prefix=API_PREFIX)
 app.include_router(applications.router, prefix=API_PREFIX)
+app.include_router(builds.router, prefix=API_PREFIX)
 app.include_router(projects.router, prefix=API_PREFIX)
 app.include_router(resources.router, prefix=API_PREFIX)
 app.include_router(tasks.router, prefix=API_PREFIX)

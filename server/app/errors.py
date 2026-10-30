@@ -49,6 +49,10 @@ ERROR_CODES: frozenset[str] = frozenset(
         "task_not_ready",
         "readiness_incomplete",
         "discover_failed",
+        # 构建身份（工单 04）
+        "build_identity_conflict",
+        "build_identity_not_confirmed",
+        "identity_unsupported",
         # 运行 / 租约 / 设备
         "lease_conflict",
         "fence_mismatch",
