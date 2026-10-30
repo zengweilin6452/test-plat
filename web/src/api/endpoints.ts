@@ -59,8 +59,19 @@ export function fetchRuns(
   }, signal)
 }
 
-export function fetchTasks(testType: string | undefined, q: string | undefined, signal?: AbortSignal) {
-  return api.get<TasksResponse>('/tasks', { test_type: testType, q }, signal)
+export function fetchTasks(
+  testType: string | undefined,
+  q: string | undefined,
+  signal?: AbortSignal,
+  runState?: string,
+  testTypeOverride?: string,
+) {
+  return api.get<TasksResponse>('/tasks', {
+    // 兼容旧签名：fetchTasks(testType, q)（工单 20 新增 run_state 过滤）
+    test_type: testTypeOverride ?? testType,
+    q,
+    run_state: runState,
+  }, signal)
 }
 
 /** ---- 以下为 P2 新建任务 / 任务详情抽屉端点（api-design.md §2.3，追加，不改既有函数）---- */

@@ -7,6 +7,7 @@
  * 硬约束：state 与 outcome 分开呈现；outcome 为空时不显示通过/未通过。
  */
 import { useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import { fetchTasks } from '../api/endpoints'
@@ -28,15 +29,39 @@ import type { CreateTaskResponse, Platform, TaskRecord } from '../types'
 
 export function TasksPage() {
   const { targetScope, setTargetScope } = useTargetScope()
-  const [keyword, setKeyword] = useState('')
+  // 工单 20：过滤条件进 URL（q / test_type / run_state / scope），
+  // 刷新与前后导航结果一致；切 scope 时重置过滤，不保留陈旧状态。
+  const location = useLocation()
+  const navigate = useNavigate()
+  const urlParams = new URLSearchParams(location.search)
+  const keyword = urlParams.get('q') ?? ''
+  const testType = urlParams.get('test_type') ?? ''
+  const runState = urlParams.get('run_state') ?? ''
+
+  function patchParams(patch: Record<string, string | null>) {
+    const params = new URLSearchParams(location.search)
+    for (const [key, value] of Object.entries(patch)) {
+      if (value) params.set(key, value)
+      else params.delete(key)
+    }
+    const search = params.toString()
+    navigate({ pathname: location.pathname, search: search ? '?' + search : '', hash: location.hash })
+  }
   const [wizardOpen, setWizardOpen] = useState(false)
   const [activeTask, setActiveTask] = useState<TaskRecord | null>(null)
   const queryClient = useQueryClient()
   const toast = useToast()
 
   const tasksQuery = useQuery({
-    queryKey: ['tasks', keyword],
-    queryFn: ({ signal }) => fetchTasks(undefined, keyword || undefined, signal),
+    queryKey: ['tasks', keyword, testType, runState],
+    queryFn: ({ signal }) =>
+      fetchTasks(
+        undefined,
+        keyword || undefined,
+        signal,
+        runState || undefined,
+        testType || undefined,
+      ),
     retry: false,
   })
 
@@ -152,7 +177,32 @@ export function TasksPage() {
           hint="每行展示最新修订与最近一次运行；点击可查看执行详情"
         />
         <div style={{ padding: '0 20px' }}>
-          <Toolbar search={keyword} onSearch={setKeyword}>
+          <Toolbar search={keyword} onSearch={(value) => patchParams({ q: value || null })}>
+            <select
+              value={testType}
+              onChange={(event) => patchParams({ test_type: event.target.value || null })}
+              aria-label="按模块过滤"
+            >
+              <option value="">全部模块</option>
+              <option value="ui">UI</option>
+              <option value="performance">性能</option>
+              <option value="joint">联动</option>
+            </select>
+            <select
+              value={runState}
+              onChange={(event) => patchParams({ run_state: event.target.value || null })}
+              aria-label="按最近运行状态过滤"
+            >
+              <option value="">全部运行态</option>
+              <option value="completed">已完成</option>
+              <option value="failed" disabled>
+                failed 是结论不是运行态
+              </option>
+              <option value="running">执行中</option>
+              <option value="errored">异常</option>
+              <option value="cancelled">已取消</option>
+              <option value="queued">排队中</option>
+            </select>
             <span className="muted small">按任务名称或编号搜索（服务端过滤 ?q=）</span>
           </Toolbar>
         </div>
