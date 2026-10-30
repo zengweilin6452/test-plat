@@ -13,25 +13,54 @@ router = APIRouter(tags=["overview"])
 
 
 @router.get("/overview", response_model=OverviewOut)
-async def get_overview(session: AsyncSession = Depends(get_session)) -> OverviewOut:
-    """首期只统计 Android；iOS/Web 无适配器（与原型 targetScope 一致）。"""
+async def get_overview(
+    scope: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> OverviewOut:
+    """工作台聚合。scope（android/ios/web）同时约束统计与"需要关注"（AC-OV-01），
+    缺省 = 全部平台；未知的 scope 422。"""
+    from typing import Any
+
+    from fastapi import HTTPException
     from sqlalchemy import text
 
-    async def scalar(sql: str) -> int:
-        result = await session.execute(text(sql))
+    if scope is not None and scope not in ("android", "ios", "web"):
+        raise HTTPException(status_code=422, detail=f"scope 只支持 android / ios / web，收到 {scope!r}")
+
+    async def scalar(sql: str, params: dict[str, Any] | None = None) -> int:
+        result = await session.execute(text(sql), params or {})
         value = result.scalar()
         return int(value or 0)
 
-    app_total = await scalar("SELECT count(*) FROM applications WHERE platform = 'android'")
-    res_total = await scalar("SELECT count(*) FROM execution_resources")
-    res_ready = await scalar("SELECT count(*) FROM execution_resources WHERE status = 'ready'")
-    run_total = await scalar("SELECT count(*) FROM test_runs")
-    run_running = await scalar(
-        "SELECT count(*) FROM test_runs WHERE state IN ('queued','dispatching','running','finalizing')"
+    # test_runs 的平台在自身 platform 列；应用/资源按各自表过滤。
+    run_platform = "AND tr.platform = :scope" if scope else ""
+    params = {"scope": scope} if scope else {}
+    app_platform = "AND platform = :scope" if scope else ""
+    res_platform = "AND platform = :scope" if scope else ""
+
+    app_total = await scalar(
+        f"SELECT count(*) FROM applications WHERE platform = 'android' {app_platform}", params
     )
-    passed = await scalar("SELECT count(*) FROM test_runs WHERE outcome = 'passed'")
-    failed = await scalar("SELECT count(*) FROM test_runs WHERE outcome = 'failed'")
-    not_tested = await scalar("SELECT count(*) FROM test_runs WHERE outcome = 'not_tested'")
+    res_total = await scalar(f"SELECT count(*) FROM execution_resources WHERE 1=1 {res_platform}", params)
+    res_ready = await scalar(
+        f"SELECT count(*) FROM execution_resources WHERE status = 'ready' {res_platform}", params
+    )
+    run_total = await scalar(f"SELECT count(*) FROM test_runs tr WHERE 1=1 {run_platform}", params)
+    run_running = await scalar(
+        "SELECT count(*) FROM test_runs tr WHERE tr.state IN"
+        " ('queued','dispatching','running','finalizing')" + run_platform,
+        params,
+    )
+    passed = await scalar(
+        "SELECT count(*) FROM test_runs tr WHERE tr.outcome = 'passed'" + run_platform, params
+    )
+    failed = await scalar(
+        "SELECT count(*) FROM test_runs tr WHERE tr.outcome = 'failed'" + run_platform, params
+    )
+    not_tested = await scalar(
+        "SELECT count(*) FROM test_runs tr WHERE tr.outcome = 'not_tested'" + run_platform,
+        params,
+    )
 
     denominator = passed + failed
     pass_rate = round(passed / denominator * 100, 1) if denominator else None
