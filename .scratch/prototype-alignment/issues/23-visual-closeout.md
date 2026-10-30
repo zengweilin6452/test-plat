@@ -4,10 +4,18 @@
 
 **Blocked by:** 17、18、19、20、21、22
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] AC-NAV-01：未知 hash 回工作台，跨页保留 scope 与必要应用上下文
-- [ ] AC-UX-01：全部可见按钮遍历，无空 onClick 或仅假成功 toast
+- [x] AC-NAV-01：未知 hash 回工作台，跨页保留 scope 与必要应用上下文
+- [x] AC-UX-01：全部可见按钮遍历，无空 onClick 或仅假成功 toast
 - [ ] AC-VIS-01：同一桌面视口对照原型，仅右侧全高调试面板为已批准布局例外
 - [ ] 加载、失败、空态、部分缺失和过期分别呈现
 - [ ] 视觉验收记录所用原型内容摘要，不用移动中的文件宣称对齐
+
+## Comments
+
+- 静态部分实现提交 `af0f895`（`feat(issue23): 未开放动作显式禁用与 404 返回入口核对`）。
+- AC-NAV-01：`* ` 路由落到 NotFoundPage，带"返回工作台"入口；scope 经 URL query 持久（工单 18/19/20 的 ?scope/?project/?app/?q 系列），跨页保留。
+- AC-UX-01：静态扫描 `onClick={() => {}}` 零命中；14 处 toast 均跟在真实 mutation 之后。两个无结果的 PrimaryAction（"登记应用"、"导出报告"）改为 disabled + title"该操作尚未开放"——显式不可用，不再是点了没反应的按钮。
+- 加载/失败/空态：Empty/Notice/骨架组件为各页标配（此前工单逐页接齐）。
+- **AC-VIS-01 未勾选**：与原型的同视口视觉对照需要浏览器截图走查（九页 × 桌面视口），本轮按指示未做浏览器 QA。空态与交互基线已由上述静态核对覆盖；像素级对齐待人工/浏览器走查后补记。

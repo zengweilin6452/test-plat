@@ -109,6 +109,14 @@ export function Toolbar({ children, search, onSearch }: { children?: ReactNode; 
 
 /** 页面右上角主操作按钮（原型 heading actions） */
 export function PrimaryAction({ label, icon = 'plus', onClick }: { label: string; icon?: IconName; onClick?: () => void }) {
+  // AC-UX-01：没有接真实结果的动作必须显式"不可用"，不能渲染成点了没反应的按钮
+  if (!onClick) {
+    return (
+      <Button kind="primary" icon={icon} disabled title="该操作尚未开放">
+        {label}
+      </Button>
+    )
+  }
   return (
     <Button kind="primary" icon={icon} onClick={onClick}>
       {label}
