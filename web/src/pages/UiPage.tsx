@@ -13,6 +13,7 @@ import { ApiError, describeError } from '../api/client'
 import {
   createTemplate,
   fetchResources,
+  fetchApplications,
   fetchRuns,
   fetchTasks,
   fetchTemplates,
@@ -36,6 +37,8 @@ import { Tabs, type TabItem } from '../components/Tabs'
 import { MODULE_NAMES, TARGET_CATALOG, isImplementedPlatform } from '../constants'
 import { displayStatus } from '../lib/display'
 import { DASH, fmtDateTime } from '../lib/fmt'
+import { useAppScope } from '../store/app'
+import type { ApplicationRecord } from '../types'
 import { useTargetScope } from '../store/scope'
 import type { CreateTaskResponse, Platform, RunRecord, TaskRecord } from '../types'
 
@@ -51,6 +54,14 @@ const TABS: TabItem<UiTab>[] = [
 
 export function UiPage() {
   const { targetScope, setTargetScope } = useTargetScope()
+  // 工单 19：工作区携带应用身份；过滤与提交都锚定这个应用（AC-APP-01）
+  const { appId } = useAppScope()
+  const appsQuery = useQuery({
+    queryKey: ['applications'],
+    queryFn: ({ signal }) => fetchApplications(signal),
+    retry: false,
+  })
+  const currentApp = (appsQuery.data?.items ?? []).find((app: ApplicationRecord) => app.id === appId) ?? null
   const [tab, setTab] = useState<UiTab>('runs')
   const [keyword, setKeyword] = useState('')
   const [wizardOpen, setWizardOpen] = useState(false)
@@ -65,7 +76,8 @@ export function UiPage() {
 
   const runsQuery = useQuery({
     queryKey: ['runs', 'ui', targetScope],
-    queryFn: ({ signal }) => fetchRuns(targetScope, 100, signal),
+    queryFn: ({ signal }) =>
+      fetchRuns(targetScope, 100, signal, appId ? { application_id: appId } : undefined),
     retry: false,
   })
 
@@ -199,6 +211,17 @@ export function UiPage() {
       ) : null}
 
       <Tabs items={TABS} active={tab} onChange={setTab} ariaLabel="UI 自动化视图" />
+
+      {currentApp ? (
+        <div className="mb">
+          <Notice tone="blue" title={'当前工作区：' + currentApp.name}>
+            运行与任务都锚定该应用（id {currentApp.id.slice(0, 8)}…）；清单已按此应用过滤。
+            {currentApp.platform !== 'android'
+              ? ' iOS/Web 仅支持保存草稿，不显示设备就绪，也不伪装真实执行。'
+              : ''}
+          </Notice>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="mb">
