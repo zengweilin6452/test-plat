@@ -29,6 +29,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = REPO_ROOT / "server" / "alembic" / "versions" / "0001_initial.py"
+# 迁移 0002+（工单 22：字典必须覆盖当前迁移 head，而不是只解析 0001）
+MIGRATIONS_DIR = REPO_ROOT / "server" / "alembic" / "versions"
+
 OUT_PATH = REPO_ROOT / "server" / "app" / "static_data" / "schema_doc.json"
 
 # --------------------------------------------------------------------------- #
@@ -38,7 +41,7 @@ TABLE_GROUPS: dict[str, list[str]] = {
     "基础资产": ["projects", "project_members", "applications", "app_builds", "environments"],
     "执行资源": ["execution_nodes", "resource_profiles", "execution_resources", "debug_sessions", "resource_leases"],
     "测试定义": ["test_suites", "suite_versions"],
-    "任务运行": ["test_tasks", "task_revisions", "test_runs"],
+    "任务运行": ["test_tasks", "task_revisions", "task_request_keys", "test_runs"],
     "结果证据": ["run_components", "case_results", "artifacts"],
     "性能质量": ["metric_summaries", "baselines", "gate_policies", "gate_evaluations"],
     "治理追溯": ["run_events", "audit_events"],
@@ -57,6 +60,7 @@ TABLE_TITLES: dict[str, str] = {
     "suite_versions": "套件版本",
     "test_tasks": "测试任务",
     "task_revisions": "任务配置版本",
+    "task_request_keys": "任务幂等键",
     "test_runs": "测试运行",
     "debug_sessions": "调试会话",
     "resource_leases": "资源租约",
@@ -367,11 +371,65 @@ def _kwarg(call: ast.Call, key: str) -> object:
     return None
 
 
+def apply_migration_ast(tables: dict[str, dict[str, object]], source: str) -> None:
+    """把一个 0002+ 迁移的 op.create_table / op.add_column 应用到字典草稿上。
+
+    只处理结构事实（列/主键/可空/默认）；op.execute 里的原始 SQL（回填、
+    COMMENT、序列）不解析——回填不改结构，COMMENT 由 0001 的口径覆盖。
+    """
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                and func.value.id == "op"):
+            continue
+        if func.attr == "add_column" and len(node.args) >= 2:
+            table_name = _const(node.args[0])
+            column = _parse_column(node.args[1], source) if isinstance(node.args[1], ast.Call) else None
+            if table_name and column and table_name in tables:
+                columns = tables[table_name].setdefault("columns", [])  # type: ignore[union-attr]
+                if not any(c["name"] == column["name"] for c in columns):  # type: ignore[index]
+                    columns.append(column)  # type: ignore[index]
+        elif func.attr == "create_table" and node.args:
+            name = _const(node.args[0])
+            if not name or name in tables:
+                continue
+            columns = []
+            constraints = []
+            for arg in node.args[1:]:
+                if not isinstance(arg, ast.Call) or not isinstance(arg.func, ast.Attribute):
+                    continue
+                if arg.func.attr == "Column":
+                    columns.append(_parse_column(arg, source))
+                elif arg.func.attr in ("ForeignKey", "CheckConstraint", "UniqueConstraint"):
+                    parsed = _extract_constraint(arg, source) if "_extract_constraint" in globals() else None
+                    if parsed:
+                        constraints.append(parsed)
+            tables[name] = {
+                "name": name,
+                "title": TABLE_TITLES.get(name, name),
+                "columns": columns,
+                "constraints": constraints,
+                "indexes": [],
+                "comment": "",
+            }
+
+
 def main() -> int:
     source = MIGRATION.read_text(encoding="utf-8")
     extracted = _extract(source)
     tables: dict[str, dict[str, object]] = extracted["tables"]  # type: ignore[assignment]
+    indexes = extracted["indexes"]  # type: ignore[assignment]
+    # 工单 22：把 0002+ 的追加迁移也走一遍（op.create_table / op.add_column），
+    # 字典覆盖当前迁移 head；字段的可空/默认以迁移声明为准。
+    for migration in sorted(MIGRATIONS_DIR.glob("[0-9]*.py")):
+        if migration.name.startswith("0001"):
+            continue
+        apply_migration_ast(tables, migration.read_text(encoding="utf-8"))
     order = [t for g in TABLE_GROUPS.values() for t in g]
+    order += [t for t in TABLE_GROUPS.get("任务运行", []) if t not in order]
     missing = [t for t in order if t not in tables]
     if missing:
         raise SystemExit(f"迁移中缺少表: {missing}")
