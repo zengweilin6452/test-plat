@@ -584,9 +584,26 @@ async def validate_template(request: Request, session_id: str | None = None,
     在 with_scores=False 时按 3 元组解包（viewer/app.py `ValueError: too many values
     to unpack`）。vendor/ 是只读源仓库，不在本地改；改用 vendor 自己的
     `/templates/validate`（with_scores=True，响应多一个 `scores` 数组）。
+
+    阈值契约（AC-DBG-05）：0.10-1.00 之外直接 422，不把越界值透传给 vendor；
+    匹配失败如实返回无匹配，不伪造命中。
     """
+    body = await request.json()
+    threshold = body.get("threshold") if isinstance(body, dict) else None
+    if threshold is not None:
+        try:
+            value = float(threshold)
+        except (TypeError, ValueError):
+            from ..errors import validation_error
+
+            raise validation_error(["threshold 必须是数值"])
+        if not (0.10 <= value <= 1.00):
+            from ..errors import validation_error
+
+            raise validation_error(["threshold 必须在 0.10-1.00 之间"])
     sid = await _template_session(session, session_id)
-    return await _forward(sid, "POST", "/api/v1/templates/validate", json_body=await request.json())
+    return await _forward(sid, "POST", "/api/v1/templates/validate", json_body=body)
+
 
 
 @router.put("/templates/{logical:path}")
