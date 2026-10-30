@@ -269,7 +269,24 @@ async def create_suite(
             {"name": name, "application_id": str(application["id"])},
         )
 
-    source, code_copy, node_ids = _prepare_source_copy(source_id, test_type=test_type)
+    if test_type == "ui":
+        if not source_id:
+            raise validation_error(["UI 套件登记必须提供 source_id"])
+    else:
+        # performance 是声明式场景、joint 需要同时给 UI 与性能两部分，
+        # 首版本都由 POST /suites/{id}/versions 发布，登记阶段不跑 discover，
+        # 因此也不接受代码来源（避免让人误以为登记时已固定代码）。
+        if source_id:
+            raise validation_error(
+                [f"{test_type} 套件的代码来源在发布版本时提供，登记阶段不接受 source_id"]
+            )
+        source_id = None
+
+    prepared = (
+        _prepare_source_copy(source_id, test_type=test_type)
+        if source_id is not None
+        else None
+    )
 
     suite_id = str(uuid.uuid4())
     inserted = (
@@ -293,14 +310,17 @@ async def create_suite(
     if inserted is None:  # pragma: no cover
         raise bad_request("创建套件失败")
 
-    version = await create_version(
-        session,
-        suite_row=dict(inserted),
-        node_ids=node_ids,
-        source_ref=source_ref or source.source_id,
-        source_commit=source_commit,
-        extra={"code_copy": code_copy, "source_id": source.source_id},
-    )
+    version: dict[str, Any] | None = None
+    if prepared is not None:
+        source, code_copy, node_ids = prepared
+        version = await create_version(
+            session,
+            suite_row=dict(inserted),
+            node_ids=node_ids,
+            source_ref=source_ref or source.source_id,
+            source_commit=source_commit,
+            extra={"code_copy": code_copy, "source_id": source.source_id},
+        )
     row = await get_suite(session, suite_id)
     return {**_suite_dict(row), "created_version": version}
 
@@ -315,6 +335,10 @@ async def discover_version(
 ) -> dict[str, Any]:
     """对既有套件追加一个版本：来源 -> 新固定副本 -> 发现（不覆盖旧版本）。"""
     test_type = str(suite_row["test_type"])
+    if test_type == "performance":
+        raise validation_error(
+            ["performance 套件使用声明式场景发布版本（POST /suites/{id}/versions），不通过 discover 收集用例"]
+        )
     source, code_copy, node_ids = _prepare_source_copy(source_id, test_type=test_type)
     return await create_version(
         session,
@@ -360,6 +384,8 @@ async def create_version(
     source_commit: str | None,
     extra: dict[str, Any] | None = None,
     version_id: str | None = None,
+    scenario: dict[str, Any] | None = None,
+    ui_timeout_s: int | None = None,
 ) -> dict[str, Any]:
     """追加一个 suite_version（不可变），manifest 里带上用例清单与固定代码副本。
 
@@ -387,7 +413,13 @@ async def create_version(
         )
     ).scalar_one()
     version_no = suite_domain.next_version(int(current_max or 0))
-    manifest = suite_domain.build_manifest(node_ids, extra=payload)
+    manifest = suite_domain.build_typed_manifest(
+        str(suite_row["test_type"]),
+        node_ids=node_ids,
+        scenario=scenario,
+        ui_timeout_s=ui_timeout_s,
+        extra=payload,
+    )
 
     row = (
         await session.execute(
@@ -526,3 +558,65 @@ def plan_execution_budget(
         "host_deadline_s": deadline,
         "host_timeout_s": int(host_timeout_s),
     }
+
+
+async def publish_version(
+    session: AsyncSession,
+    *,
+    suite_row: Any,
+    scenario: dict[str, Any] | None,
+    ui_timeout_s: int | None = None,
+    source_id: str | None = None,
+    source_ref: str | None = None,
+    source_commit: str | None = None,
+) -> dict[str, Any]:
+    """发布声明式版本（performance）或 joint 完整组合。
+
+    UI 版本只能由 discover 产生；joint 必须同时带 UI 代码副本与性能采集项，
+    缺任一部分都拒绝（spec §6.6 / AC-INPUT-03）。
+    """
+    test_type = str(suite_row["test_type"])
+    if test_type == "ui":
+        raise validation_error(
+            ["UI 套件版本由 discover 产生，不接受声明式清单"]
+        )
+    if test_type not in ("performance", "joint"):
+        raise validation_error([f"未知测试类型：{test_type!r}"])
+
+    # 未填的可选字段（如 app_package=None）不写进 manifest，保持场景形状干净
+    scenario = {
+        key: value for key, value in (scenario or {}).items() if value is not None
+    }
+    extra: dict[str, Any] = {}
+    node_ids: list[str] = []
+    source_label = source_ref
+    if test_type == "joint":
+        if not source_id:
+            raise validation_error(["joint 版本必须提供 UI 代码来源 source_id"])
+        source, code_copy, node_ids = _prepare_source_copy(source_id, test_type="joint")
+        extra = {"code_copy": code_copy, "source_id": source.source_id}
+        source_label = source_ref or source.source_id
+    elif source_id:
+        raise validation_error(["performance 版本是声明式场景，不接受代码来源 source_id"])
+
+    manifest = suite_domain.build_typed_manifest(
+        test_type,
+        node_ids=node_ids,
+        scenario=scenario,
+        ui_timeout_s=ui_timeout_s,
+        extra=extra,
+    )
+    problems = suite_domain.validate_manifest(manifest, test_type=test_type)
+    if problems:
+        raise validation_error(problems)
+
+    return await create_version(
+        session,
+        suite_row=suite_row,
+        node_ids=node_ids,
+        source_ref=source_label,
+        source_commit=source_commit,
+        extra=extra,
+        scenario=scenario,
+        ui_timeout_s=ui_timeout_s,
+    )

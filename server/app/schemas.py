@@ -301,7 +301,33 @@ class SuiteCreateIn(BaseModel):
     application_id: str = Field(min_length=1)
     name: str = Field(min_length=1, max_length=200)
     test_type: Literal["ui", "performance", "joint"]
-    source_id: str = Field(min_length=1)
+    #: UI 套件必填；performance 是声明式场景、joint 在发布版本时提供来源
+    source_id: str | None = Field(default=None, min_length=1)
+    source_ref: str | None = None
+    source_commit: str | None = None
+
+
+class PerformanceScenarioIn(BaseModel):
+    """声明式性能场景：固定采集时长 + 实际支持的采集项（不是 pytest 用例）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration_s: int = Field(ge=10, le=3600)
+    items: list[str] = Field(min_length=1)
+    app_package: str | None = None
+
+
+class SuiteVersionPublishIn(BaseModel):
+    """POST /suites/{id}/versions：发布 performance 声明式场景或 joint 完整组合。
+
+    UI 版本由 discover 产生；joint 必须同时给 UI 代码来源（source_id）与性能采集项。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    scenario: PerformanceScenarioIn
+    ui_timeout_s: int | None = Field(default=None, gt=0)
+    source_id: str | None = None
     source_ref: str | None = None
     source_commit: str | None = None
 

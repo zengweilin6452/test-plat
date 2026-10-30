@@ -88,7 +88,7 @@ def _prepare(version_id: str) -> Path:
 def test_discover_publishes_code_copy_without_host_paths(
     api_client, seed, suite_root, tmp_path
 ):
-    response = _discover(api_client, seed["suite_id"], {"source_id": "suite_min"})
+    response = _discover(api_client, seed["other_suite_id"], {"source_id": "suite_min"})
     assert response.status_code == 201, response.text
     body = response.json()
     manifest = body["manifest"]
@@ -106,7 +106,7 @@ def test_discover_publishes_code_copy_without_host_paths(
 def test_version_copy_is_stable_after_source_changes(
     api_client, seed, suite_root
 ):
-    first = _discover(api_client, seed["suite_id"], {"source_id": "suite_min"})
+    first = _discover(api_client, seed["other_suite_id"], {"source_id": "suite_min"})
     assert first.status_code == 201, first.text
     v1 = first.json()
     v1_copy = v1["manifest"]["code_copy"]
@@ -115,14 +115,14 @@ def test_version_copy_is_stable_after_source_changes(
     (suite_root / "test_more.py").write_text(
         "def test_delta():\n    assert True\n", encoding="utf-8"
     )
-    second = _discover(api_client, seed["suite_id"], {"source_id": "suite_min"})
+    second = _discover(api_client, seed["other_suite_id"], {"source_id": "suite_min"})
     assert second.status_code == 201, second.text
     v2 = second.json()
     assert v2["version"] == 2
     assert v2["manifest"]["code_copy"]["tree_sha256"] != v1_copy["tree_sha256"]
 
     # V1 行不可变
-    versions = api_client.get(f"/api/v1/suites/{seed['suite_id']}/versions").json()
+    versions = api_client.get(f"/api/v1/suites/{seed['other_suite_id']}/versions").json()
     old = next(item for item in versions["items"] if item["id"] == v1["id"])
     assert old["manifest"]["code_copy"] == v1_copy
 
@@ -140,7 +140,7 @@ def test_version_copy_is_stable_after_source_changes(
 
 
 def test_corrupted_copy_blocks_execution(api_client, seed, suite_root):
-    response = _discover(api_client, seed["suite_id"], {"source_id": "suite_min"})
+    response = _discover(api_client, seed["other_suite_id"], {"source_id": "suite_min"})
     assert response.status_code == 201, response.text
     version = response.json()
     root = _prepare(version["id"])

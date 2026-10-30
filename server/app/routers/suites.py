@@ -22,7 +22,12 @@ from ..db import get_session
 from ..domain import suite as suite_domain
 from ..errors import validation_error
 from ..integrations import discover as discover_integration
-from ..schemas import SuiteCreateIn, SuiteDiscoverIn, SuiteSourcesOut
+from ..schemas import (
+    SuiteCreateIn,
+    SuiteDiscoverIn,
+    SuiteSourcesOut,
+    SuiteVersionPublishIn,
+)
 from ..services import suites as suite_service
 from .tasks import require_client_header
 
@@ -84,6 +89,33 @@ async def list_suite_versions(
 ) -> dict[str, Any]:
     """套件版本列表（version 倒序），每个版本带 case_count 与是否保留固定代码。"""
     return await suite_service.list_versions(session, suite_id)
+
+
+@router.post("/suites/{suite_id}/versions", status_code=201)
+async def publish_suite_version(
+    suite_id: str,
+    body: SuiteVersionPublishIn,
+    _client: str = Depends(require_client_header),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """发布声明式版本：performance 场景，或 joint 的 UI 代码副本 + 性能采集项。
+
+    失败语义：
+      - UI 套件             -> 400 validation_error（版本由 discover 产生）
+      - joint 缺 source_id   -> 400 validation_error
+      - 场景缺 duration_s/items 或越界 -> 400 validation_error
+      - 来源不可用/副本失败   -> 422 discover_failed（details.reason）
+    """
+    suite_row = await suite_service.get_suite(session, suite_id)
+    return await suite_service.publish_version(
+        session,
+        suite_row=suite_row,
+        scenario=body.scenario.model_dump(),
+        ui_timeout_s=body.ui_timeout_s,
+        source_id=body.source_id,
+        source_ref=body.source_ref,
+        source_commit=body.source_commit,
+    )
 
 
 @router.post("/suites/{suite_id}/discover", status_code=201)

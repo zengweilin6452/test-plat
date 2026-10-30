@@ -130,10 +130,11 @@ def test_create_suite_unknown_source_is_400(api_client, seed, source):
     assert resp.json()["details"]["reason"] == "source_not_configured"
 
 
-def test_create_suite_rejects_source_for_other_test_type(api_client, seed, source):
+def test_create_suite_rejects_source_for_declarative_type(api_client, seed, source):
+    """performance/joint 的首版本由 POST /versions 发布，登记阶段不接受代码来源。"""
     resp = _create_suite(api_client, seed, source, name="性能套件", test_type="performance")
     assert resp.status_code == 400, resp.text
-    assert resp.json()["details"]["reason"] == "source_type_mismatch"
+    assert "source_id" in resp.json()["message"]
 
 
 def test_create_suite_rejects_link_source(api_client, seed, tmp_path, monkeypatch):
@@ -281,12 +282,12 @@ def test_legacy_version_without_copy_is_marked_and_blocked(api_client, seed, sou
     assert not blocked.ok
     assert any("未保留固定代码副本" in item for item in blocked.invalid)
 
-    # performance 声明式场景不需要代码副本
+    # performance 声明式场景不需要代码副本（旧清单没有类型标记）
     allowed = check_readiness(
         revision={**revision, "test_type": "performance"},
         platform="android",
         application_platform="android",
-        suite_version={"manifest": legacy_manifest},
-        case_total=1,
+        suite_version={"manifest": {"schema_version": 1, "cases": []}},
+        case_total=0,
     )
     assert allowed.ok, allowed.invalid
