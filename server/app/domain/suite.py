@@ -92,3 +92,98 @@ def case_total(manifest: Any) -> int:
 def next_version(current_max: int | None) -> int:
     """suite_versions.version 单调递增（UNIQUE(project_id,suite_id,version)）。"""
     return int(current_max or 0) + 1
+
+
+# --------------------------------------------------------------------------- #
+# 类型化清单（工单 06 / spec §6.6、§9.2）
+# --------------------------------------------------------------------------- #
+#: 性能采集窗口的合法区间（秒，整数）
+DURATION_MIN_S = 10
+DURATION_MAX_S = 3600
+
+
+def build_typed_manifest(
+    test_type: str,
+    *,
+    node_ids: list[str] | None = None,
+    scenario: dict[str, Any] | None = None,
+    ui_timeout_s: int | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """按类型构造 manifest。
+
+    - ui：只有用例清单（由 discover 产生），必须带固定代码副本（由调用方放进 extra）；
+    - performance：只有声明式场景，**不伪造 cases**（case_count 恒为 0）；
+    - joint：UI 用例清单 + 固定代码副本 + 性能采集项 + ui_timeout_s。
+    """
+    manifest = build_manifest(node_ids or [], extra=extra)
+    manifest["test_type"] = test_type
+    if test_type == "performance":
+        # 声明式场景不是 pytest 用例：显式清零，避免下游把场景当成 case 统计。
+        manifest["case_count"] = 0
+        manifest["cases"] = []
+        manifest["scenario"] = dict(scenario or {})
+    elif test_type == "joint":
+        manifest["performance"] = dict(scenario or {})
+        if ui_timeout_s is not None:
+            manifest["ui_timeout_s"] = int(ui_timeout_s)
+    return manifest
+
+
+def validate_manifest(manifest: Any, *, test_type: str) -> list[str]:
+    """按类型校验 manifest，返回可读的问题列表（空表示通过）。
+
+    规则来自 spec §6.6：
+      - ui：必须有用例清单；空清单失败（不允许用占位数据通过验证）；
+      - performance：必须是声明式场景，duration_s 为 10–3600 的整数、采集项非空，
+        且不得出现伪造的 cases；
+      - joint：UI 与性能任一部分缺失都失败。
+    """
+    problems: list[str] = []
+    if not isinstance(manifest, dict):
+        return ["manifest 缺失或格式不正确"]
+
+    declared = manifest.get("test_type")
+    if declared is not None and declared != test_type:
+        problems.append(f"清单类型 {declared!r} 与套件类型 {test_type!r} 不一致")
+
+    cases = case_total(manifest)
+    if test_type == "ui":
+        if cases <= 0:
+            problems.append("UI 清单为空：没有收集到任何用例")
+    elif test_type == "performance":
+        if cases > 0 or manifest.get("cases"):
+            problems.append("性能场景不应包含 pytest 用例（不能用占位用例冒充执行）")
+        problems.extend(_scenario_problems(manifest.get("scenario")))
+    elif test_type == "joint":
+        if cases <= 0:
+            problems.append("joint 清单缺少 UI 用例")
+        problems.extend(
+            [f"joint {item}" for item in _scenario_problems(manifest.get("performance"))]
+        )
+        ui_timeout = manifest.get("ui_timeout_s")
+        if not isinstance(ui_timeout, int) or ui_timeout <= 0:
+            problems.append("joint 清单缺少 ui_timeout_s（正整数秒）")
+    else:
+        problems.append(f"未知测试类型：{test_type!r}")
+    return problems
+
+
+def _scenario_problems(scenario: Any) -> list[str]:
+    """声明式场景的必需字段：duration_s（10–3600 整数）与 items（非空字符串列表）。"""
+    if not isinstance(scenario, dict) or not scenario:
+        return ["缺少声明式性能场景（duration_s 与采集项）"]
+    problems: list[str] = []
+    duration = scenario.get("duration_s")
+    if not isinstance(duration, int) or isinstance(duration, bool):
+        problems.append("性能场景 duration_s 必须是整数秒")
+    elif not (DURATION_MIN_S <= duration <= DURATION_MAX_S):
+        problems.append(
+            f"性能场景 duration_s 必须在 {DURATION_MIN_S}–{DURATION_MAX_S} 秒之间"
+        )
+    items = scenario.get("items")
+    if not isinstance(items, list) or not items or not all(
+        isinstance(item, str) and item.strip() for item in items
+    ):
+        problems.append("性能场景采集项 items 必须是非空字符串列表")
+    return problems

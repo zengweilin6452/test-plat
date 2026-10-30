@@ -94,6 +94,7 @@ def check_readiness(
     application_platform: str | None,
     suite_version: dict[str, Any] | None,
     case_total: int,
+    suite_test_type: str | None = None,
 ) -> ReadinessReport:
     """校验修订是否满足"可运行"的必要条件。
 
@@ -113,18 +114,46 @@ def check_readiness(
     invalid: list[str] = []
 
     suite_version_id = revision.get("suite_version_id")
+    rev_test_type = str(revision.get("test_type") or "")
+    effective_type = rev_test_type or suite_test_type or ""
     if suite_version_id is None:
         missing.append("suite_version_id")
     elif suite_version is None:
         invalid.append("suite_version_id: 该套件版本不存在")
-    elif case_total <= 0:
-        invalid.append("suite_version_id: 该套件版本没有收集到任何用例")
     else:
-        test_type = str(revision.get("test_type") or "")
         manifest = suite_version.get("manifest")
         manifest = manifest if isinstance(manifest, dict) else {}
-        if test_type in ("ui", "joint") and not isinstance(manifest.get("code_copy"), dict):
-            invalid.append("suite_version_id: 该套件版本未保留固定代码副本，请重新发现并创建新版本")
+        if suite_test_type and rev_test_type and suite_test_type != rev_test_type:
+            # 套件与修订的测试类型必须一致（spec §6.6 / AC-INPUT-03）
+            invalid.append(
+                f"suite_version_id: 套件类型 {suite_test_type!r} 与修订类型 {rev_test_type!r} 不一致"
+            )
+        elif isinstance(manifest.get("test_type"), str):
+            # 新版本清单带类型标记：按 §6.6 的清单规则逐项校验
+            from . import suite as suite_domain
+
+            invalid.extend(
+                f"suite_version_id: {problem}"
+                for problem in suite_domain.validate_manifest(
+                    manifest, test_type=effective_type or str(manifest["test_type"])
+                )
+            )
+            if effective_type in ("ui", "joint") and not isinstance(
+                manifest.get("code_copy"), dict
+            ):
+                invalid.append(
+                    "suite_version_id: 该套件版本未保留固定代码副本，请重新发现并创建新版本"
+                )
+        else:
+            # 旧版本清单没有类型标记：沿用旧口径，只要求 UI/joint 有用例与固定副本
+            if effective_type in ("ui", "joint") and case_total <= 0:
+                invalid.append("suite_version_id: 该套件版本没有收集到任何用例")
+            if effective_type in ("ui", "joint") and not isinstance(
+                manifest.get("code_copy"), dict
+            ):
+                invalid.append(
+                    "suite_version_id: 该套件版本未保留固定代码副本，请重新发现并创建新版本"
+                )
 
     if not revision.get("build_id"):
         missing.append("build_id")

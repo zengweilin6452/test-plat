@@ -1421,6 +1421,42 @@
             "$ref": "#/components/schemas/ErrorEnvelope"
           }
         }
+      },
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "suite_id",
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": {
+          "$ref": "#/components/schemas/SuiteVersionPublishIn"
+        },
+        "responses": {
+          "201": {
+            "additionalProperties": true,
+            "title": "Response Publish Suite Version Api V1 Suites  Suite Id  Versions Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
       }
     },
     "/api/v1/tasks": {
@@ -2518,6 +2554,43 @@
       "title": "OverviewOut",
       "type": "object"
     },
+    "PerformanceScenarioIn": {
+      "additionalProperties": false,
+      "description": "声明式性能场景：固定采集时长 + 实际支持的采集项（不是 pytest 用例）。",
+      "properties": {
+        "app_package": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "App Package"
+        },
+        "duration_s": {
+          "maximum": 3600.0,
+          "minimum": 10.0,
+          "title": "Duration S",
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "duration_s",
+        "items"
+      ],
+      "title": "PerformanceScenarioIn",
+      "type": "object"
+    },
     "ProjectRecordOut": {
       "additionalProperties": true,
       "properties": {
@@ -3039,9 +3112,16 @@
           "title": "Source Commit"
         },
         "source_id": {
-          "minLength": 1,
-          "title": "Source Id",
-          "type": "string"
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Id"
         },
         "source_ref": {
           "anyOf": [
@@ -3067,8 +3147,7 @@
       "required": [
         "application_id",
         "name",
-        "test_type",
-        "source_id"
+        "test_type"
       ],
       "title": "SuiteCreateIn",
       "type": "object"
@@ -3157,6 +3236,65 @@
         "total"
       ],
       "title": "SuiteSourcesOut",
+      "type": "object"
+    },
+    "SuiteVersionPublishIn": {
+      "additionalProperties": false,
+      "description": "POST /suites/{id}/versions：发布 performance 声明式场景或 joint 完整组合。\n\nUI 版本由 discover 产生；joint 必须同时给 UI 代码来源（source_id）与性能采集项。",
+      "properties": {
+        "scenario": {
+          "$ref": "#/components/schemas/PerformanceScenarioIn"
+        },
+        "source_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Commit"
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Id"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Ref"
+        },
+        "ui_timeout_s": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ui Timeout S"
+        }
+      },
+      "required": [
+        "scenario"
+      ],
+      "title": "SuiteVersionPublishIn",
       "type": "object"
     },
     "TaskCreateIn": {

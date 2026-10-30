@@ -133,7 +133,7 @@ def test_list_versions_of_unknown_suite_is_404(api_client):
 
 
 def test_versions_start_empty(api_client, seed):
-    body = api_client.get(f"/api/v1/suites/{seed['suite_id']}/versions").json()
+    body = api_client.get(f"/api/v1/suites/{seed['other_suite_id']}/versions").json()
     assert body == {"items": [], "total": 0}
 
 
@@ -142,7 +142,7 @@ def test_versions_start_empty(api_client, seed):
 # --------------------------------------------------------------------------- #
 def test_discover_creates_first_version(api_client, seed, suite_source):
     resp = api_client.post(
-        f"/api/v1/suites/{seed['suite_id']}/discover",
+        f"/api/v1/suites/{seed['other_suite_id']}/discover",
         json={"source_id": suite_source["id"]},
         headers=CLIENT_HEADERS,
     )
@@ -150,7 +150,7 @@ def test_discover_creates_first_version(api_client, seed, suite_source):
     body = resp.json()
 
     assert body["version"] == 1
-    assert body["suite_id"] == seed["suite_id"]
+    assert body["suite_id"] == seed["other_suite_id"]
     assert body["case_count"] == 3
     assert body["source_ref"] == suite_source["id"]
     assert body["source_commit"] == "local"
@@ -168,8 +168,8 @@ def test_discover_creates_first_version(api_client, seed, suite_source):
     assert any(k.endswith("::TestGroup::test_gamma") for k in keys)
 
     # 列表里能看到最新版本
-    listing = api_client.get("/api/v1/suites", params={"test_type": "performance"}).json()
-    listed = {item["id"]: item for item in listing["items"]}[seed["suite_id"]]
+    listing = api_client.get("/api/v1/suites", params={"test_type": "ui"}).json()
+    listed = {item["id"]: item for item in listing["items"]}[seed["other_suite_id"]]
     assert listed["version_count"] == 1
     assert listed["latest_version"]["version"] == 1
     assert listed["latest_version"]["case_count"] == 3
@@ -177,7 +177,7 @@ def test_discover_creates_first_version(api_client, seed, suite_source):
 
 def test_discover_appends_new_version_and_keeps_old(api_client, seed, suite_source):
     first = api_client.post(
-        f"/api/v1/suites/{seed['suite_id']}/discover",
+        f"/api/v1/suites/{seed['other_suite_id']}/discover",
         json={"source_id": suite_source["id"]},
         headers=CLIENT_HEADERS,
     )
@@ -186,7 +186,7 @@ def test_discover_appends_new_version_and_keeps_old(api_client, seed, suite_sour
     # 目录里加一条用例后重新 discover
     (suite_source["root"] / "test_more.py").write_text("def test_delta():\n    assert True\n", encoding="utf-8")
     second = api_client.post(
-        f"/api/v1/suites/{seed['suite_id']}/discover",
+        f"/api/v1/suites/{seed['other_suite_id']}/discover",
         json={"source_id": suite_source["id"], "source_ref": "e2e-suite", "source_commit": "abc1234"},
         headers=CLIENT_HEADERS,
     )
@@ -196,7 +196,7 @@ def test_discover_appends_new_version_and_keeps_old(api_client, seed, suite_sour
     assert second.json()["source_ref"] == "e2e-suite"
     assert second.json()["source_commit"] == "abc1234"
 
-    versions = api_client.get(f"/api/v1/suites/{seed['suite_id']}/versions").json()
+    versions = api_client.get(f"/api/v1/suites/{seed['other_suite_id']}/versions").json()
     assert versions["total"] == 2
     assert [v["version"] for v in versions["items"]] == [2, 1]
     # 旧版本不可变：仍然只有 3 条
@@ -207,7 +207,7 @@ def test_discover_appends_new_version_and_keeps_old(api_client, seed, suite_sour
 
 def test_discover_requires_client_header(api_client, seed, suite_source):
     resp = api_client.post(
-        f"/api/v1/suites/{seed['suite_id']}/discover",
+        f"/api/v1/suites/{seed['other_suite_id']}/discover",
         json={"source_id": suite_source["id"]},
     )
     assert resp.status_code == 428, resp.text
@@ -231,7 +231,7 @@ def test_discover_missing_source_is_422(api_client, seed, tmp_path, monkeypatch)
         json.dumps([{"id": "gone", "name": "已删除来源", "path": str(tmp_path / "no-such-dir")}]),
     )
     resp = api_client.post(
-        f"/api/v1/suites/{seed['suite_id']}/discover",
+        f"/api/v1/suites/{seed['other_suite_id']}/discover",
         json={"source_id": "gone"},
         headers=CLIENT_HEADERS,
     )
@@ -256,7 +256,7 @@ def test_discover_source_without_tests_is_422(api_client, seed, tmp_path, monkey
     )
 
     resp = api_client.post(
-        f"/api/v1/suites/{seed['suite_id']}/discover",
+        f"/api/v1/suites/{seed['other_suite_id']}/discover",
         json={"source_id": "empty"},
         headers=CLIENT_HEADERS,
     )
@@ -267,7 +267,7 @@ def test_discover_source_without_tests_is_422(api_client, seed, tmp_path, monkey
 def test_discover_rejects_arbitrary_host_path(api_client, seed, suite_source):
     """浏览器不能把任意宿主路径当来源；只能传预配置 source_id。"""
     resp = api_client.post(
-        f"/api/v1/suites/{seed['suite_id']}/discover",
+        f"/api/v1/suites/{seed['other_suite_id']}/discover",
         json={"suite_root": str(suite_source["root"])},
         headers=CLIENT_HEADERS,
     )
@@ -277,7 +277,7 @@ def test_discover_rejects_arbitrary_host_path(api_client, seed, suite_source):
 
 def test_discover_unconfigured_source_is_400(api_client, seed):
     resp = api_client.post(
-        f"/api/v1/suites/{seed['suite_id']}/discover",
+        f"/api/v1/suites/{seed['other_suite_id']}/discover",
         json={"source_id": "not-configured"},
         headers=CLIENT_HEADERS,
     )
@@ -293,9 +293,9 @@ def test_discover_failure_does_not_create_version(api_client, seed, tmp_path, mo
         json.dumps([{"id": "gone", "name": "已删除来源", "path": str(tmp_path / "nope")}]),
     )
     api_client.post(
-        f"/api/v1/suites/{seed['suite_id']}/discover",
+        f"/api/v1/suites/{seed['other_suite_id']}/discover",
         json={"source_id": "gone"},
         headers=CLIENT_HEADERS,
     )
-    versions = api_client.get(f"/api/v1/suites/{seed['suite_id']}/versions").json()
+    versions = api_client.get(f"/api/v1/suites/{seed['other_suite_id']}/versions").json()
     assert versions["total"] == 0

@@ -230,9 +230,11 @@ async def _check_suite_version(
     return (
         await session.execute(
             text(
-                "SELECT id, suite_id, version, source_ref, source_commit, manifest, created_at "
-                "FROM suite_versions "
-                "WHERE project_id = :pid AND application_id = :aid AND id = :sid"
+                "SELECT sv.id, sv.suite_id, sv.version, sv.source_ref, sv.source_commit, "
+                "       sv.manifest, sv.created_at, s.test_type AS suite_test_type "
+                "  FROM suite_versions sv "
+                "  JOIN test_suites s ON s.id = sv.suite_id "
+                " WHERE sv.project_id = :pid AND sv.application_id = :aid AND sv.id = :sid"
             ),
             {"pid": project_id, "aid": application_id, "sid": sid},
         )
@@ -583,6 +585,9 @@ async def validate_task(session: AsyncSession, *, task_id: str, created_by: str)
         application_platform=application["platform"],
         suite_version=dict(suite_version) if suite_version is not None else None,
         case_total=case_total,
+        suite_test_type=(
+            str(suite_version["suite_test_type"]) if suite_version is not None else None
+        ),
     )
     if not report.ok:
         from ..errors import task_not_ready
