@@ -14,6 +14,7 @@ WindowsSelectorEventLoopPolicy（与 app/main.py 一致）。
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import uuid
@@ -178,6 +179,37 @@ def demo(sync_engine) -> dict:
     }
 
 
+def _make_code_copy(suffix: str) -> dict:
+    """在配置的副本根下造一个单文件固定副本，返回可校验的 code_copy 摘要。"""
+    import hashlib
+
+    from app.integrations.discover import (
+        CODE_COPY_SCHEMA_VERSION,
+        configured_code_copies_root,
+        tree_digest,
+    )
+
+    copy_id = "p3test-" + suffix
+    root = configured_code_copies_root() / copy_id
+    root.mkdir(parents=True, exist_ok=True)
+    rel_path = "tests/test_smoke.py"
+    content = ("# smoke fixture " + suffix + chr(10)).encode("utf-8")
+    (root / "tests").mkdir(exist_ok=True)
+    (root / rel_path).write_bytes(content)
+    entry = [{"path": rel_path, "sha256": hashlib.sha256(content).hexdigest(),
+              "size": len(content)}]
+    return {
+        "schema_version": CODE_COPY_SCHEMA_VERSION,
+        "copy_id": copy_id,
+        "root_rel": copy_id,
+        "tree_sha256": tree_digest(entry),
+        "file_count": 1,
+        "files": entry,
+        "source_id": "pytest-fixture",
+        "copied_at": "1970-01-01T00:00:00+00:00",
+    }
+
+
 def make_project(sync_engine, *, resources: int = 2, platform: str = "android") -> dict:
     """建一个干净的 P3 测试项目（含 application / node / 若干 ready 资源）。
 
@@ -251,14 +283,29 @@ def make_project(sync_engine, *, resources: int = 2, platform: str = "android") 
         {"id": suite_id, "pid": project_id, "aid": application_id, "name": f"suite-{suffix}"},
     )
     suite_version_id = str(uuid.uuid4())
+    # 工单 24：派发前复验固定代码副本——夹具造一个真实可校验的副本
+    #（TESTDOCK_CODE_COPIES_DIR 指向 pytest tmp 的用例自行覆盖根目录）。
+    code_copy = _make_code_copy(suffix)
     _exec_sync(
         "INSERT INTO suite_versions"
         " (id, project_id, application_id, suite_id, version, source_ref, source_commit, manifest)"
         " VALUES (CAST(:id AS uuid), CAST(:pid AS uuid), CAST(:aid AS uuid),"
-        "         CAST(:sid AS uuid), 1, 'local', 'local',"
-        "         '{\"schema_version\": 1, \"case_count\": 1,"
-        "           \"cases\": [{\"case_key\": \"tests/test_smoke.py::test_ok\"}]}'::jsonb)",
-        {"id": suite_version_id, "pid": project_id, "aid": application_id, "sid": suite_id},
+        "         CAST(:sid AS uuid), 1, 'local', 'local', CAST(:manifest AS jsonb))",
+        {
+            "id": suite_version_id,
+            "pid": project_id,
+            "aid": application_id,
+            "sid": suite_id,
+            "manifest": json.dumps(
+                {
+                    "schema_version": 1,
+                    "case_count": 1,
+                    "cases": [{"case_key": "tests/test_smoke.py::test_ok"}],
+                    "code_copy": code_copy,
+                },
+                ensure_ascii=False,
+            ),
+        },
     )
     revision_id = str(uuid.uuid4())
     _exec_sync(

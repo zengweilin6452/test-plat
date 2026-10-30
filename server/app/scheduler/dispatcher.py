@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -101,6 +102,83 @@ async def _resolve_config(session, run: dict[str, Any]) -> dict[str, Any]:
         merged.setdefault("application_name", app_row["name"])
         merged.setdefault("app_package", app_row["identifier"])
     return merged
+
+
+async def _prepare_suite_copy(session, revision_id: str) -> Path:
+    """解析修订引用的套件版本并复验固定代码副本，返回副本根目录。"""
+    if not revision_id:
+        raise ValueError("修订缺失，无法定位套件版本")
+    row = (
+        await session.execute(
+            text("SELECT suite_version_id FROM task_revisions WHERE id = CAST(:rid AS uuid)"),
+            {"rid": revision_id},
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise ValueError(f"修订 {revision_id} 不存在")
+    from ..services import suites as suite_service
+
+    return await suite_service.prepare_execution_copy(session, str(row))
+
+
+async def _verify_build_identity(run_id: str, *, serial: str) -> dict[str, Any]:
+    """运行租约内复核构建安装身份（只读 dumpsys，不安装不修改）。
+
+    返回 {verdict: skipped|verified|mismatch|unreadable, detail}；
+    - 修订无构建、构建未学习身份（pending）→ skipped（无从复核，不冒充通过）；
+    - versionName 与固定基准一致 → verified；
+    - 不一致 → mismatch；adb 不可读/设备不在线 → unreadable。
+    """
+    from ..integrations import devices as adb_integration
+
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT b.metadata
+                      FROM test_runs r
+                      JOIN task_revisions tr ON tr.id = r.revision_id
+                      JOIN app_builds b ON b.id = tr.build_id
+                     WHERE r.id = CAST(:rid AS uuid)
+                    """
+                ),
+                {"rid": run_id},
+            )
+        ).scalar_one_or_none()
+    metadata = row if isinstance(row, dict) else {}
+    identity = metadata.get("identity") if isinstance(metadata, dict) else None
+    # 基准在 confirm 时固定到 identity.baseline（工单 04）；state != confirmed
+    # 视为"身份未学习"——不冒充通过，也不阻断（无从复核）。
+    if not isinstance(identity, dict) or identity.get("state") != "confirmed":
+        return {"verdict": "skipped", "detail": "构建身份未学习（pending），运行前无从复核"}
+    declared = identity.get("baseline")
+    if not isinstance(declared, dict) or not declared.get("package_name"):
+        return {"verdict": "skipped", "detail": "构建身份缺少固定基准，运行前无从复核"}
+
+    package = str(declared["package_name"])
+    expected = str(declared.get("version_name") or "")
+    try:
+        adb_path = adb_integration.resolve_adb_path()
+        raw = await asyncio.to_thread(
+            adb_integration._run,  # noqa: SLF001 - 与 readiness 共用只读 adb 入口
+            adb_path,
+            ["-s", serial, "shell", f"dumpsys package {package}"],
+            timeout_s=15,
+        )
+    except Exception as exc:  # noqa: BLE001 - 不可读阻断
+        return {"verdict": "unreadable", "detail": f"adb 读取失败：{exc}"}
+    match = re.search(r"versionName=(\S+)", raw or "")
+    if match is None:
+        return {"verdict": "unreadable", "detail": "dumpsys 输出里没有 versionName"}
+    observed = match.group(1)
+    if expected and observed != expected:
+        return {
+            "verdict": "mismatch",
+            "detail": f"expected versionName={expected}, observed={observed}",
+        }
+    return {"verdict": "verified", "detail": f"versionName={observed}"}
 
 
 async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome:
@@ -200,6 +278,25 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
                 )
                 return DispatchOutcome(run_id=rid, ok=False, reason="local_lease_busy")
 
+            config = await _resolve_config(session, run)
+            # 工单 24：派发前把执行目录固定到套件版本的代码副本——缺失/损坏
+            # 阻断派发（errored），绝不回退到可变来源目录（工单 05 的接线缺口）。
+            try:
+                config["suite_root"] = str(
+                    await _prepare_suite_copy(session, str(run.get("revision_id") or ""))
+                )
+            except Exception as exc:  # noqa: BLE001 - ApiError 与意外失败都阻断
+                await leases_mod.release_lease(session, run_id=rid, reason="execution_copy_missing")
+                await _fail_run_in_tx(
+                    session,
+                    run=run,
+                    reason="execution_copy_missing",
+                    message=f"固定代码副本不可用：{exc}",
+                    source=events_mod.SOURCE_DISPATCHER,
+                )
+                logger.warning("run %s 固定副本不可用 -> errored(execution_copy_missing)", rid)
+                return DispatchOutcome(run_id=rid, ok=False, reason="execution_copy_missing")
+            lease_details = lease.as_details()
             # acquire_lease 已在同一事务内绑定资源，随后迁移状态。
             await runs_mod.transition(
                 session,
@@ -223,8 +320,21 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
                     "fencing_token": lease.fencing_token,
                 },
             )
-            config = await _resolve_config(session, run)
             lease_details = lease.as_details()
+
+    # 工单 24：运行租约内的构建身份复核（只读 adb，不申请第二把租约——
+    # leases_one_live_resource 不允许两条活动租约并存）。冲突/不可读阻断，
+    # 身份未学习（pending）不阻断但记录事件。
+    identity_result = await _verify_build_identity(
+        rid, serial=str(lease_details.get("serial") or "")
+    )
+    if identity_result["verdict"] == "mismatch":
+        await mark_spawn_failed(
+            rid,
+            error="identity_mismatch: " + str(identity_result.get("detail"))[:400],
+            lease=lease_details,
+        )
+        return DispatchOutcome(run_id=rid, ok=False, reason="identity_mismatch")
 
     # 事务已提交：此时镜像里一定有"租约 + dispatching"。spawn 放在事务外，
     # 因为拉起子进程是不可回滚的副作用，绝不能让它发生在一个还会回滚的事务里。
