@@ -687,7 +687,21 @@ async def evaluate_run_original(
             {"project_id": run["project_id"], "component_id": component["id"]},
         )
     ).first() is not None
-    mode = "reanalysis" if original_exists else "original"
+    # 工单 14：已终态的历史运行即使缺 original，补判定也只能是 reanalysis——
+    # "原始判定"意味着执行时点的首轮结论，事后补造等于伪造。finalizing 内的
+    # 首轮判定（runtime._apply_original_gate）不受影响：那时 run 还没终态。
+    mode = (
+        "reanalysis"
+        if original_exists or run["state"] in ("completed", "errored", "cancelled")
+        else "original"
+    )
+    if run_complete is None and run["state"] not in ("completed", "errored", "cancelled"):
+        # 外部试算打到未完成的运行：没有可判定的输入，拒绝并说明缺项，不预写判定。
+        # （finalizing 内的首轮判定显式传 run_complete=True，不走这条拒绝。）
+        raise HTTPException(
+            status_code=409,
+            detail=f"运行尚未完成（当前状态 {run['state']}），无法判定；完成后再试算或等待 finalizing 内的原始判定",
+        )
 
     explicit_policy = bool(policy_id)
     if not policy_id:

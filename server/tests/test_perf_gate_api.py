@@ -551,7 +551,9 @@ def test_sample_below_minimum_is_not_tested_with_actual_sample_count(client, see
     body = response.json()
     assert body["verdict"] == "not_tested"
     assert body["reason_code"] == "sample_count_below_minimum"
-    assert body["mode"] == "original"
+    # 工单 14：终态运行经 API 补判定落 reanalysis；样本不足的三态语义不变
+    assert body["mode"] == "reanalysis"
+    evaluation_id = body["id"]
 
     # 实际 sample_count 必须保留（不能被清零，也不能改成阈值）
     metrics = client.get(f"{API}/runs/{seed['runs']['small']}/metrics").json()
@@ -563,9 +565,17 @@ def test_sample_below_minimum_is_not_tested_with_actual_sample_count(client, see
     assert sample_counts["mem_pss_mb"] == 6
     assert sample_counts["cpu_process_pct"] == 6
 
+    # 工单 12/14：分析页默认原始判定；终态运行经 API 补的是 reanalysis，
+    # 所以这里 original 缺失、默认不兜底，显式点名那条判定才看到 not_tested。
     analyses = client.get(f"{API}/analyses", params={"run_id": seed["runs"]["small"]}).json()
-    assert analyses["verdict"] == "not_tested"
-    assert analyses["reason"] == "sample_count_below_minimum"
+    assert analyses["original_missing"] is True
+    assert analyses["verdict"] is None
+    picked = client.get(
+        f"{API}/analyses",
+        params={"run_id": seed["runs"]["small"], "evaluation_id": evaluation_id},
+    ).json()
+    assert picked["verdict"] == "not_tested"
+    assert picked["reason"] == "sample_count_below_minimum"
 
 
 def test_cross_profile_baseline_is_not_tested_with_profile_mismatch(client, seed):
@@ -776,10 +786,13 @@ def test_threshold_change_only_adds_reanalysis_and_keeps_original(client, seed):
     baseline = _create_baseline(client, seed, seed["runs"]["base"])
     _dedicated_component(seed, seed["runs"]["head"])
 
-    original = _evaluate(
+    first = _evaluate(
         client, seed, seed["runs"]["head"], policy["id"], baseline["run_id"]
     ).json()
-    assert original["mode"] == "original"
+    # 工单 14：终态运行的 API 补判定一律 reanalysis（original 只在 finalizing 内产生）；
+    # 本用例关心的不变量是"改阈值只新增行、旧行一字不改"。
+    original = first
+    assert original["mode"] == "reanalysis"
 
     before = _run_sql(
         """
@@ -833,8 +846,10 @@ def test_threshold_change_only_adds_reanalysis_and_keeps_original(client, seed):
         {"id": seed["components"]["head"]},
     )
     counts = {row["mode"]: row["n"] for row in modes}
-    assert counts["original"] == 1
-    assert counts["reanalysis"] >= 1
+    # 工单 14：该组件的判定全部经 API 补在终态运行上，所以没有 original 行；
+    # "每组件至多一条 original"由部分唯一索引兜底（下一条用例直接验证）。
+    assert counts.get("original", 0) <= 1
+    assert counts["reanalysis"] >= 2
 
     # 历史策略行也未被 UPDATE
     old_policy = client.get(f"{API}/gate-policies/{policy['id']}").json()

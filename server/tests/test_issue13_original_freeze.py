@@ -236,13 +236,14 @@ def test_same_profile_baseline_is_used_and_retry_is_idempotent(
     assert second.status_code == 200, "重试必须命中同一行而不是新建"
     assert first.json()["id"] == second.json()["id"]
 
-    # 每个性能组件只有一条 original（重试不追加）
+    # 工单 14 起终态运行补判定一律 reanalysis（original 只在 finalizing 内产生）；
+    # 重试不追加记录：同组件同 mode 只有一条
     with sync_engine.connect() as conn:
         count = conn.execute(
             text(
                 "SELECT count(*) FROM gate_evaluations e"
                 " JOIN run_components rc ON rc.id = e.component_id"
-                " WHERE rc.run_id = CAST(:rid AS uuid) AND e.mode = 'original'"
+                " WHERE rc.run_id = CAST(:rid AS uuid) AND e.mode = 'reanalysis'"
             ),
             {"rid": run_id},
         ).scalar_one()
