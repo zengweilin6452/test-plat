@@ -122,6 +122,32 @@ export interface TemplateVersionRecord {
 export interface RunReport {
   runId: string
   hostRunId?: string | null
+  /** 运行引用的修订与构建（工单 11：报告可追溯原输入） */
+  revision?: { id: string; readiness?: string | null; test_type?: string | null } | null
+  build?: {
+    id: string
+    version?: string | null
+    build_key?: string | null
+    source_commit?: string | null
+    sha256?: string | null
+  } | null
+  /** 运行时资源档案（不可变行内容）；缺失为 null，不用设备 serial 冒充 */
+  resourceProfile?: { id: string; name?: string | null; fingerprint?: string | null } | null
+  /** 服务端导出的证据清单：available 才有 download_url（AC-REP-03） */
+  evidence?: Array<{
+    id: string
+    kind: string
+    logical_key: string
+    byte_size?: number | null
+    sha256?: string | null
+    availability: string
+    download_url?: string | null
+  }> | null
+  gateEvaluations?: Array<{
+    mode: string
+    verdict: string
+    reason_code?: string | null
+  }> | null
   name?: string | null
   projectId?: string | null
   applicationId?: string | null

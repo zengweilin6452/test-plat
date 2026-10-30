@@ -82,6 +82,21 @@ export function validateTask(taskId: string) {
   return api.post<TaskValidateResponse>(`/tasks/${encodeURIComponent(taskId)}/validate`)
 }
 
+/** POST /api/v1/runs —— 发起运行；重跑用 parent_run_id 关联原运行（工单 11） */
+export function createRun(body: {
+  application_id: string
+  task_id: string
+  revision_id?: string
+  platform: string
+  request_key: string
+  parent_run_id?: string
+}) {
+  return api.post<{ id: string; display_id: string; state: string; duplicate?: boolean }>(
+    '/runs',
+    body,
+  )
+}
+
 /** ---- 以下为 P5 调试会话 / 模板端点（api-design.md §2.7，后端由同事并行实现）---- */
 
 import type {

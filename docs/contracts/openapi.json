@@ -1264,6 +1264,33 @@
         }
       }
     },
+    "/api/v1/runs/{run_id}/report/export": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
     "/api/v1/schema": {
       "get": {
         "parameters": [],
