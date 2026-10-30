@@ -298,6 +298,7 @@ PROJECT_TABLE_DROP_ORDER: tuple[str, ...] = (
     "debug_sessions",
     "test_runs",
     "task_revisions",
+    "task_request_keys",
     "execution_resources",
     "suite_versions",
     "test_tasks",
