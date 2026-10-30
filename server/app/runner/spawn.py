@@ -292,7 +292,7 @@ async def _tail_stdout(run_id: str, process: RunnerProcess, log_path: Path) -> N
                 try:
                     async with sessionmaker() as session:
                         async with session.begin():
-                            await events_mod.append_event(
+                            written = await events_mod.append_event(
                                 session,
                                 project_id=project_id,
                                 run_id=run_id,
@@ -309,6 +309,8 @@ async def _tail_stdout(run_id: str, process: RunnerProcess, log_path: Path) -> N
                             "type": "event",
                             "kind": str(event.get("t") or "text"),
                             "name": str(event.get("name") or ""),
+                            # 幂等命中时 written 为空（重复事件不推第二次）
+                            "sequence": written[0]["sequence"] if written else None,
                             "at": None,
                         },
                     )

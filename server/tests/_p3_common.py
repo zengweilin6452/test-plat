@@ -235,18 +235,47 @@ def make_project(sync_engine, *, resources: int = 2, platform: str = "android") 
         "         'ready', 'pytest')",
         {"id": task_id, "pid": project_id, "aid": application_id, "name": f"task-{suffix}"},
     )
+    # 工单 08 起 POST /runs 只接受 validated 修订，且 validated 行受
+    # ck_task_revisions_readiness_requires_build_and_suite 约束：必须先有构建与
+    # 套件版本，否则夹具造不出可提交的运行。
+    build_id = str(uuid.uuid4())
+    _exec_sync(
+        "INSERT INTO app_builds (id, project_id, application_id, version, build_key)"
+        " VALUES (CAST(:id AS uuid), CAST(:pid AS uuid), CAST(:aid AS uuid), '1.0.0', :key)",
+        {"id": build_id, "pid": project_id, "aid": application_id, "key": f"pytest-{suffix}"},
+    )
+    suite_id = str(uuid.uuid4())
+    _exec_sync(
+        "INSERT INTO test_suites (id, project_id, application_id, name, test_type)"
+        " VALUES (CAST(:id AS uuid), CAST(:pid AS uuid), CAST(:aid AS uuid), :name, 'ui')",
+        {"id": suite_id, "pid": project_id, "aid": application_id, "name": f"suite-{suffix}"},
+    )
+    suite_version_id = str(uuid.uuid4())
+    _exec_sync(
+        "INSERT INTO suite_versions"
+        " (id, project_id, application_id, suite_id, version, source_ref, source_commit, manifest)"
+        " VALUES (CAST(:id AS uuid), CAST(:pid AS uuid), CAST(:aid AS uuid),"
+        "         CAST(:sid AS uuid), 1, 'local', 'local',"
+        "         '{\"schema_version\": 1, \"case_count\": 1,"
+        "           \"cases\": [{\"case_key\": \"tests/test_smoke.py::test_ok\"}]}'::jsonb)",
+        {"id": suite_version_id, "pid": project_id, "aid": application_id, "sid": suite_id},
+    )
     revision_id = str(uuid.uuid4())
     _exec_sync(
         "INSERT INTO task_revisions (id, project_id, application_id, task_id,"
-        "                           revision, environment_id, test_type, readiness, config, created_by)"
+        "                           revision, environment_id, build_id, suite_version_id,"
+        "                           test_type, readiness, config, created_by)"
         " VALUES (CAST(:id AS uuid), CAST(:pid AS uuid), CAST(:aid AS uuid), CAST(:tid AS uuid),"
-        "         1, CAST(:eid AS uuid), 'ui', 'draft', '{}'::jsonb, 'pytest')",
+        "         1, CAST(:eid AS uuid), CAST(:bid AS uuid), CAST(:svid AS uuid),"
+        "         'ui', 'validated', '{}'::jsonb, 'pytest')",
         {
             "id": revision_id,
             "pid": project_id,
             "aid": application_id,
             "tid": task_id,
             "eid": environment_id,
+            "bid": build_id,
+            "svid": suite_version_id,
         },
     )
 
@@ -276,6 +305,9 @@ def make_project(sync_engine, *, resources: int = 2, platform: str = "android") 
         "environment_id": environment_id,
         "task_id": task_id,
         "revision_id": revision_id,
+        "build_id": build_id,
+        "suite_id": suite_id,
+        "suite_version_id": suite_version_id,
         "profile_id": profile_id,
         "resources": resource_ids,
         "resource_id": resource_ids[0]["id"] if resource_ids else None,

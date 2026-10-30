@@ -128,21 +128,19 @@ async def heartbeat_run(
     token = body.get("fencing_token")
 
     fence = await leases_mod.verify_fence(session, run_id=str(run_id), token=token)
-    cancel = (
-        await session.execute(
-            text(
-                "SELECT 1 FROM run_events"
-                " WHERE run_id = :run_id AND event_type = :kind LIMIT 1"
-            ),
-            {"run_id": str(run_id), "kind": "cancel_requested"},
-        )
-    ).scalar_one_or_none() is not None
+    # 取消读列而不是事件：受理事实必须持久且不被事件分页/清理截断（spec §9.3）
+    cancel = bool(
+        (
+            await session.execute(
+                text("SELECT cancel_requested_at IS NOT NULL FROM test_runs WHERE id = :run_id"),
+                {"run_id": str(run_id)},
+            )
+        ).scalar_one()
+    )
     if fence.get("ok"):
-        await leases_mod.extend_lease(
-            session,
-            run_id=str(run_id),
-            lease_seconds=leases_mod.DEFAULT_LEASE_SECONDS,
-        )
+        # extend_lease 内部用 DEFAULT_LEASE_SECONDS；带 token 时只续自己那条租约，
+        # 免得旧 runner 的心跳把新租约续上（原调用多传 lease_seconds，心跳恒 500）
+        await leases_mod.extend_lease(session, run_id=str(run_id), token=token)
     await events_mod.append_event(
         session,
         project_id=str(row["project_id"]),
@@ -213,7 +211,14 @@ async def post_events(
         name = payload.get("name") if isinstance(payload, dict) else None
         hub_mod.publish(
             str(run_id),
-            {"type": "event", "kind": event.get("event_type"), "name": name, "at": None},
+            {
+                "type": "event",
+                "kind": event.get("event_type"),
+                "name": name,
+                # 序号让客户端按 (run_id, sequence) 去重、断线后从 last_sequence 补拉
+                "sequence": event.get("sequence"),
+                "at": None,
+            },
         )
     return {"accepted": len(inserted)}
 

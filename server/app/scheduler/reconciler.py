@@ -85,11 +85,8 @@ _CANCELLABLE_SQL = text(
       FROM test_runs tr
       LEFT JOIN execution_resources er ON er.id = tr.resource_id
      WHERE tr.state IN ('queued', 'dispatching')
-       AND EXISTS (
-             SELECT 1 FROM run_events re
-              WHERE re.run_id = tr.id
-                AND re.event_type = 'cancel_requested'
-           )
+       -- 取消受理事实在列上（0006）；事件只用于时间线展示，不作判定依据
+       AND tr.cancel_requested_at IS NOT NULL
     """
 )
 

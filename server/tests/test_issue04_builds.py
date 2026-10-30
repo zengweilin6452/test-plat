@@ -231,14 +231,16 @@ def test_register_build_enforces_application_scope_and_sha256(client, project, s
 
 
 def test_build_listing_includes_declared_identity_and_verification_note(client, project):
-    _build_id(_register(client, project))
+    build_id = _build_id(_register(client, project))
     response = client.get(
         "/api/v1/builds", params={"application_id": project["application_id"]}
     )
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["total"] == 1
-    build = body["items"][0]
+    # p3_project 夹具自带一条构建（validated 修订需要 build_id，工单 08），
+    # 所以这里按 id 取本次登记的构建，而不是假定列表只有一条。
+    assert body["total"] >= 1
+    build = next(item for item in body["items"] if item["id"] == build_id)
     assert build["identity_state"] == "pending"
     assert build["baseline"] is None
     assert build["apk_digest_verified"] is False
