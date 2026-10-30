@@ -12,14 +12,14 @@
  *  - 清单：已完成运行（state='completed'）；
  *  - 「查看报告」：GET /runs/{id}/report + GET /runs/{id}/artifacts（ReportDrawer）。
  */
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import { fetchRuns } from '../api/endpoints'
 import { StatusBadge } from '../components/Badge'
-import { LinkButton } from '../components/Button'
+import { Button, LinkButton } from '../components/Button'
 import { PageHeading, Panel, PanelHead } from '../components/Card'
-import { ContextBar, PrimaryAction } from '../components/PageBits'
+import { ContextBar, PrimaryAction, Toolbar } from '../components/PageBits'
 import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
 import { ReportDrawer } from '../components/ReportDrawer'
@@ -43,19 +43,29 @@ export function conclusionText(module: string | null, outcome: RunOutcome | null
 export function ReportsPage() {
   const { targetScope, setTargetScope } = useTargetScope()
   const [activeRun, setActiveRun] = useState<RunRecord | null>(null)
+  // 服务端过滤 + 游标分页（工单 10）：q / module / 页栈变化都重新拉取；
+  // 过滤条件变化时页栈清零，旧游标带新过滤条件会被服务端 422 拒掉。
+  const [keyword, setKeyword] = useState('')
+  const [module, setModule] = useState<'' | 'ui' | 'performance'>('')
+  const [pages, setPages] = useState<(string | null)[]>([])
+  const cursor = pages.length > 0 ? pages[pages.length - 1] : null
 
   const runsQuery = useQuery({
-    queryKey: ['runs', 'reports', targetScope],
-    queryFn: ({ signal }) => fetchRuns(targetScope, 200, signal),
+    queryKey: ['runs', 'reports', targetScope, keyword, module, cursor],
+    queryFn: ({ signal }) =>
+      fetchRuns(targetScope, 50, signal, {
+        state: 'completed',
+        q: keyword.trim() || undefined,
+        test_type: module || undefined,
+        cursor: cursor ?? undefined,
+      }),
     retry: false,
   })
 
   const error = runsQuery.isError ? describeError(runsQuery.error) : null
-  // 只有完成的运行才有报告
-  const completed = useMemo(
-    () => (runsQuery.data?.items ?? []).filter((run) => run.state === 'completed'),
-    [runsQuery.data],
-  )
+  // 只有完成的运行才有报告：completed 过滤在服务端完成，前端不再从
+  // 全量列表里筛 —— 第 201 份之后的报告也能靠游标翻到（AC-REP-01）。
+  const completed = runsQuery.data?.items ?? []
 
   const columns: Column<RunRecord>[] = [
     {
@@ -110,7 +120,39 @@ export function ReportsPage() {
         description="统一报告视图：结论、证据与可比性说明"
         actions={<PrimaryAction label="导出报告" icon="download" />}
       />
-      <ContextBar scope={targetScope} onScopeChange={setTargetScope} />
+      <ContextBar
+        scope={targetScope}
+        onScopeChange={(scope) => {
+          setTargetScope(scope)
+          setPages([])
+        }}
+      />
+
+      <div className="mb">
+        <Toolbar
+          search={keyword}
+          onSearch={(value) => {
+            setKeyword(value)
+            setPages([])
+          }}
+        >
+          <select
+            value={module}
+            onChange={(event) => {
+              setModule(event.target.value as '' | 'ui' | 'performance')
+              setPages([])
+            }}
+            aria-label="按模块筛选"
+          >
+            <option value="">全部模块</option>
+            <option value="ui">UI</option>
+            <option value="performance">性能</option>
+          </select>
+          <span className="muted small">
+            搜索命中编号 / 任务名 / 应用名，completed 过滤在服务端完成
+          </span>
+        </Toolbar>
+      </div>
 
       <div className="mb">
         <Notice tone="blue" icon="alert" title="结论只有一种来源">
@@ -144,9 +186,32 @@ export function ReportsPage() {
             rows={completed}
             rowKey={(run) => run.id}
             ariaLabel="报告清单"
-            footer={<span>共 {completed.length} 份报告</span>}
+            footer={
+              <span className="muted small">
+                本页 {completed.length} 份
+                {runsQuery.data?.has_more ? ` · 还有更多（已翻到第 ${pages.length + 1} 页）` : ''}
+              </span>
+            }
           />
         )}
+        {pages.length > 0 || runsQuery.data?.has_more ? (
+          <div className="toolbar mt">
+            <Button
+              disabled={pages.length === 0}
+              onClick={() => setPages((current) => current.slice(0, -1))}
+            >
+              上一页
+            </Button>
+            <Button
+              disabled={!runsQuery.data?.has_more || !runsQuery.data?.next_cursor}
+              onClick={() =>
+                setPages((current) => [...current, runsQuery.data?.next_cursor ?? null])
+              }
+            >
+              下一页
+            </Button>
+          </div>
+        ) : null}
       </Panel>
 
       <div className="result-grid mt">

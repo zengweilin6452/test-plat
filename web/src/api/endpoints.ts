@@ -46,10 +46,16 @@ export function syncResources(body: { project_id?: string; node_id?: string } = 
   return api.post<ResourceSyncResponse>('/resources/sync', body)
 }
 
-export function fetchRuns(scope: TargetScope, limit = 100, signal?: AbortSignal) {
+export function fetchRuns(
+  scope: TargetScope,
+  limit = 100,
+  signal?: AbortSignal,
+  extra?: { state?: string; application_id?: string; test_type?: string; q?: string; cursor?: string },
+) {
   return api.get<RunsResponse>('/runs', {
     scope: scope === 'all' ? undefined : scope,
     limit,
+    ...extra,
   }, signal)
 }
 

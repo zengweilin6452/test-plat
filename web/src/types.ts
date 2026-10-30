@@ -299,6 +299,9 @@ export interface RunRecord {
 export interface RunsResponse {
   items: RunRecord[]
   total: number
+  /** 下一页游标（服务端封了过滤条件与创建水位）；尽头/空页为 null */
+  next_cursor?: string | null
+  has_more?: boolean
 }
 
 /** GET /api/v1/tasks 的一行（server/app/routers/tasks.py） */
