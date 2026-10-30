@@ -20,3 +20,8 @@
 - 本工单新增：`/templates/validate` 的阈值契约（0.10-1.00 之外 422，不透传 vendor，有参数化测试）；DebugDrawer 增加阈值输入（by=image 时显示并随验证提交，越界前端拦截）。
 - 余项单列工单 25：模板库跨会话共享（vendor TemplateStore 绑定会话 assets_dir，需要平台侧共享存储设计）与任务执行锁定模板 version/sha256（任务清单扩展）。
 - 验收（定向）：`test_issue17_debug_templates.py` 2 例 + `test_p5_debug_api.py` 回归全过；web `tsc --noEmit` 通过。真实设备上的框选/匹配留待设备授权后的实机走查（spec §"真实验证"清单）。
+
+## Comments（2026-10-31 真机验收补记）
+
+- 真机调试链路验收通过：小米 2206123SC（serial 749622c9）经平台 API 建会话（3s active，vendor viewer 13444）→ 真实截屏 1080x2400 → 控件树 91 个 resource-id 节点 → resource-id 定位验证唯一匹配 → 从真机屏幕裁剪登记模板（sha256 34c4ffd5…）→ 图像匹配唯一命中（score 1.0，坐标与裁剪区域一致）→ 模板进入共享库（与工单 25 执行锁定同源）→ 会话关闭设备释放。
+- 过程记录与使用要点见 `.scratch/prototype-alignment/real-device-debug-acceptance.md`；证据 `real-device-snapshot.png`。
