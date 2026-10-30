@@ -60,6 +60,8 @@ _TAIL_TASKS: dict[str, asyncio.Task[Any]] = {}
 
 #: 等进程退出的默认超时（正常跑完由 runner 自己上报，这里只是兜底）
 EXIT_TIMEOUT_SECONDS = 3600
+#: joint 总超时在 UI 上限之外保留的缓冲（准备/停采/归档各有界，D11）
+JOINT_TOTAL_TIMEOUT_MARGIN_S = 900
 #: 取消后的宽限期（§10.1：10s 不退出就 taskkill /T /F）
 CANCEL_GRACE_SECONDS = 10
 
@@ -148,7 +150,7 @@ def build_spec(
 ) -> SpawnSpec:
     """把 run 配置翻译成 `python -m testdock_runner ui|perf|debug ...`。"""
     mode = str(config.get("module") or config.get("kind") or "ui")
-    if mode not in ("ui", "perf", "debug"):
+    if mode not in ("ui", "perf", "debug", "joint"):
         mode = "ui"
     serial = lease.get("serial") or config.get("serial")
     artifacts_dir = artifacts_dir_for(run_id)
@@ -174,6 +176,15 @@ def build_spec(
     if config.get("task_id"):
         argv += ["--task-id", str(config["task_id"])]
     timeout = config.get("timeout_s") or settings.run_timeout_s
+    ui_timeout = 0
+    if mode == "joint":
+        # D11：UI 上限独立字段（10–3600），总超时必须给 UI 窗留出准备/归档缓冲，
+        # 不能让总 deadline 把合法的 3600 秒执行窗截断（AC-CONTRACT-06）。
+        from ..domain.joint_policy import clamp_ui_timeout
+
+        ui_timeout = clamp_ui_timeout(config.get("ui_timeout_s"))
+        argv += ["--ui-timeout", str(ui_timeout)]
+        timeout = max(int(timeout or 0), ui_timeout + JOINT_TOTAL_TIMEOUT_MARGIN_S)
     argv += ["--timeout", str(int(timeout))]
     if config.get("test_paths"):
         paths = config["test_paths"]

@@ -151,7 +151,13 @@ class ControlClient:
         )
 
     def fail(
-        self, *, error_code: str, message: str, stage: str, fencing_token: int
+        self,
+        *,
+        error_code: str,
+        message: str,
+        stage: str,
+        fencing_token: int,
+        components: list[Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return self._request(
             "POST",
@@ -161,6 +167,7 @@ class ControlClient:
                 "message": message[:4000],
                 "stage": stage,
                 "fencing_token": fencing_token,
+                "components": list(components or []),
             },
         )
 

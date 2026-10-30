@@ -317,6 +317,8 @@ async def fail_run(
             "error_code": code,
             "message": str(body.get("message") or ""),
             "stage": str(body.get("stage") or ""),
+            # joint 的失败也带组件事实（如 UI=cancelled"前置采集失败未执行"）
+            "components": body.get("components") or [],
         },
         actor="runner",
     )
