@@ -31,7 +31,7 @@ EXIT_INFRA_ERROR = 3
 EXIT_CANCELLED = 4
 EXIT_FENCE_MISMATCH = 5
 
-SUBCOMMANDS = ("ui", "perf", "debug")
+SUBCOMMANDS = ("ui", "perf", "debug", "joint")
 
 
 def _json_object(value: str) -> dict:
@@ -59,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
         job.add_argument("--control-token", default="")
         job.add_argument("--fencing-token", type=int, default=0)
         job.add_argument("--timeout", type=float, default=1800.0)
+        job.add_argument("--ui-timeout", type=float, default=0.0)
         job.add_argument("--test-path", action="append", default=[])
         job.add_argument("--app-package", default="")
         job.add_argument("--app-activity", default="")
@@ -143,12 +144,16 @@ def _report_fail(
 ) -> None:
     if control is None:
         return
+    # joint 的组件事实随 fail 一并上报（如"采集启动失败、UI 未执行"），
+    # 平台据此落组件行，而不是让 errored 运行没有任何组件记录。
+    components = getattr(result, "components", None) if "result" in dir() else None
     try:
         control.fail(
             error_code=error_code,
             message=message[:2000],
             stage=stage,
             fencing_token=int(args.fencing_token or 0),
+            components=components,
         )
     except ControlError as exc:
         emit_text("fail_report_failed", detail=str(exc)[:500])
@@ -186,6 +191,11 @@ def main(argv: list[str] | None = None) -> int:
             from .debug_job import run_perf_job
 
             result = run_perf_job(options, context)
+        elif args.command == "joint":
+            from .joint_job import run_joint_job
+
+            options.perf = {**(options.perf or {}), "ui_timeout_s": int(args.ui_timeout or 0)}
+            result = run_joint_job(options, context)
         else:
             from .ui_job import run_ui_job
 
