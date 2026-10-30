@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..domain import runs as runs_mod
-from ..errors import CLIENT_HEADER, CLIENT_HEADER_VALUE, client_header_required
+from ..errors import CLIENT_HEADER, CLIENT_HEADER_VALUE, client_header_required, validation_error
 from ..schemas import TaskCreateIn, TaskPatchIn, TaskRevisionListOut, TasksOut
 from ..services import tasks as task_service
 
@@ -55,6 +55,7 @@ def require_client_header(
 async def list_tasks(
     test_type: Annotated[str | None, Query()] = None,
     q: Annotated[str | None, Query()] = None,
+    run_state: Annotated[str | None, Query()] = None,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, object]:
     """列表带每个任务最近一次运行与最新 revision 的测试类型。
@@ -94,6 +95,13 @@ async def list_tasks(
     if test_type:
         where.append("rev.test_type = :test_type")
         params["test_type"] = test_type
+    if run_state:
+        # 工单 20：按**关联运行的 state** 过滤任务（最近一次运行），
+        # 不与任务 lifecycle（draft/ready/archived）或修订 readiness 混用。
+        if run_state not in runs_mod.ALL_STATES:
+            raise validation_error([f"run_state 只支持 {' / '.join(runs_mod.ALL_STATES)}，收到 {run_state!r}"])
+        where.append("r.state = :run_state")
+        params["run_state"] = run_state
     if q:
         where.append("(t.name ILIKE :q OR t.id::text = :qid)")
         params["q"] = f"%{q}%"
