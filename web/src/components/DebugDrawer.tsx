@@ -41,7 +41,7 @@ import {
 } from '../api/endpoints'
 import type { LocatorMatch, SnapshotTreeNode, TemplateRecord } from '../api/types'
 import { Badge } from './Badge'
-import { Button } from './Button'
+import { Button, LinkButton } from './Button'
 import { Empty } from './Empty'
 import { Notice } from './Notice'
 import { useToast } from './Toast'
@@ -702,7 +702,7 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
         ) : null}
 
         {session ? (
-          <div className="debug-work">
+          <div className="inspector">
             {/* 左栏：实时预览（命中框 / 框选都叠在这里） */}
             <div>
               <section className="debug-section">
@@ -875,7 +875,67 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
                 </div>
               </section>
 
+                            {/* 第三栏：元素与定位描述（原型 attribute-list / locator-option） */}
               <section className="debug-section">
+                <header>
+                  <h3>元素与定位描述</h3>
+                  <span className="badge gray">原生定位</span>
+                </header>
+                {selected ? (
+                  <div className="attribute-list">
+                    <div className="attribute"><span>text</span><span>{selected.text || '—'}</span></div>
+                    <div className="attribute"><span>resource-id</span><span className="mono">{selected.resource_id || '—'}</span></div>
+                    <div className="attribute"><span>class</span><span className="mono">{selected.class_name || '—'}</span></div>
+                    <div className="attribute"><span>clickable</span><span>{selected.clickable ? 'true' : 'false'}</span></div>
+                    <div className="attribute"><span>bounds</span><span className="mono">{nodeBounds(selected) || '—'}</span></div>
+                  </div>
+                ) : (
+                  <div className="attribute-list">
+                    <Empty icon="check" title="等待拾取" description="在层级树中点击节点，这里显示它的属性与定位候选。" />
+                  </div>
+                )}
+                {selected ? (
+                  <>
+                    <h3 style={{ margin: '14px 0 4px', fontSize: 12 }}>定位候选</h3>
+                    {selected.resource_id ? (
+                      <button
+                        type="button"
+                        className={'locator-option' + (locatorBy === 'resource_id' ? ' active' : '')}
+                        onClick={() => { setLocatorBy('resource_id'); setLocator(String(selected.resource_id)) }}
+                      >
+                        <div className="between"><b>resource-id</b><span className="badge green">优先候选</span></div>
+                        <code>{String(selected.resource_id)}</code>
+                      </button>
+                    ) : null}
+                    {selected.text ? (
+                      <button
+                        type="button"
+                        className={'locator-option' + (locatorBy === 'text' ? ' active' : '')}
+                        onClick={() => { setLocatorBy('text'); setLocator(String(selected.text)) }}
+                      >
+                        <div className="between"><b>text</b><span className="small text-amber">文案变动会失效</span></div>
+                        <code>{String(selected.text)}</code>
+                      </button>
+                    ) : null}
+                    <pre className="code-block">{locatorBy === 'resource_id'
+                      ? 'Target(Locator.RESOURCE_ID, "' + locator + '")'
+                      : 'Target(Locator.TEXT, "' + locator + '")'}</pre>
+                    <div className="flex wrap" style={{ gap: 8 }}>
+                      <LinkButton
+                        onClick={() => {
+                          const expression = locatorBy === 'resource_id'
+                            ? 'Target(Locator.RESOURCE_ID, "' + locator + '")'
+                            : 'Target(Locator.TEXT, "' + locator + '")'
+                          void navigator.clipboard?.writeText(expression)
+                          toast.show('表达式已复制')
+                        }}
+                      >
+                        复制表达式
+                      </LinkButton>
+                    </div>
+                  </>
+                ) : null}
+
                 <header>
                   <h3>定位验证</h3>
                 </header>
@@ -942,9 +1002,16 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
                     {validateMutation.isPending ? '验证中…' : '验证定位'}
                   </Button>
                 </div>
-              </section>
+                </section>
 
-              {/* 图像识别：模板库 + 从快照框选建档 + 图像匹配 */}
+
+
+            </div>
+          </div>
+        ) : null}
+
+        {/* 图像识别：模板库 + 从快照框选建档 + 图像匹配（全宽，inspector 之外） */}
+        <section className="debug-section">
               <section className="debug-section">
                 <header>
                   <h3>图像识别（模板库）</h3>
@@ -1087,9 +1154,7 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
                   </Button>
                 </div>
               </section>
-            </div>
-          </div>
-        ) : null}
+        </section>
       </div>
 
       <footer className="debug-pane-foot">

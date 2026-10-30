@@ -14,16 +14,14 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import { fetchProjects, fetchResources, syncResources } from '../api/endpoints'
 import { DebugDrawer, type DebugTarget } from '../components/DebugDrawer'
-import { ResourceStatusBadge, Badge } from '../components/Badge'
+import { ResourceStatusBadge } from '../components/Badge'
 import { Button } from '../components/Button'
-import { PageHeading, Panel, PanelHead } from '../components/Card'
+import { PageHeading } from '../components/Card'
 import { ContextBar, PrimaryAction } from '../components/PageBits'
 import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
-import { StatCard } from '../components/StatCard'
-import { Table, type Column } from '../components/Table'
 import { TARGET_CATALOG } from '../constants'
-import { DASH, fmtDateTime } from '../lib/fmt'
+import { DASH } from '../lib/fmt'
 import { useTargetScope } from '../store/scope'
 import { useProjectScope } from '../store/project'
 import type { ResourceRecord, ResourceSyncResponse } from '../types'
@@ -86,107 +84,19 @@ export function DevicesPage() {
   const all = resourcesQuery.data?.items ?? []
   const rows = all.filter((item) => targetScope === 'all' || item.platform === targetScope)
 
-  const readyCount = rows.filter((item) => item.status === 'ready').length
-  const busyCount = rows.filter((item) => item.busy).length
-  const unavailableCount = rows.filter(
-    (item) => item.status === 'offline' || item.status === 'unauthorized',
-  ).length
+  // 原型 androidDevicesPage：状态筛选 + resource-card 栅格（工单 23 对齐原型）
+  type DeviceState = 'idle' | 'busy' | 'offline' | 'unauthorized' | 'draining'
+  function deviceState(item: ResourceRecord): DeviceState {
+    if (item.status !== 'ready') return item.status as DeviceState
+    return item.busy ? 'busy' : 'idle'
+  }
+  const [deviceFilter, setDeviceFilter] = useState<'all' | DeviceState>('all')
+  const filtered = rows.filter((item) => deviceFilter === 'all' || deviceState(item) === deviceFilter)
+  const stateCount = (state: DeviceState) => rows.filter((item) => deviceState(item) === state).length
 
   function openDebug(row: ResourceRecord) {
-    const hint = row.lease
-      ? row.lease.run_id
-        ? '运行 ' + row.lease.run_id.slice(0, 8) + ' 占用中'
-        : '调试会话占用中'
-      : null
-    setDebugTarget({ serial: row.resource_key ?? row.resource_key, label: row.name, leaseHint: hint })
+    setDebugTarget({ serial: row.resource_key ?? row.resource_key, label: row.name, leaseHint: null })
   }
-
-  const columns: Column<ResourceRecord>[] = [
-    {
-      key: 'name',
-      header: '资源',
-      render: (row) => (
-        <>
-          <span className="task-name mono">{row.resource_key}</span>
-          <div className="task-sub">{row.kind}</div>
-        </>
-      ),
-    },
-    {
-      key: 'platform',
-      header: '平台',
-      render: (row) => (
-        <span className="module-pill">{TARGET_CATALOG[row.platform]?.label ?? row.platform}</span>
-      ),
-    },
-    {
-      key: 'profile',
-      header: '系统 / 分辨率',
-      render: (row) => {
-        const p = row.profile
-        // 档案缺失或 spec 里没有该字段 → 破折号，不编造
-        const os = p?.os_name ? `${p.os_name} ${p.os_version ?? ''}`.trim() : DASH
-        return (
-          <>
-            <span className="muted small">{os}</span>
-            <div className="task-sub">{p?.screen_resolution ?? DASH}</div>
-          </>
-        )
-      },
-    },
-    {
-      key: 'last_seen_at',
-      header: '最后在线',
-      render: (row) => (
-        <span className="muted small">{row.last_seen_at ? fmtDateTime(row.last_seen_at) : DASH}</span>
-      ),
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (row) => (
-        <div>
-          <ResourceStatusBadge status={row.status} />
-          {row.busy ? (
-            <div style={{ marginTop: 4 }}>
-              <Badge tone="blue">已占用</Badge>
-            </div>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      key: 'lease',
-      header: '占用者',
-      render: (row) => (
-        <span className="muted small mono">
-          {row.lease?.run_id ? 'run ' + row.lease.run_id.slice(0, 8) : row.lease?.debug_session_id ? '调试会话' : DASH}
-        </span>
-      ),
-    },
-    {
-      key: 'debug',
-      header: '操作',
-      align: 'right',
-      render: (row) => {
-        const busy = row.busy || row.status !== 'ready'
-        return (
-          <Button
-            size="small"
-            disabled={busy}
-            title={
-              busy
-                ? '资源不可用或被占用' + (row.lease?.run_id ? '（run ' + row.lease.run_id.slice(0, 8) + '）' : row.lease?.debug_session_id ? '（调试会话）' : '')
-                : undefined
-            }
-            onClick={() => openDebug(row)}
-          >
-            打开调试
-          </Button>
-        )
-      },
-    },
-  ]
 
   return (
     <>
@@ -250,69 +160,105 @@ export function DevicesPage() {
         </div>
       ) : null}
 
-      <div className="stats">
-        <StatCard
-          label="资源总数"
-          value={resourcesQuery.isSuccess ? rows.length : null}
-          foot="按当前目标端过滤"
-        />
-        {/* 工单 15：计数来自服务端 counts（覆盖完整集合），加载中回退到本地推导 */}
-        <StatCard
-          label="可用"
-          value={resourcesQuery.data?.counts ? resourcesQuery.data.counts.ready_idle : readyCount}
-          foot="ready 且无租约"
-        />
-        <StatCard
-          label="占用中"
-          value={resourcesQuery.data?.counts ? resourcesQuery.data.counts.ready_busy : busyCount}
-          foot="存在未释放租约"
-        />
-        <StatCard
-          label="不可用"
-          value={
-            resourcesQuery.data?.counts
-              ? resourcesQuery.data.counts.offline +
-                resourcesQuery.data.counts.unauthorized +
-                resourcesQuery.data.counts.draining
-              : unavailableCount
-          }
-          foot="离线 + 待授权 + 退役中"
-        />
+      <div className="toolbar mb">
+        <select
+          value={deviceFilter}
+          onChange={(event) => setDeviceFilter(event.target.value as 'all' | DeviceState)}
+          aria-label="设备状态筛选"
+        >
+          <option value="all">全部设备（{rows.length}）</option>
+          <option value="idle">空闲（{stateCount('idle')}）</option>
+          <option value="busy">占用中（{stateCount('busy')}）</option>
+          <option value="offline">离线（{stateCount('offline')}）</option>
+          <option value="unauthorized">待授权（{stateCount('unauthorized')}）</option>
+          <option value="draining">退役中（{stateCount('draining')}）</option>
+        </select>
+        <span className="spacer" />
+        <span className="small muted">
+          {resourcesQuery.data?.summary ?? '占用由未释放租约实时推导'}
+        </span>
       </div>
 
-      <Panel>
-        <PanelHead
-          title="资源池"
-          hint="设备来自 /resources/sync；占用由租约推导"
-          actions={
-            <Button size="small" onClick={() => resourcesQuery.refetch()}>
-              刷新
-            </Button>
-          }
+      {resourcesQuery.isLoading ? (
+        <Empty icon="devices" title="正在加载资源池" description="正在请求 /api/v1/resources" />
+      ) : filtered.length === 0 && !error ? (
+        <Empty
+          icon="devices"
+          title="当前没有此状态的设备"
+          description="切换其他状态查看设备；插上真机后点「同步设备池」。"
         />
-        {resourcesQuery.isLoading ? (
-          <Empty icon="devices" title="正在加载资源池" description="正在请求 /api/v1/resources" />
-        ) : rows.length === 0 && !error ? (
-          <Empty
-            icon="devices"
-            title="资源池为空"
-            description="插上设备后点「同步设备池」，这里按可用 / 占用 / 离线 / 待授权展示。"
-          />
-        ) : (
-          <Table
-            columns={columns}
-            rows={rows}
-            rowKey={(row) => row.id}
-            ariaLabel="执行资源"
-            footer={
-              <span>
-                {resourcesQuery.data?.summary ?? '—'} · 当前筛选{' '}
-                {targetScope === 'all' ? '全部目标端' : TARGET_CATALOG[targetScope].label}
-              </span>
-            }
-          />
-        )}
-      </Panel>
+      ) : (
+        <div className="resource-grid">
+          {filtered.map((row) => {
+            const state = deviceState(row)
+            const busy = state === 'busy'
+            const profile = row.profile
+            const os = profile?.os_name
+              ? `${profile.os_name} ${profile.os_version ?? ''}`.trim()
+              : DASH
+            return (
+              <section key={row.id} className="panel resource-card">
+                <div className="between">
+                  <h3>{row.name}</h3>
+                  <ResourceStatusBadge status={row.status} />
+                </div>
+                <div className="device-art">
+                  <div className="mini-phone">
+                    <div className="mini-line" />
+                    <div className="mini-block">
+                      {state === 'idle' ? '可调试' : busy ? '只读预览' : '未连接'}
+                    </div>
+                    <div className="mini-line" />
+                  </div>
+                </div>
+                <dl className="kv">
+                  <dt>平台</dt>
+                  <dd>{TARGET_CATALOG[row.platform]?.label ?? row.platform}</dd>
+                  <dt>系统</dt>
+                  <dd>{os === DASH ? DASH : os}</dd>
+                  <dt>分辨率</dt>
+                  <dd>{profile?.screen_resolution ?? DASH}</dd>
+                  <dt>设备编号</dt>
+                  <dd className="mono">{row.resource_key}</dd>
+                  <dt>当前占用</dt>
+                  <dd>
+                    {row.lease?.run_id
+                      ? 'run ' + row.lease.run_id.slice(0, 8)
+                      : row.lease?.debug_session_id
+                        ? '调试会话'
+                        : state === 'unauthorized'
+                          ? '等待 USB 调试授权'
+                          : state === 'offline'
+                            ? '检查连接与设备状态'
+                            : '无占用'}
+                  </dd>
+                </dl>
+                <div className="resource-actions">
+                  <Button
+                    size="small"
+                    kind={state === 'idle' ? 'primary' : 'default'}
+                    disabled={state !== 'idle'}
+                    title={
+                      state !== 'idle'
+                        ? busy
+                          ? '设备占用中，暂不支持打开调试'
+                          : '设备当前不可调试'
+                        : undefined
+                    }
+                    onClick={() => openDebug(row)}
+                  >
+                    {busy ? '只读预览' : '打开调试'}
+                  </Button>
+                </div>
+              </section>
+            )
+          })}
+        </div>
+      )}
+
+      <div className="notice blue mt">
+        设备占用状态与 UI、性能任务共用；接入时由宿主协调设备租约与短事务准入。平台不执行连接、安装或授权操作。
+      </div>
 
       <DebugDrawer
         open={Boolean(debugTarget)}
