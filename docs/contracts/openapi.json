@@ -235,6 +235,144 @@
         }
       }
     },
+    "/api/v1/builds": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "application_id",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/BuildsOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "post": {
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": {
+          "$ref": "#/components/schemas/BuildCreateIn"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/BuildRecordOut"
+          },
+          "201": {
+            "$ref": "#/components/schemas/BuildRecordOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/builds/{build_id}/confirm-identity": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": {
+          "$ref": "#/components/schemas/ConfirmIdentityIn"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/BuildRecordOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/builds/{build_id}/identity-checks": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": {
+          "$ref": "#/components/schemas/IdentityCheckIn"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/BuildIdentityCheckOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
     "/api/v1/debug-sessions": {
       "post": {
         "parameters": [
@@ -1670,6 +1808,504 @@
       "title": "ApplicationsOut",
       "type": "object"
     },
+    "BuildCreateIn": {
+      "additionalProperties": false,
+      "description": "POST /builds 请求体（§9.2：version/build_key，可选 source_commit/sha256）。",
+      "properties": {
+        "application_id": {
+          "title": "Application Id",
+          "type": "string"
+        },
+        "build_key": {
+          "title": "Build Key",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sha256"
+        },
+        "source_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Commit"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "application_id",
+        "version",
+        "build_key"
+      ],
+      "title": "BuildCreateIn",
+      "type": "object"
+    },
+    "BuildIdentityBaselineOut": {
+      "additionalProperties": true,
+      "description": "已固定的设备安装身份基准。",
+      "properties": {
+        "check_id": {
+          "title": "Check Id",
+          "type": "string"
+        },
+        "confirmed_at": {
+          "title": "Confirmed At",
+          "type": "string"
+        },
+        "package_name": {
+          "title": "Package Name",
+          "type": "string"
+        },
+        "resource": {
+          "additionalProperties": true,
+          "title": "Resource",
+          "type": "object"
+        },
+        "version_code": {
+          "title": "Version Code",
+          "type": "integer"
+        },
+        "version_name": {
+          "title": "Version Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_name",
+        "version_name",
+        "version_code",
+        "resource",
+        "check_id",
+        "confirmed_at"
+      ],
+      "title": "BuildIdentityBaselineOut",
+      "type": "object"
+    },
+    "BuildIdentityBlockingOut": {
+      "additionalProperties": true,
+      "description": "阻断原因：冲突或不可读。",
+      "properties": {
+        "check": {
+          "title": "Check",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Detail"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check",
+        "reason"
+      ],
+      "title": "BuildIdentityBlockingOut",
+      "type": "object"
+    },
+    "BuildIdentityCheckOut": {
+      "additionalProperties": true,
+      "description": "一次设备身份核对记录：设备、时间、预期、观测、结果。",
+      "properties": {
+        "apk_digest_verified": {
+          "title": "Apk Digest Verified",
+          "type": "boolean"
+        },
+        "blocking": {
+          "items": {
+            "$ref": "#/components/schemas/BuildIdentityBlockingOut"
+          },
+          "title": "Blocking",
+          "type": "array"
+        },
+        "check_id": {
+          "title": "Check Id",
+          "type": "string"
+        },
+        "checked_at": {
+          "title": "Checked At",
+          "type": "string"
+        },
+        "device": {
+          "additionalProperties": true,
+          "title": "Device",
+          "type": "object"
+        },
+        "execution_allowed": {
+          "title": "Execution Allowed",
+          "type": "boolean"
+        },
+        "expected": {
+          "additionalProperties": true,
+          "title": "Expected",
+          "type": "object"
+        },
+        "identity_state": {
+          "enum": [
+            "pending",
+            "confirmed"
+          ],
+          "title": "Identity State",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/BuildIdentityItemOut"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "observed": {
+          "additionalProperties": true,
+          "title": "Observed",
+          "type": "object"
+        },
+        "purpose": {
+          "enum": [
+            "manual",
+            "pre_run"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "resource": {
+          "additionalProperties": true,
+          "title": "Resource",
+          "type": "object"
+        },
+        "result": {
+          "enum": [
+            "match",
+            "conflict",
+            "unknown"
+          ],
+          "title": "Result",
+          "type": "string"
+        },
+        "superseded_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Superseded At"
+        },
+        "superseded_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Superseded By"
+        },
+        "test_type": {
+          "enum": [
+            "ui",
+            "performance",
+            "joint"
+          ],
+          "title": "Test Type",
+          "type": "string"
+        },
+        "verification_level": {
+          "title": "Verification Level",
+          "type": "string"
+        },
+        "verification_note": {
+          "title": "Verification Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check_id",
+        "purpose",
+        "test_type",
+        "checked_at",
+        "resource",
+        "device",
+        "expected",
+        "observed",
+        "items",
+        "result",
+        "blocking",
+        "execution_allowed",
+        "identity_state",
+        "verification_level",
+        "apk_digest_verified",
+        "verification_note"
+      ],
+      "title": "BuildIdentityCheckOut",
+      "type": "object"
+    },
+    "BuildIdentityItemOut": {
+      "additionalProperties": true,
+      "description": "单个固定核对项的预期 / 观测 / 结果。",
+      "properties": {
+        "expected": {
+          "title": "Expected"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "observed": {
+          "title": "Observed"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason"
+        },
+        "status": {
+          "enum": [
+            "match",
+            "conflict",
+            "unknown",
+            "observed"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "status"
+      ],
+      "title": "BuildIdentityItemOut",
+      "type": "object"
+    },
+    "BuildRecordOut": {
+      "additionalProperties": true,
+      "description": "构建视图：声明身份 + 核对状态 + 固定基准 + 最近一次核对。",
+      "properties": {
+        "apk_digest_verified": {
+          "default": false,
+          "title": "Apk Digest Verified",
+          "type": "boolean"
+        },
+        "application_id": {
+          "title": "Application Id",
+          "type": "string"
+        },
+        "application_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Application Name"
+        },
+        "baseline": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/BuildIdentityBaselineOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "build_key": {
+          "title": "Build Key",
+          "type": "string"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/components/schemas/BuildIdentityCheckOut"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Created At"
+        },
+        "duplicate": {
+          "default": false,
+          "title": "Duplicate",
+          "type": "boolean"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "identity_state": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "confirmed"
+          ],
+          "title": "Identity State",
+          "type": "string"
+        },
+        "latest_check": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/BuildIdentityCheckOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "package_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Package Name"
+        },
+        "platform": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Platform"
+        },
+        "project_id": {
+          "title": "Project Id",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sha256"
+        },
+        "source_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Commit"
+        },
+        "verification_level": {
+          "default": "none",
+          "title": "Verification Level",
+          "type": "string"
+        },
+        "verification_note": {
+          "title": "Verification Note",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "application_id",
+        "version",
+        "build_key",
+        "verification_note"
+      ],
+      "title": "BuildRecordOut",
+      "type": "object"
+    },
+    "BuildsOut": {
+      "additionalProperties": true,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/BuildRecordOut"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "total"
+      ],
+      "title": "BuildsOut",
+      "type": "object"
+    },
+    "ConfirmIdentityIn": {
+      "additionalProperties": false,
+      "description": "POST /builds/{id}/confirm-identity 请求体：显式提交该构建的核对结果。",
+      "properties": {
+        "check_id": {
+          "title": "Check Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check_id"
+      ],
+      "title": "ConfirmIdentityIn",
+      "type": "object"
+    },
     "ErrorEnvelope": {
       "additionalProperties": true,
       "description": "统一错误信封（api-design.md §1.2）。",
@@ -1698,6 +2334,40 @@
         "request_id"
       ],
       "title": "ErrorEnvelope",
+      "type": "object"
+    },
+    "IdentityCheckIn": {
+      "additionalProperties": false,
+      "description": "POST /builds/{id}/identity-checks 请求体。",
+      "properties": {
+        "purpose": {
+          "default": "manual",
+          "enum": [
+            "manual",
+            "pre_run"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "resource_id": {
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "test_type": {
+          "default": "ui",
+          "enum": [
+            "ui",
+            "performance",
+            "joint"
+          ],
+          "title": "Test Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "resource_id"
+      ],
+      "title": "IdentityCheckIn",
       "type": "object"
     },
     "LeaseOut": {
