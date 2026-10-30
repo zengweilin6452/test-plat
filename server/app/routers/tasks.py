@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..domain import runs as runs_mod
 from ..errors import CLIENT_HEADER, CLIENT_HEADER_VALUE, client_header_required
 from ..schemas import TaskCreateIn, TaskPatchIn, TaskRevisionListOut, TasksOut
 from ..services import tasks as task_service
@@ -65,7 +66,8 @@ async def list_tasks(
         SELECT t.id, t.name, t.lifecycle, t.lock_version, t.application_id,
                a.name AS application_name, a.platform,
                rev.test_type AS test_type, rev.id AS revision_id, rev.readiness,
-               r.id AS run_id, r.state AS run_state, r.outcome AS run_outcome,
+               r.id AS run_id, r.display_no AS run_display_no,
+               r.state AS run_state, r.outcome AS run_outcome,
                r.created_at AS run_created_at, r.ended_at AS run_ended_at,
                (SELECT count(*) FROM task_revisions tr2 WHERE tr2.task_id = t.id) AS revision_count,
                (SELECT count(*) FROM run_components rc WHERE rc.run_id = r.id) AS component_total
@@ -79,7 +81,7 @@ async def list_tasks(
                 LIMIT 1
           ) rev ON TRUE
           LEFT JOIN LATERAL (
-               SELECT r2.id, r2.state, r2.outcome, r2.created_at, r2.ended_at
+               SELECT r2.id, r2.display_no, r2.state, r2.outcome, r2.created_at, r2.ended_at
                  FROM test_runs r2
                  JOIN task_revisions tr3 ON tr3.id = r2.revision_id
                 WHERE tr3.task_id = t.id
@@ -106,7 +108,10 @@ async def list_tasks(
         items.append(
             {
                 "id": row["id"],
-                "display_id": f"RUN-{row['run_id']}" if row["run_id"] else f"TASK-{row['id']}",
+                # 有运行的显示运行的持久编号（与运行页、报告同一字符串），
+                # 没有运行的显示任务自身编号；两者都不随列表顺序变化。
+                "display_id": runs_mod.format_display_id(row["run_display_no"])
+                or f"TASK-{row['id']}",
                 "name": row["name"],
                 "test_type": row["test_type"],
                 "lifecycle": row["lifecycle"],
@@ -117,6 +122,7 @@ async def list_tasks(
                 "readiness": row["readiness"],
                 "run": {
                     "id": row["run_id"],
+                    "display_id": runs_mod.format_display_id(row["run_display_no"]),
                     "state": row["run_state"],
                     "outcome": row["run_outcome"],
                     "created_at": row["run_created_at"],

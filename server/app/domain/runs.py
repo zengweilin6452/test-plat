@@ -104,6 +104,22 @@ def is_terminal(state: str) -> bool:
     return state in TERMINAL_STATES
 
 
+#: 展示编号前缀。编号本身来自 test_runs.display_no（持久分配，工单 09）；
+#: 前缀只做格式化，不参与判定，也不作为主键。
+DISPLAY_ID_PREFIX = "RUN"
+
+
+def format_display_id(display_no: int | None) -> str | None:
+    """display_no -> `RUN-0001`。
+
+    编号一旦分配就不再变（历史数据变动、过滤、分页都不重编号），
+    所以这里只做纯格式化：同一 display_no 在任何页面、报告、导出里都是同一个字符串。
+    """
+    if display_no is None:
+        return None
+    return "%s-%04d" % (DISPLAY_ID_PREFIX, int(display_no))
+
+
 def allowed_targets(state: str) -> tuple[str, ...]:
     """当前状态允许迁移到的目标状态（用于错误文案与前端按钮可用性）。"""
     if is_terminal(state):
@@ -319,6 +335,7 @@ __all__ = [
     "ALL_OUTCOMES",
     "ALL_STATES",
     "CANCELABLE_STATES",
+    "DISPLAY_ID_PREFIX",
     "ERRORABLE_STATES",
     "EXECUTING_STATES",
     "FORWARD_EDGES",
@@ -337,6 +354,7 @@ __all__ = [
     "TransitionResult",
     "allowed_targets",
     "check_transition",
+    "format_display_id",
     "is_terminal",
     "normalize_outcome",
     "transition",

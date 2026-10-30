@@ -38,20 +38,16 @@ from ..ws import hub as hub_mod
 
 router = APIRouter(tags=["runs"])
 
-# 原型用 run-0001 这种流水号；平台侧按 created_at 升序计算全局序号，
-# 保证同一份数据稳定可预期（不依赖随机或前端拼接）。
+# 原型用 run-0001 这种流水号；编号由 test_runs.display_no 持久分配（迁移 0007），
+# 查询期不再用 row_number 现算 —— 现算会随历史数据增删而重编号（工单 09、INV-10）。
 _RUNS_SQL = """
-    WITH numbered AS (
-        SELECT r.*, row_number() OVER (ORDER BY r.created_at, r.id) AS seq
-          FROM test_runs r
-    )
-    SELECT n.id, n.seq, n.state, n.outcome, n.reason_code, n.not_tested_reason,
+    SELECT n.id, n.display_no, n.state, n.outcome, n.reason_code, n.not_tested_reason,
            n.platform, n.started_at, n.ended_at, n.created_at,
            n.application_id, a.name AS application_name,
            n.revision_id, tr.task_id, tr.test_type,
            t.name AS task_name,
            n.resource_id, er.resource_key AS resource_name
-      FROM numbered n
+      FROM test_runs n
       JOIN applications a ON a.id = n.application_id
       LEFT JOIN task_revisions tr ON tr.id = n.revision_id
       LEFT JOIN test_tasks t ON t.id = tr.task_id
@@ -126,7 +122,7 @@ async def list_runs(
         items.append(
             {
                 "id": row["id"],
-                "display_id": f"RUN-{row['seq']:04d}",
+                "display_id": runs_mod.format_display_id(row["display_no"]),
                 "name": row["task_name"] or row["application_name"],
                 "task_id": row["task_id"],
                 "application": {"id": row["application_id"], "name": row["application_name"]},
@@ -477,21 +473,6 @@ async def _insert_run(session: AsyncSession, body: Mapping, *, internal: bool = 
     }
 
 
-async def _display_id(session: AsyncSession, run_id: str) -> str:
-    """全局序号：按 (created_at, id) 升序的排名，与列表页 RUN-0001 口径一致。"""
-    seq = (
-        await session.execute(
-            text(
-                "SELECT count(*) FROM test_runs r2 "
-                "WHERE (r2.created_at, r2.id) <= "
-                "      (SELECT r3.created_at, r3.id FROM test_runs r3 WHERE r3.id::text = :id)"
-            ),
-            {"id": str(run_id)},
-        )
-    ).scalar_one()
-    return "RUN-%04d" % int(seq or 0)
-
-
 async def _run_view(session: AsyncSession, run_id: str) -> dict:
     """run 单条视图：详情、WS 快照、报告都复用它，避免三处口径不一致。
 
@@ -503,7 +484,8 @@ async def _run_view(session: AsyncSession, run_id: str) -> dict:
     row = (
         await session.execute(
             text(
-                "SELECT r.id, r.project_id, r.application_id, r.platform, r.revision_id,"
+                "SELECT r.id, r.display_no, r.project_id, r.application_id, r.platform,"
+                "       r.revision_id,"
                 "       r.state, r.outcome, r.reason_code, r.not_tested_reason,"
                 "       r.resource_id, r.parent_run_id, r.request_key,"
                 "       r.started_at, r.ended_at, r.created_at, r.config_snapshot,"
@@ -548,7 +530,7 @@ async def _run_view(session: AsyncSession, run_id: str) -> dict:
         snapshot = {}
     return {
         "id": str(row["id"]),
-        "display_id": await _display_id(session, str(run_id)),
+        "display_id": runs_mod.format_display_id(row["display_no"]),
         "name": row["task_name"] or row["application_name"],
         "task_id": str(row["task_id"]) if row["task_id"] else None,
         "application": {"id": str(row["application_id"]), "name": row["application_name"]},
@@ -811,8 +793,11 @@ async def get_run_report(
     snapshot = view["config_snapshot"] or {}
     mode = "imported" if snapshot.get("source") == "import" else "live"
     return {
-        "runId": view["id"],
-        "hostRunId": view["request_key"],
+        # 报告里的编号与页面、导出、告警同源：都是持久分配的 display_id；
+        # 精确身份仍由 id（UUID）承载（INV-10）。
+        "runId": view["display_id"],
+        "hostRunId": view["display_id"],
+        "id": view["id"],
         "name": view["name"],
         "projectId": view["project_id"],
         "applicationId": view["application_id"],

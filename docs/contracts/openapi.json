@@ -3746,6 +3746,17 @@
           ],
           "title": "Created At"
         },
+        "display_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Display Id"
+        },
         "ended_at": {
           "anyOf": [
             {
