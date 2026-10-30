@@ -1,16 +1,18 @@
 """工单 03：套件发现使用固定副本，执行前复验同一副本（真实 PostgreSQL）。
 
 覆盖 AC-INPUT-02：
-- 浏览器只给可信根内的 source_id/路径；越界与链接逃逸 422 discover_failed；
 - 发现版本 manifest 只保留相对文件清单与摘要，不回显宿主绝对路径；
 - 形成 V1 后修改来源目录，V1 的发现/执行仍用 V1 副本；
 - 副本损坏/缺失时执行前阻断，不回退到来源目录。
+
+来源边界（未配置 source_id、越界、链接逃逸、来源缺失）在工单 05 改为按
+预配置来源解析后，由 test_issue05_suite_sources.py 覆盖。
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
+import json
 import sys
 from pathlib import Path
 
@@ -58,6 +60,10 @@ def suite_root(tmp_path, monkeypatch):
     root.mkdir()
     (root / "test_min.py").write_text(_MINIMAL_SUITE, encoding="utf-8")
     (root / "pytest.ini").write_text("[pytest]\naddopts =\n", encoding="utf-8")
+    monkeypatch.setenv(
+        "TESTDOCK_SUITE_SOURCES",
+        json.dumps([{"id": "suite_min", "name": "最小套件", "path": str(root)}]),
+    )
     return root
 
 
@@ -82,7 +88,7 @@ def _prepare(version_id: str) -> Path:
 def test_discover_publishes_code_copy_without_host_paths(
     api_client, seed, suite_root, tmp_path
 ):
-    response = _discover(api_client, seed["suite_id"], {"suite_root": "suite_min"})
+    response = _discover(api_client, seed["suite_id"], {"source_id": "suite_min"})
     assert response.status_code == 201, response.text
     body = response.json()
     manifest = body["manifest"]
@@ -100,7 +106,7 @@ def test_discover_publishes_code_copy_without_host_paths(
 def test_version_copy_is_stable_after_source_changes(
     api_client, seed, suite_root
 ):
-    first = _discover(api_client, seed["suite_id"], {"suite_root": "suite_min"})
+    first = _discover(api_client, seed["suite_id"], {"source_id": "suite_min"})
     assert first.status_code == 201, first.text
     v1 = first.json()
     v1_copy = v1["manifest"]["code_copy"]
@@ -109,7 +115,7 @@ def test_version_copy_is_stable_after_source_changes(
     (suite_root / "test_more.py").write_text(
         "def test_delta():\n    assert True\n", encoding="utf-8"
     )
-    second = _discover(api_client, seed["suite_id"], {"suite_root": "suite_min"})
+    second = _discover(api_client, seed["suite_id"], {"source_id": "suite_min"})
     assert second.status_code == 201, second.text
     v2 = second.json()
     assert v2["version"] == 2
@@ -134,7 +140,7 @@ def test_version_copy_is_stable_after_source_changes(
 
 
 def test_corrupted_copy_blocks_execution(api_client, seed, suite_root):
-    response = _discover(api_client, seed["suite_id"], {"suite_root": "suite_min"})
+    response = _discover(api_client, seed["suite_id"], {"source_id": "suite_min"})
     assert response.status_code == 201, response.text
     version = response.json()
     root = _prepare(version["id"])
@@ -145,44 +151,3 @@ def test_corrupted_copy_blocks_execution(api_client, seed, suite_root):
     error = exc.value
     assert getattr(error, "code", None) == "discover_failed"
     assert error.extra_details["reason"] == "code_copy_corrupt"
-
-
-def test_source_outside_trusted_root_is_rejected(api_client, seed, tmp_path, suite_root):
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "test_leak.py").write_text("def test_leak():\n    pass\n", encoding="utf-8")
-
-    response = _discover(api_client, seed["suite_id"], {"suite_root": str(outside)})
-    assert response.status_code == 422, response.text
-    body = response.json()
-    assert body["code"] == "discover_failed"
-    assert body["details"]["reason"] == "source_outside_trusted_root"
-    assert str(outside) not in response.text
-
-
-def test_symlink_source_is_rejected(api_client, seed, suite_root, tmp_path):
-    outside = tmp_path / "outside_link_target"
-    outside.mkdir()
-    (outside / "test_leak.py").write_text("def test_leak():\n    pass\n", encoding="utf-8")
-    link = suite_root.parent / "linked_suite"
-    try:
-        os.symlink(outside, link, target_is_directory=True)
-    except (OSError, NotImplementedError):
-        if os.name == "nt":
-            import subprocess
-
-            completed = subprocess.run(
-                ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
-                capture_output=True,
-                text=True,
-            )
-            if completed.returncode != 0:
-                pytest.skip("当前环境不能创建符号链接/junction")
-        else:
-            pytest.skip("当前环境不能创建符号链接")
-
-    response = _discover(api_client, seed["suite_id"], {"suite_root": str(link)})
-    assert response.status_code == 422, response.text
-    body = response.json()
-    assert body["code"] == "discover_failed"
-    assert body["details"]["reason"] == "source_symlink"

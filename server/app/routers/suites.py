@@ -1,14 +1,14 @@
-"""套件与套件版本：列表 / 版本 / 发现用例（P2）。
+"""套件与套件版本：来源 / 登记 / 版本 / 发现用例。
 
-设计约束（来自 0001 真源，不是偏好）
-------------------------------------
-- test_suites **没有配置列**：套件目录只能由 discover 请求体传 suite_root。
-- schema 里**没有 cases 表**：用例清单存在 suite_versions.manifest 的 jsonb 里
-  （该列注释原文是"用例 key、入口、场景及 schemaVersion"）。
+设计约束（来自 0001 真源与 spec §9.2）
+--------------------------------------
+- test_suites **没有配置列**：套件来源只能按服务端预配置的 source_id 解析，
+  浏览器不能传任意宿主路径。
+- schema 里**没有 cases 表**：用例清单存在 suite_versions.manifest 的 jsonb 里。
 - suite_versions 不可变：每次 discover 追加一个新版本，不覆盖历史版本。
-
-discover 跑在宿主子进程里（app/integrations/discover.py），只做 pytest --collect-only，
-不 import 被测代码到 API 进程，也不碰 vendor/**。
+- 发现跑在宿主子进程里（app/integrations/discover.py），只做 pytest --collect-only，
+  不 import 被测代码到 API 进程，也不碰 vendor/**；发现读的是固定副本，
+  不是可变来源目录。
 """
 
 from __future__ import annotations
@@ -20,13 +20,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..domain import suite as suite_domain
-from ..errors import discover_failed, not_found, validation_error
+from ..errors import validation_error
 from ..integrations import discover as discover_integration
-from ..schemas import SuiteDiscoverIn
+from ..schemas import SuiteCreateIn, SuiteDiscoverIn, SuiteSourcesOut
 from ..services import suites as suite_service
 from .tasks import require_client_header
 
 router = APIRouter(tags=["suites"])
+
+
+@router.get("/suite-sources", response_model=SuiteSourcesOut)
+async def list_suite_sources() -> dict[str, Any]:
+    """预配置套件来源：只返回 source_id、显示名与适用类型，不含宿主目录。"""
+    items = discover_integration.list_suite_sources()
+    return {"items": items, "total": len(items)}
 
 
 @router.get("/suites")
@@ -42,11 +49,40 @@ async def list_suites(
     return await suite_service.list_suites(session, test_type=test_type)
 
 
+@router.post("/suites", status_code=201)
+async def create_suite(
+    body: SuiteCreateIn,
+    _client: str = Depends(require_client_header),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """从预配置来源登记套件并发布 V1（来源 -> 固定副本 -> 发现）。
+
+    失败语义：
+      - 应用不存在           -> 404 not_found
+      - source_id 未配置/不适用 -> 400 validation_error（details.reason）
+      - 来源越界/链接逃逸     -> 422 discover_failed（details.reason）
+      - 来源缺失/不是目录     -> 422 discover_failed
+      - 复制期间来源变化      -> 422 discover_failed（reason=source_changed）
+      - 磁盘不足             -> 422 discover_failed（reason=disk_full，不淘汰旧副本）
+      - pytest 失败/0 用例    -> 422 discover_failed（带 stderr 尾巴）
+      - 同名套件已存在        -> 409 state_conflict
+    """
+    return await suite_service.create_suite(
+        session,
+        application_id=body.application_id,
+        name=body.name,
+        test_type=body.test_type,
+        source_id=body.source_id,
+        source_ref=body.source_ref,
+        source_commit=body.source_commit,
+    )
+
+
 @router.get("/suites/{suite_id}/versions")
 async def list_suite_versions(
     suite_id: str, session: AsyncSession = Depends(get_session)
 ) -> dict[str, Any]:
-    """套件版本列表（version 倒序），每个版本带 case_count。"""
+    """套件版本列表（version 倒序），每个版本带 case_count 与是否保留固定代码。"""
     return await suite_service.list_versions(session, suite_id)
 
 
@@ -57,65 +93,15 @@ async def discover_suite(
     client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """在宿主上跑 pytest --collect-only，把用例清单写成新的 suite_version。
+    """按预配置 source_id 复制固定副本并在副本上发现，追加一个新版本。
 
-    失败语义（都是 422，业务能处理）：
-      - suite 不存在           -> 404 not_found
-      - suite_root 不存在/不是目录 -> 422 discover_failed
-      - pytest 返回非 0        -> 422 discover_failed，带 stderr 末 200 行
-      - 超时（默认 120s）      -> 422 discover_failed，error=timeout
-      - 收集到 0 条用例        -> 422 discover_failed，error=no_tests
-        （写一个空版本会让绑定它的任务永远 validate 不过，而且掩盖了"目录配错了"）
+    失败语义与 POST /suites 相同；失败不发布半成品版本，诊断留在副本目录。
     """
     suite_row = await suite_service.get_suite(session, suite_id)
-
-    root = discover_integration.resolve_suite_root(body.suite_root)
-    result = discover_integration.collect_suite(root)
-
-    if not result.ok:
-        kind = result.error
-        if kind == discover_integration.DiscoverErrorKind.ROOT_MISSING:
-            raise discover_failed(
-                f"suite_root 不存在：{root}",
-                result.stderr_tail,
-                result.returncode,
-            )
-        if kind == discover_integration.DiscoverErrorKind.ROOT_NOT_DIR:
-            raise discover_failed(
-                f"suite_root 不是目录：{root}",
-                result.stderr_tail,
-                result.returncode,
-            )
-        if kind == discover_integration.DiscoverErrorKind.TIMEOUT:
-            raise discover_failed(
-                f"用例收集超时（{discover_integration.DISCOVER_TIMEOUT_S}s）：{root}",
-                result.stderr_tail,
-                result.returncode,
-            )
-        if kind == discover_integration.DiscoverErrorKind.NO_TESTS:
-            raise discover_failed(
-                f"未收集到任何用例：{root}",
-                result.stderr_tail,
-                result.returncode,
-            )
-        if kind == discover_integration.DiscoverErrorKind.PYTEST_MISSING:
-            raise discover_failed(
-                "宿主解释器缺少 pytest，无法收集用例",
-                result.stderr_tail,
-                result.returncode,
-            )
-        raise discover_failed(
-            f"pytest --collect-only 失败（退出码 {result.returncode}）：{root}",
-            result.stderr_tail,
-            result.returncode,
-        )
-
-    version = await suite_service.create_version(
+    return await suite_service.discover_version(
         session,
         suite_row=suite_row,
-        node_ids=result.node_ids,
+        source_id=body.source_id,
         source_ref=body.source_ref,
         source_commit=body.source_commit,
-        extra={"suite_root": str(root)},
     )
-    return version

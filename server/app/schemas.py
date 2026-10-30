@@ -273,18 +273,50 @@ class TaskValidateIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class SuiteDiscoverIn(BaseModel):
-    """POST /suites/{id}/discover 请求体。
+class SuiteSourceOut(BaseModel):
+    """GET /suite-sources 的单项：只有 source_id、显示名与适用类型。"""
 
-    suite_root 是宿主路径。test_suites 表没有"配置"列（0001 真源），
-    manifest 又只存在于 suite_versions 上，所以路径只能由请求体给出；
-    后续若要固化到 suite 上，需要 0002 加列，本阶段不做。
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    test_types: list[str] = Field(default_factory=list)
+
+
+class SuiteSourcesOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[SuiteSourceOut] = Field(default_factory=list)
+    total: int
+
+
+class SuiteCreateIn(BaseModel):
+    """POST /suites：从预配置来源登记套件并发布 V1。
+
+    浏览器只提交 source_id；宿主路径由服务端配置决定，不接受任意路径。
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    suite_root: str = Field(min_length=1)
-    #: 可选覆盖；缺省 suite:<id> 与 "local"（两列在 DB 里都是 NOT NULL）
+    application_id: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=200)
+    test_type: Literal["ui", "performance", "joint"]
+    source_id: str = Field(min_length=1)
+    source_ref: str | None = None
+    source_commit: str | None = None
+
+
+class SuiteDiscoverIn(BaseModel):
+    """POST /suites/{id}/discover 请求体。
+
+    只接受预配置 source_id（spec §9.2）：浏览器不能传任意宿主路径，
+    服务端按配置解析来源、复制固定副本，再在副本上发现。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str = Field(min_length=1)
+    #: 可选覆盖；缺省用 source_id 与 "local"（两列在 DB 里都是 NOT NULL）
     source_ref: str | None = None
     source_commit: str | None = None
 
@@ -315,6 +347,8 @@ class SuiteVersionOut(BaseModel):
     source_commit: str
     case_count: int = 0
     case_keys: list[str] = Field(default_factory=list)
+    #: 旧版本没有固定代码副本时为 False，界面标“未保留固定代码”。
+    has_code_copy: bool = False
     manifest: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
 
