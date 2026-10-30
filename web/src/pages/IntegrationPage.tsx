@@ -12,19 +12,23 @@ import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
 import { useTargetScope } from '../store/scope'
 
+// 与 docs/contracts/openapi.json 同源（AC-INT-01）：不把 runner 内部协议
+//（/internal/*，X-Control-Token）宣传成普通接入 API。
 const CAPS: { title: string; desc: string }[] = [
-  { title: '测试定义写入', desc: '用例、套件与任务草稿经 POST /api/v1/tasks 写入，草稿编号以 TASK- 开头。' },
-  { title: '执行资源申请', desc: '执行前向后端申请租约（lease），成功后资源状态变为占用中。' },
-  { title: '执行结果上报', desc: '结果经 POST /api/v1/runs/{id}/results 上报，包含断言、日志与产物引用。' },
-  { title: '性能指标上报', desc: '指标样本写入 run_metrics，统计口径由后端统一计算（中位数 / P95 等）。' },
-  { title: '门禁评估', desc: '阈值评估在后端完成并写入 gate_evaluations，接入方不需要也不应该自行判定。' },
+  { title: '测试定义写入', desc: 'POST /api/v1/tasks 创建任务草稿；PATCH /tasks/{id} 与 /tasks/{id}/validate 形成修订并验证（幂等键 request_key）。' },
+  { title: '构建与套件登记', desc: 'POST /api/v1/builds 登记构建（同 key 同身份复用）；POST /api/v1/suites 登记套件并固定代码副本。' },
+  { title: '运行发起与跟踪', desc: 'POST /api/v1/runs 发起运行（幂等键重复提交返回 200 + duplicate）；GET /runs/{id}/events 按序号补拉，WS /ws/runs/{id} 实时跟踪。' },
+  { title: '结果与证据', desc: '结果由 runner 经内部协议上报并落库（runs/cases/metrics/gate_evaluations）；浏览器经 GET /runs/{id}/report 与 /artifacts 读取，error/available/expired 分别呈现。' },
+  { title: '门禁评估', desc: '阈值评估在后端完成并写入 gate_evaluations；试算经 POST /runs/{id}/gate-evaluations 只新增 reanalysis，不改写原始判定。' },
 ]
 
 const ERRORS: { code: string; desc: string }[] = [
-  { code: 'VALIDATION_FAILED', desc: '请求体字段缺失或类型不符' },
-  { code: 'RESOURCE_UNAVAILABLE', desc: '目标资源无租约可发放' },
-  { code: 'TASK_NOT_FOUND', desc: '任务编号不存在或已归档' },
-  { code: 'GATE_NOT_EVALUATED', desc: '该运行尚无门禁结论（样本不足或仍在执行）' },
+  { code: 'validation_error', desc: '400 请求体字段缺失、类型不符或改写固定输入' },
+  { code: 'readiness_incomplete', desc: '422 修订未验证或缺少显式身份（application_id/task_id）' },
+  { code: 'not_found', desc: '404 任务/运行/修订不存在或跨归属引用' },
+  { code: 'state_conflict', desc: '409 运行终态不可再改、取消竞争等状态不允许' },
+  { code: 'stale_version', desc: '409 任务被他人更新（lock_version CAS 失败），请刷新重试' },
+  { code: 'device_busy', desc: '409 目标资源已有活动租约（含占用者信息）' },
 ]
 
 export function IntegrationPage() {
@@ -87,7 +91,7 @@ export function IntegrationPage() {
               {checks.map((check) => (
                 <span
                   key={check.label}
-                  className={'badge ' + (check.ok ? 'green' : 'red')}
+                  className={'badge ' + (check.ok === null ? 'gray' : check.ok ? 'green' : 'red')}
                   title={check.label + '：' + check.detail}
                 >
                   <i className="dot" />
