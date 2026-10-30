@@ -223,10 +223,20 @@ export interface ResourceRecord {
   lease: { run_id: string | null; debug_session_id: string | null } | null
 }
 
+export interface ResourceCounts {
+  ready_idle: number
+  ready_busy: number
+  offline: number
+  unauthorized: number
+  draining: number
+}
+
 export interface ResourcesResponse {
   items: ResourceRecord[]
   total: number
   ready: number
+  /** 五状态 × 空闲/占用的服务端计数（工单 15），覆盖完整过滤集合 */
+  counts?: ResourceCounts
   summary: string
 }
 

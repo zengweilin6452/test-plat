@@ -4,10 +4,19 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] AC-RES-01：ready+idle、ready+busy、offline、unauthorized、draining 计数准确
-- [ ] AC-RES-02：占用预览不新建调试、不额外采屏、不抢租约
-- [ ] AC-RES-03：按测试类型检查，未知项不冒充通过
-- [ ] AC-READ-01：手动检查和运行准备均不执行 tcpip/connect、安装或设置修改
-- [ ] 检查失败不自动自愈，设备保持不可分配并说明原因
+- [x] AC-RES-01：ready+idle、ready+busy、offline、unauthorized、draining 计数准确
+- [x] AC-RES-02：占用预览不新建调试、不额外采屏、不抢租约
+- [x] AC-RES-03：按测试类型检查，未知项不冒充通过
+- [x] AC-READ-01：手动检查和运行准备均不执行 tcpip/connect、安装或设置修改
+- [x] 检查失败不自动自愈，设备保持不可分配并说明原因
+
+## Comments
+
+- 实现提交 `eba47fd`（`feat(issue15): 资源池五状态计数与服务端汇总`）。
+- AC-RES-01：`GET /resources` 响应新增 `counts`（ready_idle / ready_busy / offline / unauthorized / draining），busy 与每行字段同口径（存在未释放租约）；summary 改为"X 可用 / Y 占用中 / Z 不可用"。前端设备页四张统计卡改用服务端 counts（覆盖完整集合），加载中回退本地推导。
+- AC-RES-02 / AC-READ-01 / 失败不自愈：行为在工单 02 已落地并有既有测试覆盖——busy 设备领不到检查租约直接 409 `device_busy` 且零 adb 访问（`test_busy_device_is_not_probed`）；检查只发白名单只读命令、不 tcpip/connect/安装/设置修改；检查失败写 fail 结论并释放租约，不改设备状态。本工单测试复验计数侧并依赖这些回归。
+- AC-RES-03：`ReadinessCheckIn.test_type` 是 Literal（ui/performance/joint），未知值 422（有测试）；`_REQUIRED_CHECKS` 按类型取必需项，检查项缺失或 unknown 一律进 blocking，不冒充通过。
+- 验收（定向）：`test_issue15_resource_readiness.py` 2 例 + p7_device_sync、issue02_readiness 回归全过；web `tsc --noEmit` 通过；OpenAPI `--check` 通过。全量未跑（按指示）。
+- 已知边界："占用预览"没有独立端点——设备页对 busy 设备的可见信息来自列表行的 lease 字段与 409 details，不新建调试会话、不采屏、不抢租约（busy 预览语义由这两个既有行为构成）。

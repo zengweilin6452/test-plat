@@ -256,12 +256,27 @@ export function DevicesPage() {
           value={resourcesQuery.isSuccess ? rows.length : null}
           foot="按当前目标端过滤"
         />
-        <StatCard label="可用" value={resourcesQuery.isSuccess ? readyCount : null} foot="status = ready" />
-        <StatCard label="占用中" value={resourcesQuery.isSuccess ? busyCount : null} foot="存在未释放租约" />
+        {/* 工单 15：计数来自服务端 counts（覆盖完整集合），加载中回退到本地推导 */}
+        <StatCard
+          label="可用"
+          value={resourcesQuery.data?.counts ? resourcesQuery.data.counts.ready_idle : readyCount}
+          foot="ready 且无租约"
+        />
+        <StatCard
+          label="占用中"
+          value={resourcesQuery.data?.counts ? resourcesQuery.data.counts.ready_busy : busyCount}
+          foot="存在未释放租约"
+        />
         <StatCard
           label="不可用"
-          value={resourcesQuery.isSuccess ? unavailableCount : null}
-          foot="离线 + 待授权"
+          value={
+            resourcesQuery.data?.counts
+              ? resourcesQuery.data.counts.offline +
+                resourcesQuery.data.counts.unauthorized +
+                resourcesQuery.data.counts.draining
+              : unavailableCount
+          }
+          foot="离线 + 待授权 + 退役中"
         />
       </div>
 

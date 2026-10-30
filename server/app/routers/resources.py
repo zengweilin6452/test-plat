@@ -664,10 +664,23 @@ async def list_resources(
             }
         )
 
-    ready = sum(1 for i in items if i["status"] == "ready")
+    # AC-RES-01：五个状态 × 空闲/占用的准确计数。busy 由"存在未释放租约"实时推导，
+    # 与每行的 busy 字段同一口径；counts 覆盖完整过滤集合，前端不再自己数。
+    counts = {
+        "ready_idle": sum(1 for i in items if i["status"] == "ready" and not i["busy"]),
+        "ready_busy": sum(1 for i in items if i["status"] == "ready" and i["busy"]),
+        "offline": sum(1 for i in items if i["status"] == "offline"),
+        "unauthorized": sum(1 for i in items if i["status"] == "unauthorized"),
+        "draining": sum(1 for i in items if i["status"] == "draining"),
+    }
     return {
         "items": items,
         "total": len(items),
-        "ready": ready,
-        "summary": f"{ready} 台已授权在线 / {len(items)} 台设备",
+        "ready": counts["ready_idle"] + counts["ready_busy"],
+        "counts": counts,
+        "summary": (
+            f"{counts['ready_idle']} 台可用 / {counts['ready_busy']} 台占用中"
+            f" / {counts['offline'] + counts['unauthorized'] + counts['draining']} 台不可用"
+            f"（共 {len(items)} 台）"
+        ),
     }
