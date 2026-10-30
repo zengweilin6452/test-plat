@@ -750,7 +750,13 @@
     },
     "/api/v1/overview": {
       "get": {
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false
+          }
+        ],
         "request": null,
         "responses": {
           "200": {

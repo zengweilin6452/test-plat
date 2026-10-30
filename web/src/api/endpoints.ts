@@ -19,8 +19,8 @@ import type {
 } from '../types'
 
 /** overview 不接受 scope（后端按 Android 统计），保留参数位以便后续扩展 */
-export function fetchOverview(signal?: AbortSignal) {
-  return api.get<OverviewSummary>('/overview', undefined, signal)
+export function fetchOverview(scope: string | undefined, signal?: AbortSignal) {
+  return api.get<OverviewSummary>('/overview', { scope: scope || undefined }, signal)
 }
 
 export function fetchApplications(signal?: AbortSignal) {

@@ -33,8 +33,8 @@ export function OverviewPage() {
   const { targetScope, setTargetScope } = useTargetScope()
 
   const overviewQuery = useQuery({
-    queryKey: ['overview'],
-    queryFn: ({ signal }) => fetchOverview(signal),
+    queryKey: ['overview', targetScope],
+    queryFn: ({ signal }) => fetchOverview(targetScope === 'all' ? undefined : targetScope, signal),
     retry: false,
   })
 
@@ -108,6 +108,11 @@ export function OverviewPage() {
           label="需要关注"
           value={overview ? overview.needs_attention : null}
           foot={overview ? `未通过 ${overview.failed} + 未判定 ${overview.not_tested}` : '未通过 + 未判定'}
+          extra={
+            <a className="link-btn" href="#/reports" aria-label="查看需要关注的报告">
+              查看报告 ›
+            </a>
+          }
         />
         <StatCard
           label="执行中"
