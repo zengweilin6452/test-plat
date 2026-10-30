@@ -129,13 +129,16 @@ POST   /api/v1/tasks/{id}/suites/discover  # pytest --collect-only
 
 ```http
 POST /api/v1/runs
-{ "request_key": "…", "task_id": 12,
-  "overrides": { "duration_s": 120, "items": ["CPU","Memory"] },
+{ "request_key": "…", "application_id": "…", "platform": "android",
+  "task_id": 12, "revision_id": 7,          // revision_id 可省略
   "device": { "resource_id": "7f3a" } }
-// 201 -> { id: 47, display_id: RUN-47, state: queued }
+// 201 -> { id: 47, display_id: RUN-47, state: queued, revision_id: 7, task_id: 12 }
+// 200 -> 同 request_key 重放既有运行：{ …, "duplicate": true }（不新建、不重解析修订）
 ```
 
-前置校验顺序（失败即返回，错误码见 §1.2）：任务存在 → 修订 `readiness=validated` → 设备存在且 `status=ready` → 目标端为 android。
+前置校验顺序（失败即返回，错误码见 §1.2）：`application_id` 必填且与 `platform` 一致 → `task_id` 必填 → 修订属于该任务/应用/项目且 `readiness=validated` → 设备存在且 `status=ready` → 目标端为 android。跨应用/跨项目的任务、修订、父运行一律按 `not_found` 拒绝；省略 `revision_id` 时只解析已验证修订，并把实际 `revision_id` 回传，派发时不再重解析。
+
+固定输入：执行输入（`overrides`、`source_dir`、`test_paths`、结果字段）只来自修订；请求里出现 `overrides`/`source_dir`/`test_paths`/`fake_outcome`/`source` 直接 400 `validation_error`。内部导入通道 `POST /runs/import` 与浏览器真执行隔离，不能成为绕过固定输入的通道。
 
 ```http
 GET  /api/v1/runs/47
@@ -155,8 +158,18 @@ GET  /api/v1/runs/47
 
 ```http
 POST /api/v1/runs/47/cancel
-// 202 -> { "state": "running", "cancel_requested": true }   语义：已受理，WS 会推 cancelled
+// 202 -> { "id": 47, "state": "running", "cancel_requested": true,
+//          "cancel_requested_at": "2026-10-25T12:01:00Z" }
 ```
+
+取消语义：先受理、后收敛。受理事实写进 `test_runs.cancel_requested_at`（重复受理保留首次时间），不依赖事件流是否完整。`queued` 直接迁移 `cancelled`；执行中只受理不改状态，runner 从心跳的 `cancel` 标志感知，再由 `complete`/`fail` 或 reconciler 收敛 —— 若恰好完成，终态就是真实完成态，不伪造 `cancelled`。终态运行取消返回 409 `state_conflict`。
+
+```http
+GET /api/v1/runs/47/events?after=0&limit=200
+// -> { "items": [...], "total": 200, "after": 0, "next_after": 200, "has_more": true }
+```
+
+`items` 按 `sequence` 升序；`total` 是本页条数；`next_after` 是下一页起点（空页沿用 `after`）；`has_more` 表示后面还有。客户端循环补拉直到 `has_more=false`，按 `(run_id, sequence)` 去重。取消事实以 `test_runs` 列为准，不因事件分页或清理丢失。
 
 ### 2.5 结果与报告
 
@@ -268,15 +281,17 @@ POST   /api/v1/templates/validate      # IMAGE 目标验证 -> { matches[], scor
 服务端 → 客户端（text frame，JSON）：
 
 ```json
-{"type":"snapshot","run":{...}}
+{"type":"snapshot","run":{...}}          // run 与 GET /runs/{id} 同一投影，含 progress/stage/last_sequence/cancel_requested
 {"type":"state","state":"running","progress":45,"stage":2,"at":"..."}
-{"type":"event","kind":"stage","name":"采集开始","at":"..."}
+{"type":"event","kind":"stage","name":"采集开始","sequence":42,"at":"..."}
 {"type":"finished","state":"completed","outcome":"failed"}
 ```
 
 客户端 → 服务端：只允许 `{"type":"ping"}`。关闭码：`4404` run 不存在、`4409` 已终态（推完即关）。
 
-实现：api 每 1s 查一次 `test_runs + run_events`（首期简单，数据量小）；二期可换 `LISTEN/NOTIFY`。
+断线重连：先收到 snapshot（含 `last_sequence`），再用 `GET /runs/{id}/events?after=last_sequence` 补拉缺口，按 `(run_id, sequence)` 去重；终态运行重连时 snapshot 之后直接推 `finished`，不重放历史事件。
+
+实现：api 每 2s 查一次 `test_runs + run_events`（首期简单，数据量小）；runner 事件经 hub 即时插入推送。二期可换 `LISTEN/NOTIFY`。
 
 ### 3.2 调试预览 `/api/v1/ws/debug/{id}`
 
@@ -287,7 +302,7 @@ POST   /api/v1/templates/validate      # IMAGE 目标验证 -> { matches[], scor
 | 端点 | 请求 | 响应 |
 | --- | --- | --- |
 | `POST /internal/runs/{id}/ack` | `{pid, started_at}` | `{ok:true, revision:{...}, task:{...}}` |
-| `POST /internal/runs/{id}/heartbeat` | `{pid, progress, stage}` | `{cancel: bool, fence_ok: bool}` |
+| `POST /internal/runs/{id}/heartbeat` | `{pid, progress, stage, fencing_token}` | `{ok:true, cancel: bool, fence_ok: bool}`（`cancel` 读 `test_runs.cancel_requested_at`，并顺带续租） |
 | `GET /internal/runs/{id}/fence` | — | `{token}` 或 409 `fence_mismatch` |
 | `POST /internal/runs/{id}/events` | `{events:[{source_key, source_event_id, kind, payload}]}` | `{accepted: n}` |
 | `POST /internal/runs/{id}/complete` | `{outcome, components, cases, metrics, artifacts, verdicts}` | `{ok:true}` |

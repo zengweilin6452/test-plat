@@ -128,9 +128,10 @@ def test_create_run_without_revision_is_rejected_without_orphan_run(client, proj
 
 
 def test_revision_must_belong_to_selected_application(client, project, sync_engine):
+    """跨应用的任务+修订组合：task_id 属于另一个应用，必须按不存在拒绝。"""
     other = make_project(sync_engine)
     response = client.post("/api/v1/runs", json=_body(
-        project, task_id=None, revision_id=other["revision_id"]
+        project, task_id=other["task_id"], revision_id=other["revision_id"]
     ), headers=CLIENT_HEADERS)
     assert response.status_code == 404, response.text
     assert response.json()["code"] == "not_found"

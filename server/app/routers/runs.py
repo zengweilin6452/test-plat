@@ -58,13 +58,27 @@ _RUNS_SQL = """
       LEFT JOIN execution_resources er ON er.id = n.resource_id
 """
 
-_COMPONENT_SQL = """
-    SELECT rc.run_id,
-           count(*) AS component_total,
-           count(*) FILTER (WHERE rc.state = 'completed') AS component_completed
-      FROM run_components rc
-     WHERE rc.run_id = ANY(:run_ids)
-     GROUP BY rc.run_id
+#: 列表 / 详情 / WS 共用同一条进度投影（spec §9.3）：由 run_events 推导，
+#: 与 domain/events.compute_progress 同一口径（stage 权重在下面 CASE 里逐项复刻，
+#: 改动权重必须同时改两处，test_issue08 有一条静态断言守住）。
+#: 用 SQL 聚合而不是把事件全捞回来：事件可能上千条，详情页不该因此变慢。
+_EVENT_PROGRESS_SQL = """
+    SELECT run_id,
+           max(GREATEST(
+               CASE WHEN payload->>'progress' ~ '^[0-9]{1,3}$'
+                    THEN (payload->>'progress')::int ELSE 0 END,
+               CASE COALESCE(payload->>'stage', payload->>'name')
+                    WHEN 'ack' THEN 5
+                    WHEN 'lease' THEN 10
+                    WHEN 'ready' THEN 20
+                    WHEN 'pytest' THEN 80
+                    WHEN 'archive' THEN 100
+                    ELSE 0 END
+           ))::int AS progress,
+           max(sequence)::int AS last_sequence
+      FROM run_events
+     WHERE run_id = ANY(:run_ids)
+     GROUP BY run_id
 """
 
 
@@ -100,14 +114,12 @@ async def list_runs(
 
     rows = (await session.execute(text(sql), params)).mappings().all()
     run_ids = [row["id"] for row in rows]
-    progress: dict[object, float | None] = {}
+    progress: dict[object, int] = {}
     if run_ids:
-        comp = (await session.execute(text(_COMPONENT_SQL), {"run_ids": run_ids})).mappings().all()
-        for c in comp:
-            total = c["component_total"] or 0
-            progress[c["run_id"]] = (
-                round(c["component_completed"] * 100 / total) if total else None
-            )
+        for item in (
+            await session.execute(text(_EVENT_PROGRESS_SQL), {"run_ids": run_ids})
+        ).mappings().all():
+            progress[item["run_id"]] = int(item["progress"] or 0)
 
     items = []
     for row in rows:
@@ -124,7 +136,7 @@ async def list_runs(
                 "outcome": row["outcome"],
                 "reason_code": row["reason_code"],
                 "not_tested_reason": row["not_tested_reason"],
-                # 没有 component 记录时返回 null，前端显示"无进度数据"而不是 0%
+                # 与详情/WS 同一投影；完全没有事件时返回 null（前端显示"无进度数据"）
                 "progress": progress.get(row["id"]),
                 "resource": row["resource_name"],
                 "started_at": row["started_at"],
@@ -137,53 +149,12 @@ async def list_runs(
 
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str, session: AsyncSession = Depends(get_session)) -> dict[str, object]:
-    """单次运行的详情骨架：只有主记录与组件进度，证据/门禁在后续阶段接入。"""
-    from fastapi import HTTPException
+    """运行详情：与 WS snapshot、报告复用同一个 `_run_view` 投影。
 
-    sql = _RUNS_SQL + " WHERE n.id::text = :run_id"
-    row = (await session.execute(text(sql), {"run_id": run_id})).mappings().first()
-    if row is None:
-        raise HTTPException(status_code=404, detail="run not found")
-
-    # 0001_initial.py 的 run_components 列名是 kind（不是 component），
-    # 且只有 created_at，没有 started_at/ended_at——查不存在的列会让
-    # 详情接口直接 500。组件级时间线以 created_at 为准。
-    comp = (
-        await session.execute(
-            text(
-                "SELECT kind, state, outcome, created_at "
-                "FROM run_components WHERE run_id = :run_id ORDER BY kind"
-            ),
-            {"run_id": row["id"]},
-        )
-    ).mappings().all()
-
-    return {
-        "id": row["id"],
-        "display_id": f"RUN-{row['seq']:04d}",
-        "name": row["task_name"] or row["application_name"],
-        "task_id": row["task_id"],
-        "application": {"id": row["application_id"], "name": row["application_name"]},
-        "platform": row["platform"],
-        "test_type": row["test_type"],
-        "state": row["state"],
-        "outcome": row["outcome"],
-        "reason_code": row["reason_code"],
-        "not_tested_reason": row["not_tested_reason"],
-        "resource": row["resource_name"],
-        "started_at": row["started_at"],
-        "ended_at": row["ended_at"],
-        "components": [
-            {
-                "component": c["kind"],
-                "kind": c["kind"],
-                "state": c["state"],
-                "outcome": c["outcome"],
-                "created_at": c["created_at"],
-            }
-            for c in comp
-        ],
-    }
+    同一份投影是硬要求（spec §9.3）：列表、详情与 WS 的 progress / stage /
+    cancel_requested 必须一致，否则刷新页面看到的进度会跳变。
+    """
+    return await _run_view(session, run_id)
 
 
 # ---------------------------------------------------------------------------
@@ -220,20 +191,32 @@ async def _project_of(session: AsyncSession, run_id: str) -> str:
 
 
 async def _pick_application(
-    session: AsyncSession, application_id: str | None, platform: str
+    session: AsyncSession, application_id: str | None, platform: str, *, required: bool = True
 ) -> dict:
-    """给了 application_id 就用它，否则取该平台最早创建且未归档的应用。"""
+    """浏览器必须显式选择应用（spec §6.2）。
+
+    不再"取该平台最早创建的应用"——那会把运行悄悄挂到另一个应用上。
+    只有内部导入通道（required=False）保留兼容回退。
+    """
     if application_id:
         row = (
             await session.execute(
-                text("SELECT id, project_id, platform, name FROM applications "
-                     "WHERE id::text = :aid AND platform = :platform AND archived_at IS NULL"),
-                {"aid": str(application_id), "platform": platform},
+                text(
+                    "SELECT id, project_id, platform, name FROM applications "
+                    "WHERE id::text = :aid AND archived_at IS NULL"
+                ),
+                {"aid": str(application_id)},
             )
         ).mappings().first()
         if row is None:
             raise not_found("application", str(application_id))
+        if row["platform"] != platform:
+            raise validation_error(
+                [f"platform {platform!r} 与应用平台 {row['platform']!r} 不一致"]
+            )
         return dict(row)
+    if required:
+        raise validation_error(["application_id 必填（浏览器必须显式选择应用）"])
     row = (
         await session.execute(
             text(
@@ -251,55 +234,101 @@ async def _pick_application(
 
 async def _resolve_revision(
     session: AsyncSession, *, task_id: str | None, revision_id: str | None,
-    project_id: str, application_id: str
+    project_id: str, application_id: str, require_validated: bool = True
 ) -> str:
-    """只引用所选应用下真实存在的修订，不合成悬空外键。"""
+    """解析并固定本次执行使用的修订（spec §9.1）。
+
+    - task_id 必填：运行必须明确属于哪个任务，不能靠"应用下最新修订"猜；
+    - revision_id 可省略以兼容旧客户端，但一旦省略就在这里**解析一次并固定**，
+      响应把实际 revision_id 返回，派发时绝不重新解析；
+    - 修订必须属于该任务、该应用、该项目，且 readiness='validated'；
+      跨归属与非 validated 一律拒绝，不合成悬空外键。
+    """
     if not revision_id and not task_id:
         raise readiness_incomplete(["task_id 或 revision_id"])
+    if not task_id:
+        raise readiness_incomplete(["task_id"])
+
     got = (
         await session.execute(
             text(
-                "SELECT tr.id FROM task_revisions tr "
+                "SELECT tr.id, tr.readiness FROM task_revisions tr "
                 "JOIN test_tasks t ON t.id = tr.task_id "
                 "WHERE t.project_id = :pid AND t.application_id = :aid "
+                "AND t.id::text = :tid "
                 "AND (CAST(:rid AS text) IS NULL OR tr.id::text = :rid) "
-                "AND (CAST(:tid AS text) IS NULL OR t.id::text = :tid) "
+                # 省略 revision_id 时只接受已验证修订：草稿不能直接发起运行
+                "AND (CAST(:rid AS text) IS NOT NULL OR tr.readiness = 'validated'"
+                "     OR NOT CAST(:require_validated AS boolean)) "
                 "ORDER BY tr.revision DESC LIMIT 1"
             ),
             {"pid": project_id, "aid": application_id,
              "rid": str(revision_id) if revision_id else None,
-             "tid": str(task_id) if task_id else None},
+             "tid": str(task_id),
+             "require_validated": require_validated},
         )
-    ).scalar_one_or_none()
+    ).mappings().first()
     if got is None:
-        raise not_found("revision" if revision_id else "task", str(revision_id or task_id))
-    return str(got)
+        if revision_id:
+            raise not_found("revision", str(revision_id))
+        raise readiness_incomplete([f"任务 {task_id} 没有已验证的修订，请先 validate"])
+    if require_validated and got["readiness"] != "validated":
+        raise readiness_incomplete(
+            [f"revision {got['id']} 尚未验证（readiness={got['readiness']}），不能发起运行"]
+        )
+    return str(got["id"])
 
 
-async def _insert_run(session: AsyncSession, body: Mapping) -> dict:
-    """插入 queued run；request_key 重复则返回既有 run（created=False）。"""
+#: 浏览器不得用这些字段改写修订里固定的输入（spec §9.1）。导入通道在内部
+#: `/runs/import` 里自己写 source=import，不接受浏览器传 source。
+_FIXED_INPUT_FIELDS = ("overrides", "source_dir", "test_paths", "fake_outcome", "source")
+
+
+async def _insert_run(session: AsyncSession, body: Mapping, *, internal: bool = False) -> dict:
+    """插入 queued run；request_key 重复则返回既有 run（created=False）。
+
+    internal=True 只给 `/runs/import` 用：它需要 source=import 与 source_dir，
+    且允许省略 application_id（补录历史产物）。浏览器通道一律走严格校验。
+    """
     request_key = str(body.get("request_key") or "").strip()
     if not request_key:
         raise validation_error(["request_key 必填（幂等去重键）"])
     if len(request_key) > 200:
         raise validation_error(["request_key 过长（<=200）"])
 
+    if not internal:
+        offending = [name for name in _FIXED_INPUT_FIELDS if name in body]
+        if offending:
+            # 固定输入只能来自修订：overrides / source_dir / test_paths / 伪造结论
+            # 若被接受，就等于给了浏览器一条绕过验证与固定副本的通道。
+            raise validation_error(
+                [f"不允许在请求中改写固定输入：{', '.join(offending)}"]
+            )
+
     platform = str(body.get("platform") or "android")
     if platform not in _PLATFORMS:
         raise validation_error(["platform 只支持 android / ios / web"])
 
-    application = await _pick_application(session, body.get("application_id"), platform)
+    application = await _pick_application(
+        session, body.get("application_id"), platform, required=not internal
+    )
     project_id = str(application["project_id"])
     application_id = str(application["id"])
 
     existing = (
         await session.execute(
-            text("SELECT id FROM test_runs WHERE project_id = :pid AND request_key = :rk"),
+            text("SELECT id, revision_id FROM test_runs WHERE project_id = :pid AND request_key = :rk"),
             {"pid": project_id, "rk": request_key},
         )
-    ).scalar_one_or_none()
+    ).mappings().first()
     if existing is not None:
-        return {"id": str(existing), "created": False, "project_id": project_id}
+        return {
+            "id": str(existing["id"]),
+            "created": False,
+            "project_id": project_id,
+            "revision_id": str(existing["revision_id"]),
+            "task_id": str(body.get("task_id") or "") or None,
+        }
 
     revision_id = await _resolve_revision(
         session,
@@ -307,7 +336,27 @@ async def _insert_run(session: AsyncSession, body: Mapping) -> dict:
         revision_id=body.get("revision_id"),
         project_id=project_id,
         application_id=application_id,
+        # 导入通道补录的是历史产物，不要求修订当时已验证
+        require_validated=not internal,
     )
+
+    parent_run_id = body.get("parent_run_id")
+    if parent_run_id:
+        if not _is_uuid(parent_run_id):
+            raise validation_error(["parent_run_id 必须是 uuid"])
+        parent = (
+            await session.execute(
+                text(
+                    "SELECT id FROM test_runs "
+                    "WHERE id::text = :id AND project_id = :pid AND application_id = :aid"
+                ),
+                {"id": str(parent_run_id), "pid": project_id, "aid": application_id},
+            )
+        ).first()
+        if parent is None:
+            # 重跑只能引用同一应用下的运行；跨应用/跨项目一律按不存在处理
+            raise not_found("run", str(parent_run_id))
+        parent_run_id = str(parent_run_id)
 
     revision = (
         await session.execute(
@@ -316,9 +365,8 @@ async def _insert_run(session: AsyncSession, body: Mapping) -> dict:
         )
     ).mappings().one()
     revision_config = dict(revision["config"] or {})
-    overrides = body.get("overrides") or {}
-    if not isinstance(overrides, Mapping):
-        raise validation_error(["overrides 必须是对象"])
+    # device 是显式选择（§6.2 允许），不属于"改写固定输入"；其余执行输入一律
+    # 取自修订，请求体里出现就会被 _FIXED_INPUT_FIELDS 拒绝。
     device = body.get("device") if "device" in body else revision_config.get("device")
     device = device or {}
     if not isinstance(device, Mapping):
@@ -326,7 +374,7 @@ async def _insert_run(session: AsyncSession, body: Mapping) -> dict:
     resource_id = device.get("resource_id")
     if resource_id is not None and not _is_uuid(resource_id):
         raise validation_error(["device.resource_id 必须是 uuid"])
-    importing = str(body.get("source") or "") == "import"
+    importing = internal
     if importing and not resource_id:
         # completed 行受 ck_test_runs_state_executing_needs_resource 约束：没有资源
         # 就插不进去。导入通道不派发，但必须显式指明这批产物来自哪台设备。
@@ -354,18 +402,10 @@ async def _insert_run(session: AsyncSession, body: Mapping) -> dict:
         "platform": platform,
         "application_id": application_id,
         "module": "perf" if revision["test_type"] == "performance" else revision["test_type"],
-        "overrides": dict(overrides),
         "requested_resource_id": resource_id,
-        "source": str(body.get("source") or "api"),
+        "source": "import" if internal else "api",
         "submitted_at": datetime.now(timezone.utc).isoformat(),
     }
-    if body.get("source_dir"):
-        snapshot["source_dir"] = str(body["source_dir"])
-    paths = body.get("test_paths")
-    if paths:
-        snapshot["test_paths"] = [str(p) for p in paths]
-    if body.get("fake_outcome"):
-        snapshot["fake_outcome"] = str(body["fake_outcome"])
 
     row = (
         await session.execute(
@@ -385,7 +425,7 @@ async def _insert_run(session: AsyncSession, body: Mapping) -> dict:
                 "application_id": application_id,
                 "platform": platform,
                 "revision_id": revision_id,
-                "parent_run_id": body.get("parent_run_id"),
+                "parent_run_id": parent_run_id,
                 "request_key": request_key,
                 "config": _json(snapshot),
                 "created_by": str(body.get("created_by") or "web"),
@@ -397,13 +437,24 @@ async def _insert_run(session: AsyncSession, body: Mapping) -> dict:
         )
     ).mappings().first()
     if row is None:
+        # 并发插入撞唯一键：回读既有运行。它的 revision 才是真实固定输入，
+        # 不能用本次请求解析出来的 revision 冒充。
         existing = (
             await session.execute(
-                text("SELECT id FROM test_runs WHERE project_id = :pid AND request_key = :rk"),
+                text(
+                    "SELECT id, revision_id FROM test_runs "
+                    "WHERE project_id = :pid AND request_key = :rk"
+                ),
                 {"pid": project_id, "rk": request_key},
             )
-        ).scalar_one()
-        return {"id": str(existing), "created": False, "project_id": project_id}
+        ).mappings().one()
+        return {
+            "id": str(existing["id"]),
+            "created": False,
+            "project_id": project_id,
+            "revision_id": str(existing["revision_id"]),
+            "task_id": str(body.get("task_id") or "") or None,
+        }
 
     run_id = str(row["id"])
     await events_mod.append_event(
@@ -420,6 +471,9 @@ async def _insert_run(session: AsyncSession, body: Mapping) -> dict:
         "created": True,
         "project_id": project_id,
         "state": str(row["state"]),
+        # 固定下来的修订：省略 revision_id 的兼容请求也能从这里看到实际引用
+        "revision_id": revision_id,
+        "task_id": str(body.get("task_id") or "") or None,
     }
 
 
@@ -441,8 +495,10 @@ async def _display_id(session: AsyncSession, run_id: str) -> str:
 async def _run_view(session: AsyncSession, run_id: str) -> dict:
     """run 单条视图：详情、WS 快照、报告都复用它，避免三处口径不一致。
 
-    progress 由 run_events 的阶段权重推导（domain/events.compute_progress），
-    stage 再按 api-design.md 的阈值换算，因此刷新页面不会丢进度。
+    progress 走 `_EVENT_PROGRESS_SQL`（与列表同一投影），stage 再按
+    api-design.md 的阈值换算，因此刷新页面不会丢进度。
+    cancel_requested 读**列**而不是事件：取消受理是持久化事实，不能被
+    事件分页/清理截断（spec §9.3、AC-CONTRACT-03）。
     """
     row = (
         await session.execute(
@@ -451,6 +507,7 @@ async def _run_view(session: AsyncSession, run_id: str) -> dict:
                 "       r.state, r.outcome, r.reason_code, r.not_tested_reason,"
                 "       r.resource_id, r.parent_run_id, r.request_key,"
                 "       r.started_at, r.ended_at, r.created_at, r.config_snapshot,"
+                "       r.cancel_requested_at, r.cancel_requested_by,"
                 "       a.name AS application_name, tr.task_id, tr.test_type,"
                 "       t.name AS task_name, er.resource_key AS resource_name"
                 "  FROM test_runs r"
@@ -466,13 +523,23 @@ async def _run_view(session: AsyncSession, run_id: str) -> dict:
     if row is None:
         raise not_found("run", str(run_id))
     project_id = str(row["project_id"])
-    events = await events_mod.list_events(
-        session, project_id=project_id, run_id=str(run_id), limit=500
-    )
-    progress = events_mod.compute_progress(events)
+    progress_row = (
+        await session.execute(text(_EVENT_PROGRESS_SQL), {"run_ids": [row["id"]]})
+    ).mappings().first()
+    progress = int(progress_row["progress"] or 0) if progress_row else None
+    last_sequence = int(progress_row["last_sequence"] or 0) if progress_row else 0
     terminal = runs_mod.is_terminal(str(row["state"]))
-    stage = events_mod.stage_number(progress, terminal=terminal)
-    cancel_requested = any(e.get("event_type") == "cancel_requested" for e in events)
+    stage = events_mod.stage_number(progress or 0, terminal=terminal)
+    cancel_requested = row["cancel_requested_at"] is not None
+    components = (
+        await session.execute(
+            text(
+                "SELECT kind, state, outcome, created_at "
+                "FROM run_components WHERE run_id = :run_id ORDER BY kind"
+            ),
+            {"run_id": row["id"]},
+        )
+    ).mappings().all()
     duration_s = None
     if row["started_at"] and row["ended_at"]:
         duration_s = int((row["ended_at"] - row["started_at"]).total_seconds())
@@ -500,7 +567,20 @@ async def _run_view(session: AsyncSession, run_id: str) -> dict:
         "resource": row["resource_name"],
         "progress": progress,
         "stage": stage,
+        "last_sequence": last_sequence,
+        "components": [
+            {
+                "component": c["kind"],
+                "kind": c["kind"],
+                "state": c["state"],
+                "outcome": c["outcome"],
+                "created_at": c["created_at"],
+            }
+            for c in components
+        ],
         "cancel_requested": cancel_requested,
+        "cancel_requested_at": row["cancel_requested_at"],
+        "cancel_requested_by": row["cancel_requested_by"],
         "parent_run_id": str(row["parent_run_id"]) if row["parent_run_id"] else None,
         "request_key": row["request_key"],
         "created_at": row["created_at"],
@@ -527,6 +607,8 @@ async def create_run(
                 "display_id": view["display_id"],
                 "state": view["state"],
                 "outcome": view["outcome"],
+                "revision_id": created["revision_id"],
+                "task_id": created["task_id"],
                 "duplicate": True,
             },
         )
@@ -536,7 +618,14 @@ async def create_run(
     )
     return JSONResponse(
         status_code=201,
-        content={"id": run_id, "display_id": view["display_id"], "state": view["state"]},
+        content={
+            "id": run_id,
+            "display_id": view["display_id"],
+            "state": view["state"],
+            # 本次真正固定的修订（兼容请求省略 revision_id 时由服务端解析并返回）
+            "revision_id": created["revision_id"],
+            "task_id": created["task_id"],
+        },
     )
 
 
@@ -547,32 +636,76 @@ async def list_run_events(
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """run_events 增量拉取：WS 断线重连、刷新后补进度都靠它。"""
+    """run_events 增量拉取：WS 断线重连、刷新后补进度都靠它。
+
+    分页语义（spec §9.3）：total 是**本页条数**；next_after 是下一页的起点
+    （本页最后一条的 sequence，空页则沿用请求的 after）；has_more 表示后面还有。
+    客户端循环补拉直到 has_more=false，按 (run_id, sequence) 去重。
+    """
     project_id = await _project_of(session, run_id)
-    items = await events_mod.list_events(
-        session, project_id=project_id, run_id=str(run_id), after_sequence=after, limit=limit
+    # 多取一条判断 has_more，避免"最后一页刚好满页"时让客户端再空跑一次
+    fetched = await events_mod.list_events(
+        session,
+        project_id=project_id,
+        run_id=str(run_id),
+        after_sequence=after,
+        limit=limit + 1,
     )
-    return {"items": items, "total": len(items), "after": after}
+    has_more = len(fetched) > limit
+    items = fetched[:limit]
+    next_after = int(items[-1]["sequence"]) if items else after
+    return {
+        "items": items,
+        "total": len(items),
+        "after": after,
+        "next_after": next_after,
+        "has_more": has_more,
+    }
 
 
 @router.post("/runs/{run_id}/cancel", status_code=202)
 async def cancel_run(run_id: str, session: AsyncSession = Depends(get_session)) -> dict:
-    """取消 run。
+    """取消 run：先受理（202），再由执行侧收敛（spec §6.2、§9.1）。
 
-    queued 直接 cancelled（还没占设备，迁移即可）。执行中的只登记 cancel_requested
-    事件：真正落地必须由 runner 收到 heartbeat.cancel 后停设备、放 vendor 锁，API 再
-    释放 DB 租约（§7.1 释放顺序）；reconciler 负责清理卡死的执行态。
+    - 取消事实写进 `test_runs.cancel_requested_at`（重复受理保留首次时间），
+      不依赖事件流是否完整，也不因为重复点击多出一条事实；
+    - queued 的运行直接迁移到 cancelled（还没占设备）；
+    - 执行中的只受理、不改状态：runner 在 heartbeat 里看到 cancel 后停设备、
+      放 vendor 锁，再由 complete/fail 或 reconciler 收敛；如果它恰好完成，
+      终态就是真实完成态，**不会**被改写成 cancelled。
     """
     project_id = await _project_of(session, run_id)
-    state = str(
-        (
-            await session.execute(
-                text("SELECT state FROM test_runs WHERE id::text = :id"), {"id": str(run_id)}
-            )
-        ).scalar_one()
-    )
-    if runs_mod.is_terminal(state):
-        raise state_conflict(run_id, state, "non_terminal")
+    terminal = sorted(runs_mod.TERMINAL_STATES)
+    placeholders = ", ".join(f":t{i}" for i in range(len(terminal)))
+    params: dict[str, object] = {"id": str(run_id), "actor": "web"}
+    params.update({f"t{i}": state for i, state in enumerate(terminal)})
+
+    # 条件 UPDATE：终态不受理（并发下由 WHERE 兜底，避免"读到 running 再被改成
+    # completed"的窗口里伪造一次 cancelled 事实）。
+    row = (
+        await session.execute(
+            text(
+                "UPDATE test_runs"
+                "   SET cancel_requested_at = COALESCE(cancel_requested_at, now()),"
+                "       cancel_requested_by = COALESCE(cancel_requested_by, :actor)"
+                f" WHERE id::text = :id AND state NOT IN ({placeholders})"
+                " RETURNING state, cancel_requested_at"
+            ),
+            params,
+        )
+    ).mappings().first()
+    if row is None:
+        current = str(
+            (
+                await session.execute(
+                    text("SELECT state FROM test_runs WHERE id::text = :id"),
+                    {"id": str(run_id)},
+                )
+            ).scalar_one()
+        )
+        raise state_conflict(run_id, current, "non_terminal")
+
+    state = str(row["state"])
     await events_mod.append_event(
         session,
         project_id=project_id,
@@ -583,29 +716,42 @@ async def cancel_run(run_id: str, session: AsyncSession = Depends(get_session)) 
         payload={"requested_by": "web", "from_state": state},
     )
     if state == runs_mod.STATE_QUEUED:
-        await runs_mod.transition(
-            session,
-            str(run_id),
-            runs_mod.STATE_QUEUED,
-            runs_mod.STATE_CANCELLED,
-            reason="cancel_requested",
-            actor="web",
-        )
-    current = str(
-        (
-            await session.execute(
-                text("SELECT state FROM test_runs WHERE id::text = :id"), {"id": str(run_id)}
+        try:
+            await runs_mod.transition(
+                session,
+                str(run_id),
+                runs_mod.STATE_QUEUED,
+                runs_mod.STATE_CANCELLED,
+                reason="cancel_requested",
+                actor="web",
             )
-        ).scalar_one()
-    )
+        except Exception:  # noqa: BLE001 - 与 dispatcher 抢同一行时交给 reconciler
+            # 取消事实已经受理，dispatcher 抢先把它领走不算失败：
+            # reconciler 会看到 cancel_requested_at 并收敛，这里按当前状态回 202。
+            pass
+    final = (
+        await session.execute(
+            text("SELECT state, outcome FROM test_runs WHERE id::text = :id"),
+            {"id": str(run_id)},
+        )
+    ).mappings().one()
+    current = str(final["state"])
     if runs_mod.is_terminal(current):
-        hub_mod.publish(str(run_id), {"type": "finished", "state": current, "outcome": None});
+        hub_mod.publish(
+            str(run_id),
+            {"type": "finished", "state": current, "outcome": final["outcome"]},
+        )
     else:
         hub_mod.publish(
             str(run_id),
             {"type": "event", "kind": "cancel_requested", "name": None, "at": None},
         )
-    return {"id": str(run_id), "state": current, "cancel_requested": True}
+    return {
+        "id": str(run_id),
+        "state": current,
+        "cancel_requested": True,
+        "cancel_requested_at": row["cancel_requested_at"],
+    }
 
 
 @router.get("/runs/{run_id}/artifacts")
@@ -728,7 +874,8 @@ async def import_run(
 
     payload = dict(body)
     payload["source"] = "import"
-    created = await _insert_run(session, payload)
+    # 内部通道：允许 source=import 与 source_dir，且可省略 application_id（补录历史产物）
+    created = await _insert_run(session, payload, internal=True)
     await session.commit()
     run_id = str(created["id"])
     project_id = str(created["project_id"])
