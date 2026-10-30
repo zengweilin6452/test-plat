@@ -197,6 +197,8 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
   const [selected, setSelected] = useState<SnapshotTreeNode | null>(null)
   const [locatorBy, setLocatorBy] = useState<LocatorBy>('text')
   const [locator, setLocator] = useState('')
+  /** 图像匹配阈值（AC-DBG-05）：0.10-1.00；越界在提交前拦下 */
+  const [matchThreshold, setMatchThreshold] = useState('0.80')
   const [matches, setMatches] = useState<LocatorMatch[] | null>(null)
   /** 图像匹配的相关系数（vendor /templates/validate 的 scores，与 matches 对齐） */
   const [scores, setScores] = useState<number[] | null>(null)
@@ -515,14 +517,23 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
    * 图像目标必须走 /templates/validate：vendor 的 /locators/validate 对 image
    * 目标解包 3 元组、实际返回 4 个值，稳定 500。 */
   const validateMutation = useMutation({
-    mutationFn: (input: { by: LocatorBy; value: string }) => {
+    mutationFn: (input: { by: LocatorBy; value: string; threshold?: string }) => {
       const id = sessionRef.current
       if (id === null) throw new Error('缺少调试会话')
       if (!input.value.trim()) throw new Error('定位值不能为空')
-      const target = { by: input.by, value: input.value.trim() }
-      return input.by === 'image'
-        ? validateTemplate(id, { target })
-        : validateLocator(id, target)
+      const target: { by: LocatorBy; value: string; confidence?: number } = {
+        by: input.by,
+        value: input.value.trim(),
+      }
+      if (input.by === 'image') {
+        const threshold = Number(matchThreshold)
+        if (!Number.isFinite(threshold) || threshold < 0.1 || threshold > 1.0) {
+          throw new Error('阈值必须在 0.10-1.00 之间')
+        }
+        target.confidence = threshold
+        return validateTemplate(id, { target })
+      }
+      return validateLocator(id, target)
     },
     onSuccess: (result) => {
       setValidateError(null)
@@ -904,12 +915,29 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
                       />
                     </label>
                   </div>
+                  {locatorBy === 'image' ? (
+                    <label className="muted small">
+                      阈值 0.10-1.00
+                      <input
+                        value={matchThreshold}
+                        onChange={(event) => setMatchThreshold(event.target.value)}
+                        style={{ width: 72 }}
+                        aria-label="图像匹配阈值"
+                      />
+                    </label>
+                  ) : null}
                   <Button
                     kind="primary"
                     size="small"
                     icon="check"
                     disabled={!locator.trim() || validateMutation.isPending}
-                    onClick={() => validateMutation.mutate({ by: locatorBy, value: locator })}
+                    onClick={() =>
+                      validateMutation.mutate({
+                        by: locatorBy,
+                        value: locator,
+                        threshold: matchThreshold,
+                      })
+                    }
                   >
                     {validateMutation.isPending ? '验证中…' : '验证定位'}
                   </Button>
