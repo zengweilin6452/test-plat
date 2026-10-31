@@ -721,3 +721,6 @@ body.debug-pane-open .main {
 /* 调试工作区：页面级（原型 nativeInspectorPage），不再是右侧浮层 */
 .debug-workspace { padding: 0 0 var(--space-9); }
 .debug-workspace-body { display: grid; gap: var(--space-9); }
+/* 图像模板模式：隐藏层级树与元素描述列，聚焦图像流程（原型 inspectMode） */
+.inspector.mode-image > div:nth-child(2),
+.inspector.mode-image > section:nth-child(3) { display: none; }

@@ -209,6 +209,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   const [snapshotId, setSnapshotId] = useState<string | null>(null)
   const [treeError, setTreeError] = useState<string | null>(null)
   const [selected, setSelected] = useState<SnapshotTreeNode | null>(null)
+  const [inspectMode, setInspectMode] = useState<'native' | 'image'>('native')
   const [locatorBy, setLocatorBy] = useState<LocatorBy>('text')
   const [locator, setLocator] = useState('')
   /** 图像匹配阈值（AC-DBG-05）：0.10-1.00；越界在提交前拦下 */
@@ -694,6 +695,19 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         </select>
         <Badge tone={wsTone} dot>{wsText}</Badge>
         <span className="spacer" />
+        <div className="flex wrap" role="group" aria-label="定位方式">
+          {([['native', '原生节点'], ['image', '图像模板']] as const).map(([value, label]) => (
+            <Button
+              key={value}
+              size="small"
+              kind={inspectMode === value ? 'primary' : 'default'}
+              aria-pressed={inspectMode === value}
+              onClick={() => setInspectMode(value)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
         <Button size="small" onClick={handleClose}>返回设备池</Button>
         <Button
           kind="primary"
@@ -731,7 +745,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         ) : null}
 
         {session ? (
-          <div className="inspector">
+          <div className={'inspector' + (inspectMode === 'image' ? ' mode-image' : '')}>
             {/* 左栏：实时预览（命中框 / 框选都叠在这里） */}
             <div>
               <section className="debug-section">
