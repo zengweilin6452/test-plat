@@ -25,3 +25,9 @@
 
 - 真机调试链路验收通过：小米 2206123SC（serial 749622c9）经平台 API 建会话（3s active，vendor viewer 13444）→ 真实截屏 1080x2400 → 控件树 91 个 resource-id 节点 → resource-id 定位验证唯一匹配 → 从真机屏幕裁剪登记模板（sha256 34c4ffd5…）→ 图像匹配唯一命中（score 1.0，坐标与裁剪区域一致）→ 模板进入共享库（与工单 25 执行锁定同源）→ 会话关闭设备释放。
 - 过程记录与使用要点见 `.scratch/prototype-alignment/real-device-debug-acceptance.md`；证据 `real-device-snapshot.png`。
+
+## Comments（2026-10-31 调试工作区原型返工 + 连接故障排查）
+
+- **UI 返工**（be389a8、baa528e、978a77a、49aa268 及合并）：调试从右侧抽屉改为原型 `nativeInspectorPage` 页面内工作区（UI 自动化页"调试"标签，工具条 = 设备下拉 + 连接状态 + 原生节点/图像模板模式切换 + 返回设备池 + 采集检查）；画面套**原型 .phone 手机外壳**（深色边框圆角 + 摄像头条，内嵌真机 WS 实时预览）；三栏 inspector（画面 | UI 层级树 | 元素与定位描述）。
+- **连接故障排查**（用户报"没法连接手机"）：根因是宿主 `.runtime/device-locks/` 里 749622c9 的陈旧本地锁——此前热重载硬杀 runner 未释放锁；vendor 锁的陈旧判定只看持有 PID 是否存活，而 Windows 复用了该 PID（NVIDIA Overlay），导致新 runner 一律 local_lease_busy 退出、会话秒关。删除该陈旧锁文件后真机调试恢复正常（已连接 → 采集检查出快照与层级树）。
+- **产品缺陷待修**（建议下轮）：① 本地锁陈旧判定应校验 PID + 进程名（或创建时间），不能被 PID 复用骗过；② 平台关闭会话时应顺带清理本地锁文件（当前只 kill 进程树）。另：前端 Vite 需以 `--host` 在宿主起（应用预览沙箱内起的实例宿主浏览器不可达）。
