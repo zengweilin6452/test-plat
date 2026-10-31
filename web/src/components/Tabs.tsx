@@ -40,7 +40,7 @@ export function Tabs<T extends string>({
             type="button"
             role="tab"
             aria-selected={on}
-            className={on ? 'active' : undefined}
+            className={'tab' + (on ? ' active' : '')}
             onClick={() => onChange(item.value)}
           >
             {item.label}
