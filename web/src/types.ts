@@ -66,73 +66,6 @@ export type DisplayStatus =
   | 'cancelled'
   | 'ready'
 
-export interface TargetApp {
-  platform: Platform
-  /** 应用名称 */
-  name: string
-  /** Android 包名 / iOS Bundle ID / Web 站点地址 */
-  identifier: string
-  /** 该端执行能力说明（已有组件基础 / 规划中） */
-  capability: string
-}
-
-export interface RunSummary {
-  id: string
-  taskId: string
-  name: string
-  platform: Platform
-  module: TestModule
-  state: RunState
-  /** completed 前必须为 null */
-  outcome: RunOutcome | null
-  /** errored 时的原因码，展示为徽章 */
-  errorCode?: string | null
-  /** 0–100，由 run_events 的进度事件推导，不做前端模拟 */
-  progress?: number
-  resourceLabel?: string | null
-  build?: string | null
-  suite?: string | null
-  startedAt?: string | null
-  finishedAt?: string | null
-  parentRunId?: string | null
-}
-
-export interface MetricSummary {
-  metricKey: string
-  name: string
-  unit: string
-  /** null = 缺失或该设备不支持，必须配合 missingReason 展示 */
-  value: number | null
-  statistic: 'median' | 'p95' | 'mean' | 'min' | 'max'
-  sampleCount: number | null
-  missingReason?: string | null
-  baselineValue?: number | null
-  /** 基线不可比时给出原因（如设备档案不同） */
-  baselineNotComparable?: string | null
-}
-
-/** gate_evaluations 的一行，结论由后端给出，前端只展示 */
-export interface GateCheck {
-  metricKey: string
-  name: string
-  value: number | null
-  threshold: number
-  operator: 'lt' | 'le' | 'gt' | 'ge'
-  unit: string
-  level: 'warn' | 'fail'
-  sampleCount: number | null
-  satisfied: boolean
-}
-
-export interface GateEvaluation {
-  id: string
-  mode: GateMode
-  verdict: RunOutcome
-  reasonCode?: string | null
-  reasonText?: string | null
-  checks: GateCheck[]
-}
-
 export interface ResourceSummary {
   id: string
   name: string
@@ -451,35 +384,3 @@ export interface BuildsResponse {
   total: number
 }
 
-/** GET /api/v1/suites 的单条 */
-export interface SuiteRecord {
-  id: string
-  name: string
-  test_type: 'ui' | 'performance' | 'joint'
-  application: { id: string; name: string; platform: string }
-  version_count?: number
-  latest_version?: { id: string; version: number } | null
-  [key: string]: unknown
-}
-
-export interface SuitesResponse {
-  items: SuiteRecord[]
-  total?: number
-}
-
-/** GET /api/v1/suites/{id}/versions 的单条 */
-export interface SuiteVersionRecord {
-  id: string
-  suite_id: string
-  version: number
-  case_count?: number
-  has_code_copy?: boolean
-  manifest?: Record<string, unknown>
-  created_at?: string | null
-  [key: string]: unknown
-}
-
-export interface SuiteVersionsResponse {
-  items: SuiteVersionRecord[]
-  total?: number
-}

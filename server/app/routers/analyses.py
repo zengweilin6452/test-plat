@@ -48,6 +48,8 @@ from ..domain.gates import (
     REASON_RUN_INCOMPLETE,
     REASON_SAMPLE_BELOW_MIN,
 )
+from ..domain.metrics_view import median_metric_view
+from ..domain.metrics_view import metric_row_view as _metric_view
 from ..domain.profiles import ProfileNormalizationError, normalize_profile
 
 router = APIRouter(tags=["analyses"])
@@ -166,27 +168,6 @@ async def _load_metrics(
     return grouped
 
 
-def _metric_view(row: dict[str, Any]) -> dict[str, Any]:
-    """一行 metric_summaries -> API 视图：缺失指标带 missing_reason，值恒为 null。"""
-    return {
-        "id": row["id"],
-        "component_id": row["component_id"],
-        "key": row["metric_key"],
-        "metric_key": row["metric_key"],
-        "metric_version": row["metric_version"],
-        "unit": row["unit"],
-        "scope": row["scope"],
-        "window_key": row["window_key"],
-        "statistic": row["statistic"],
-        "sample_count": row["sample_count"],
-        # 缺失指标这里是 None，前端显示「—」而不是 0
-        "value": row["value"],
-        "supported": row["missing_reason"] != "device_unsupported",
-        "missing_reason": row["missing_reason"],
-        "missing_reason_text": row["missing_reason_text"],
-    }
-
-
 def _is_complete(run: dict[str, Any]) -> bool:
     return run["state"] == "completed"
 
@@ -287,23 +268,7 @@ async def _analysis_for_run(
         for row in by_component.get(perf_component["id"], []):
             if row["statistic"] != "median":
                 continue
-            metric_views.append(
-                {
-                    "key": row["metric_key"],
-                    "metric_key": row["metric_key"],
-                    "statistic": row["statistic"],
-                    "scope": row["scope"],
-                    "window_key": row["window_key"],
-                    "metric_version": row["metric_version"],
-                    "median": row["value"],
-                    "value": row["value"],
-                    "unit": row["unit"],
-                    "sample_count": row["sample_count"],
-                    "supported": row["missing_reason"] != "device_unsupported",
-                    "missing_reason": row["missing_reason"],
-                    "missing_reason_text": row["missing_reason_text"],
-                }
-            )
+            metric_views.append(median_metric_view(row))
 
     return {
         "run": {

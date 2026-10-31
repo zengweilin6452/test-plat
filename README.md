@@ -87,9 +87,9 @@ D:\python312\python.exe scripts/gen_schema_doc.py
 ## 测试
 
 ```powershell
-# 后端全量（需要 DB 的集成测试用 TESTDOCK_TEST_DATABASE_URL，缺省探测 55432 共享库）
+# 后端全量（不设 TESTDOCK_TEST_DATABASE_URL 时，conftest 自动起独立临时 PG 实例；
+# 勿把该变量指回 55432 共享开发库——dev server 的调度器会认领测试排队的 run）
 cd server
-set TESTDOCK_TEST_DATABASE_URL=postgresql+psycopg://testdock@127.0.0.1:55432/testdock
 D:\python312\python.exe -m pytest tests -q
 
 # 前端类型检查与构建
@@ -104,5 +104,6 @@ npm run build
 - 缺失指标不写 0：`metric_summaries.value` 为 NULL 并带 `missing_reason`
 - 资源租约互斥不靠约定：部分唯一索引 + fencing token 强制
 - 非 completed 运行 `outcome` 必须 NULL（completed + failed 属于测试断言失败，不是执行错误）
-- `app/` 禁止 import `vendor/`（AST 级测试 `test_no_vendor_import` 把关），
-  vendor 能力只能经 `server/runner_pkg/testdock_runner` 子进程
+- `app/` 禁止 import `vendor/`（AST 级测试 `test_no_vendor_import.py` 把关：模块顶层一律禁止，
+  函数内只读 import 仅白名单 `app/integrations/mobile_perf.py` 一处），
+  vendor 能力主通道是 `server/runner_pkg/testdock_runner` 子进程

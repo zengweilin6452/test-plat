@@ -308,7 +308,6 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     createPendingRef.current = true
     createMutation.mutate()
     // 跟随 open 与目标设备变化；session/mutation 用 ref 守卫避免重复建会话
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, target?.serial])
 
   const detailQuery = useQuery({
@@ -366,7 +365,6 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     return () => {
       if (sessionRef.current !== null) unmountCloseRef.current()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /** Esc 关闭（原先是原生 <dialog> 自带的行为） */
@@ -1037,7 +1035,6 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                     <label>
                       定位方式
                       <select
-                        className="search"
                         value={locatorBy}
                         onChange={(event) => setLocatorBy(event.target.value as LocatorBy)}
                       >
@@ -1049,7 +1046,6 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                     <label>
                       定位值
                       <input
-                        className="search"
                         value={locator}
                         onChange={(event) => setLocator(event.target.value)}
                         placeholder={locatorBy === 'image' ? '模板逻辑名，如 buttons/confirm.png' : '文本 / resource-id / xpath'}
@@ -1170,7 +1166,6 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                   <label>
                     x
                     <input
-                      className="search"
                       inputMode="numeric"
                       value={region ? String(region.x) : ''}
                       onChange={(event) => setRegion(editRegion(region, 'x', event.target.value))}
@@ -1179,7 +1174,6 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                   <label>
                     y
                     <input
-                      className="search"
                       inputMode="numeric"
                       value={region ? String(region.y) : ''}
                       onChange={(event) => setRegion(editRegion(region, 'y', event.target.value))}
@@ -1188,7 +1182,6 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                   <label>
                     宽
                     <input
-                      className="search"
                       inputMode="numeric"
                       value={region ? String(region.w) : ''}
                       onChange={(event) => setRegion(editRegion(region, 'w', event.target.value))}
@@ -1197,7 +1190,6 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                   <label>
                     高
                     <input
-                      className="search"
                       inputMode="numeric"
                       value={region ? String(region.h) : ''}
                       onChange={(event) => setRegion(editRegion(region, 'h', event.target.value))}
@@ -1206,7 +1198,6 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                   <label className="full">
                     模板逻辑名（.png，POSIX 相对路径）
                     <input
-                      className="search"
                       value={newLogical}
                       onChange={(event) => setNewLogical(event.target.value)}
                       placeholder="buttons/confirm.png"

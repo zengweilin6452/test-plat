@@ -868,7 +868,7 @@ async def download_run_artifact(
     if artifact.get("availability") != "available":
         raise not_found("artifact", str(artifact_id))
     path = artifacts_mod.resolve_storage_path(str(artifact["storage_key"]))
-    if not path.is_file():
+    if path is None or not path.is_file():
         raise not_found("artifact", str(artifact_id))
     return FileResponse(
         str(path),

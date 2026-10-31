@@ -200,10 +200,14 @@ def test_identity_mismatch_blocks_dispatch(client, project, make_run, sync_engin
             {"id": outcome.run_id},
         ).scalar_one()
     assert state == "errored"
-    # 租约必须释放：设备不能被失败运行占死
+    # 租约必须释放：设备不能被失败运行占死（限定本测试项目，避免共享库串扰）
     with sync_engine.connect() as conn:
         live = conn.execute(
-            text("SELECT count(*) FROM resource_leases WHERE released_at IS NULL")
+            text(
+                "SELECT count(*) FROM resource_leases "
+                "WHERE released_at IS NULL AND project_id = CAST(:pid AS uuid)"
+            ),
+            {"pid": project["project_id"]},
         ).scalar_one()
     assert live == 0
 

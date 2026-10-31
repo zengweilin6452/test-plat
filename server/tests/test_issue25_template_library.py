@@ -97,7 +97,11 @@ def test_pins_missing_template_blocks_dispatch(client, project, make_run, sync_e
     assert state == "errored"
     with sync_engine.connect() as conn:
         live = conn.execute(
-            text("SELECT count(*) FROM resource_leases WHERE released_at IS NULL")
+            text(
+                "SELECT count(*) FROM resource_leases "
+                "WHERE released_at IS NULL AND project_id = CAST(:pid AS uuid)"
+            ),
+            {"pid": project["project_id"]},
         ).scalar_one()
     assert live == 0, "阻断后租约必须释放"
 

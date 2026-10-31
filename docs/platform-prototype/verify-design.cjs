@@ -4,7 +4,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8').replace(/\r\n/g, '\n');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 new vm.Script(script);
 const tables = JSON.parse(script.match(/const databaseTables=(\[[^\n]*\]);/)[1]);

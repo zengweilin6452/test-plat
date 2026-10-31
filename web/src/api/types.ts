@@ -253,6 +253,74 @@ export interface AuditEventsResponse {
   total?: number
 }
 
+/** ---- 套件与用例（GET /api/v1/suites、/suites/{id}/versions；P2 suites router）---- */
+
+/**
+ * 用例清单没有独立表：存在 `suite_versions.manifest.cases`（jsonb）。
+ * 字段名以 `domain/suite.normalize_case` 为准，缺失一律按"没有"处理。
+ */
+export interface SuiteCaseRecord {
+  case_key: string
+  node_id?: string | null
+  file?: string | null
+  entry?: string | null
+  tags?: string[] | null
+  [key: string]: unknown
+}
+
+export interface SuiteManifest {
+  schema_version?: number
+  case_count?: number
+  cases?: SuiteCaseRecord[] | null
+  /** discover 时写入的套件根目录（`extra` 合并进 manifest） */
+  suite_root?: string | null
+  [key: string]: unknown
+}
+
+export interface SuiteVersionRecord {
+  id: string
+  suite_id: string
+  version: number
+  source_ref?: string | null
+  source_commit?: string | null
+  case_count: number
+  case_keys?: string[] | null
+  /** UI / joint 版本是否保留固定代码副本（services/suites.py serialize_version） */
+  has_code_copy?: boolean
+  manifest?: SuiteManifest | null
+  created_at?: string | null
+}
+
+export interface SuiteVersionsResponse {
+  items: SuiteVersionRecord[]
+  total?: number
+}
+
+/** GET /api/v1/suites 的单条（services/suites._suite_dict） */
+export interface SuiteRecord {
+  id: string
+  project_id: string
+  name: string
+  /** ui / performance / joint（task_revisions.test_type 同一套枚举） */
+  test_type: string
+  application: { id: string; name: string; platform: string }
+  created_at?: string | null
+  archived_at?: string | null
+  version_count: number
+  /** 没有 discover 过的套件为 null —— 此时没有用例可展示 */
+  latest_version: {
+    id: string
+    version: number
+    case_count: number
+    created_at?: string | null
+  } | null
+}
+
+export interface SuitesResponse {
+  items: SuiteRecord[]
+  total?: number
+}
+
 /** GET /api/v1/health：{status, db, vendor:{mobile_auto,mobile_perf,versions}, runners:{active}} */
 export interface HealthDoc {
   status: string

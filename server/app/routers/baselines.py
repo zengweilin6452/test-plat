@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..domain.gates import snapshot_from_rows
+from ..domain.metrics_view import missing_fields
 from ..domain.profiles import ProfileNormalizationError, normalize_profile
 
 router = APIRouter(tags=["baselines"])
@@ -94,9 +95,7 @@ def _snapshot_preview(snapshot: Any) -> list[dict[str, Any]]:
                 "median": row.get("value"),
                 "unit": row.get("unit"),
                 "sample_count": row.get("sample_count"),
-                "supported": row.get("missing_reason") != "device_unsupported",
-                "missing_reason": row.get("missing_reason"),
-                "missing_reason_text": row.get("missing_reason_text"),
+                **missing_fields(row),
             }
         )
     return preview

@@ -70,12 +70,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _control_client(args: argparse.Namespace) -> ControlClient | None:
-    if not args.control_url or not args.control_token:
+    # token 优先取环境变量（spawn 侧不把它放进 argv，避免进程列表泄露）；
+    # --control-token 参数保留给手工调试。
+    token = args.control_token or os.environ.get("TESTDOCK_CONTROL_TOKEN", "")
+    if not args.control_url or not token:
         emit_text("control_disabled")
         return None
     from .protocol import DebugControlClient
     client_type = DebugControlClient if args.command == "debug" else ControlClient
-    return client_type(args.control_url, args.control_token, args.run_id)
+    return client_type(args.control_url, token, args.run_id)
 
 
 def _job_options(args: argparse.Namespace):

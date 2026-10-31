@@ -5,7 +5,8 @@
 runner 是被 spawn 出来的**独立进程**，它需要和 API 共享一个秘密来证明
 "我是这次 run 的合法执行者"。这个秘密不能写进 .env（重启即失效且容易泄漏到
 版本库），也不该让 runner 读数据库。折中方案：API 启动时生成随机 token，
-写入 data/control.token（权限 0600），spawn 时通过 --control-token 参数注入；
+写入 data/control.token（权限 0600），spawn 时经环境变量 ENV_CONTROL_TOKEN
+注入（不放 argv——同机任何进程枚举进程列表都能看到命令行参数）；
 API 重启 -> 重新生成 -> 旧 runner 的下一次上报立刻 401，正好符合"重启后一切
 在途执行作废"的语义。
 

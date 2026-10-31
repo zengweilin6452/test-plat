@@ -17,8 +17,6 @@ import type {
   TasksResponse,
   TaskValidateResponse,
   BuildsResponse,
-  SuiteVersionsResponse,
-  SuitesResponse,
   TaskRecord,
 } from '../types'
 
@@ -102,20 +100,6 @@ export function fetchBuilds(applicationId: string, signal?: AbortSignal) {
   return api.get<BuildsResponse>('/builds', { application_id: applicationId }, signal)
 }
 
-/** GET /api/v1/suites?test_type= —— 套件清单（含最新版本摘要） */
-export function fetchSuites(testType: string | undefined, signal?: AbortSignal) {
-  return api.get<SuitesResponse>('/suites', { test_type: testType || undefined }, signal)
-}
-
-/** GET /api/v1/suites/{id}/versions —— 套件版本（version 倒序，带 case_count/has_code_copy） */
-export function fetchSuiteVersions(suiteId: string, signal?: AbortSignal) {
-  return api.get<SuiteVersionsResponse>(
-    '/suites/' + encodeURIComponent(suiteId) + '/versions',
-    undefined,
-    signal,
-  )
-}
-
 /** PATCH /api/v1/tasks/{id} —— CAS 补齐草稿的 build_id / suite_version_id */
 export function patchTask(
   taskId: string,
@@ -136,6 +120,24 @@ export function createRun(body: {
   return api.post<{ id: string; display_id: string; state: string; duplicate?: boolean }>(
     '/runs',
     body,
+  )
+}
+
+/** ---- 套件与用例（P2 suites router；用例清单在 suite_versions.manifest 里）---- */
+
+import type { SuiteVersionsResponse, SuitesResponse } from './types'
+
+/** GET /api/v1/suites —— 套件列表；test_type 精确过滤（ui / performance / joint） */
+export function fetchSuites(testType: string | undefined, signal?: AbortSignal) {
+  return api.get<SuitesResponse>('/suites', { test_type: testType }, signal)
+}
+
+/** GET /api/v1/suites/{id}/versions —— 版本列表（version 倒序，manifest 带用例清单） */
+export function fetchSuiteVersions(suiteId: string, signal?: AbortSignal) {
+  return api.get<SuiteVersionsResponse>(
+    '/suites/' + encodeURIComponent(suiteId) + '/versions',
+    undefined,
+    signal,
   )
 }
 

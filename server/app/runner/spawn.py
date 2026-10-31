@@ -166,7 +166,6 @@ def build_spec(
         "--run-id", str(run_id),
         "--artifacts-dir", str(artifacts_dir),
         "--control-url", control_url or ("http://%s:%d" % (settings.host, settings.port)),
-        "--control-token", control_token or "",
         "--fencing-token", str(lease.get("fencing_token") or 0),
     ]
     if serial:
@@ -202,6 +201,9 @@ def build_spec(
         argv.append("--fake")
 
     env = build_env(run_id=run_id)
+    # control token 走环境变量而非命令行：argv 在同机任何进程的枚举下都可见
+    # （Windows Get-CimInstance Win32_Process / Linux /proc/*/cmdline）。
+    env[control_mod.ENV_CONTROL_TOKEN] = control_token or ""
     if fake_runner_enabled():
         env["TESTDOCK_FAKE_RUNNER"] = "1"
         fake_outcome = str(config.get("fake_outcome") or "passed")

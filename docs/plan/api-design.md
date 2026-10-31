@@ -102,7 +102,10 @@ PATCH  /api/v1/tasks/{id}               # 仅未绑定 run；带 lock_version
 POST   /api/v1/tasks/{id}/validate      # readiness draft -> validated
 POST   /api/v1/tasks/{id}/archive
 GET    /api/v1/tasks/{id}/revisions
-POST   /api/v1/tasks/{id}/suites/discover  # pytest --collect-only
+
+GET    /api/v1/suites?test_type=ui|performance|joint   # 套件列表（含最新版本与用例数）
+GET    /api/v1/suites/{id}/versions                    # 版本倒序，manifest.cases 即用例清单
+POST   /api/v1/suites/{id}/discover                    # { suite_root, source_ref? } → pytest --collect-only
 ```
 
 ```json

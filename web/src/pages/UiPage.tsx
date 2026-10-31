@@ -4,7 +4,8 @@
  * 数据源：
  *  - 执行记录：GET /api/v1/runs 里 test_type='ui' 的运行
  *  - 调试 / 模板：平台代理到活动调试会话的 vendor viewer（见 DebugDrawer / TemplatesPanel）
- *  - 套件与用例清单还没有读接口，页面只显示空态，不伪造数据
+ *  - 套件：GET /api/v1/suites?test_type=ui；用例：GET /api/v1/suites/{id}/versions 里
+ *    最新版本的 manifest.cases（schema 没有 cases 表，清单就存在 jsonb 里）
  * 硬约束：断言结果与失败现场都来自后端，接口未接入时只显示空态。
  */
 import { useEffect, useMemo, useState } from 'react'
@@ -15,12 +16,19 @@ import {
   fetchResources,
   fetchApplications,
   fetchRuns,
+  fetchSuiteVersions,
+  fetchSuites,
   fetchTasks,
   fetchTemplates,
   updateTemplate,
 } from '../api/endpoints'
 import type { ResourceRecord } from '../types'
-import type { TemplateRecord } from '../api/types'
+import type {
+  SuiteCaseRecord,
+  SuiteRecord,
+  SuiteVersionRecord,
+  TemplateRecord,
+} from '../api/types'
 import { DebugDrawer, type DebugTarget } from '../components/DebugDrawer'
 import { StatusBadge } from '../components/Badge'
 import { Button } from '../components/Button'
@@ -41,7 +49,7 @@ import { useDebugHandoff } from '../store/debugHandoff'
 import { useAppScope } from '../store/app'
 import type { ApplicationRecord } from '../types'
 import { useTargetScope } from '../store/scope'
-import type { CreateTaskResponse, Platform, RunRecord, TaskRecord } from '../types'
+import type { CreateTaskResponse, Platform, RunRecord, TargetScope, TaskRecord } from '../types'
 
 type UiTab = 'runs' | 'suites' | 'cases' | 'debug' | 'templates'
 
@@ -52,6 +60,26 @@ const TABS: TabItem<UiTab>[] = [
   { value: 'debug', label: '调试' },
   { value: 'templates', label: '模板' },
 ]
+
+/**
+ * 目标端筛选：/suites 只支持 test_type 过滤，platform 过滤在页面做
+ * （与设备页按 platform 过滤同一口径，不伪造后端能力）。
+ */
+export function filterSuites(items: SuiteRecord[], scope: TargetScope): SuiteRecord[] {
+  return scope === 'all' ? items : items.filter((item) => item.application.platform === scope)
+}
+
+/**
+ * 选中的版本：后端按 version 倒序返回；选中的号不存在（换了套件、或新 discover
+ * 把版本号推到后面）时回落到最新版本，而不是显示一张空表。
+ */
+export function pickVersion(
+  versions: SuiteVersionRecord[],
+  versionNo: number | null,
+): SuiteVersionRecord | null {
+  if (versions.length === 0) return null
+  return versions.find((item) => item.version === versionNo) ?? versions[0]
+}
 
 export function UiPage() {
   const { targetScope, setTargetScope } = useTargetScope()
@@ -86,6 +114,9 @@ export function UiPage() {
   useEffect(() => {
     if (tab === 'debug') setDebugEngaged(true)
   }, [tab])
+  // 套件 / 用例页签：选中的套件与版本（versionNo 为 null 表示看最新版本）
+  const [suiteId, setSuiteId] = useState<string | null>(null)
+  const [versionNo, setVersionNo] = useState<number | null>(null)
   const planned = !isImplementedPlatform(targetScope)
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -162,6 +193,36 @@ export function UiPage() {
   const templatesError = templatesQuery.isError ? describeError(templatesQuery.error) : null
   const templates = templatesQuery.data?.templates ?? []
 
+  // ---- 套件 / 用例 tab ----
+  // 后端 P2 起就有 GET /suites 与 /suites/{id}/versions；用例清单不在独立表里，
+  // 而是 suite_versions.manifest.cases，所以"用例"页签读的是所选版本。
+  const suitesQuery = useQuery({
+    queryKey: ['suites', 'ui'],
+    queryFn: ({ signal }) => fetchSuites('ui', signal),
+    enabled: !planned && (tab === 'suites' || tab === 'cases'),
+    retry: false,
+  })
+  const suites = useMemo(
+    () => filterSuites(suitesQuery.data?.items ?? [], targetScope),
+    [suitesQuery.data, targetScope],
+  )
+
+  // 未点过套件时默认看第一个：切到「用例」页签不需要先回套件页签点一下
+  const activeSuiteId = suiteId ?? suites[0]?.id ?? null
+  const activeSuite = suites.find((item) => item.id === activeSuiteId) ?? null
+
+  const versionsQuery = useQuery({
+    queryKey: ['suite-versions', activeSuiteId],
+    queryFn: ({ signal }) => fetchSuiteVersions(activeSuiteId as string, signal),
+    enabled: !planned && tab === 'cases' && Boolean(activeSuiteId),
+    retry: false,
+  })
+  const versions = versionsQuery.data?.items ?? []
+  const activeVersion = pickVersion(versions, versionNo)
+  const suiteCases: SuiteCaseRecord[] = activeVersion?.manifest?.cases ?? []
+  const suitesError = suitesQuery.isError ? describeError(suitesQuery.error) : null
+  const versionsError = versionsQuery.isError ? describeError(versionsQuery.error) : null
+
   const columns: Column<RunRecord>[] = [
     {
       key: 'name',
@@ -204,6 +265,108 @@ export function UiPage() {
           任务详情<span aria-hidden="true">›</span>
         </LinkButton>
       ),
+    },
+  ]
+
+  /** 打开某个套件的用例（切到「用例」页签并重置版本到最新） */
+  function openSuite(suite: SuiteRecord) {
+    setSuiteId(suite.id)
+    setVersionNo(null)
+    setTab('cases')
+  }
+
+  const suiteColumns: Column<SuiteRecord>[] = [
+    {
+      key: 'name',
+      header: '套件 / 应用',
+      render: (suite) => (
+        <>
+          <span className="task-name">{suite.name}</span>
+          <div className="task-sub">{suite.application.name}</div>
+        </>
+      ),
+    },
+    {
+      key: 'platform',
+      header: '目标端',
+      render: (suite) => (
+        <span className="module-pill">
+          {TARGET_CATALOG[suite.application.platform as Platform]?.label ??
+            suite.application.platform}
+        </span>
+      ),
+    },
+    {
+      key: 'version',
+      header: '最新版本',
+      render: (suite) =>
+        suite.latest_version ? (
+          <span className="mono">v{suite.latest_version.version}</span>
+        ) : (
+          <span className="muted small">未发现</span>
+        ),
+    },
+    {
+      key: 'cases',
+      header: '用例数',
+      align: 'right',
+      render: (suite) =>
+        suite.latest_version ? (
+          <span className="mono">{suite.latest_version.case_count}</span>
+        ) : (
+          <span className="muted">{DASH}</span>
+        ),
+    },
+    {
+      key: 'discovered',
+      header: '最近发现',
+      render: (suite) => (
+        <span className="muted small">
+          {suite.latest_version ? fmtDateTime(suite.latest_version.created_at) : DASH}
+        </span>
+      ),
+    },
+    {
+      key: 'action',
+      header: '操作',
+      align: 'right',
+      render: (suite) => (
+        <LinkButton
+          onClick={() => openSuite(suite)}
+          disabled={!suite.latest_version}
+          title={suite.latest_version ? undefined : '该套件还没有 discover 过，没有用例可看'}
+        >
+          查看用例<span aria-hidden="true">›</span>
+        </LinkButton>
+      ),
+    },
+  ]
+
+  const caseColumns: Column<SuiteCaseRecord>[] = [
+    {
+      key: 'case',
+      header: '用例',
+      render: (item) => <span className="mono small">{item.case_key}</span>,
+    },
+    {
+      key: 'file',
+      header: '文件',
+      render: (item) => <span className="muted small">{item.file ?? DASH}</span>,
+    },
+    {
+      key: 'entry',
+      header: '入口',
+      render: (item) => <span className="mono small">{item.entry ?? DASH}</span>,
+    },
+    {
+      key: 'tags',
+      header: '标签',
+      render: (item) =>
+        item.tags && item.tags.length > 0 ? (
+          <span className="muted small">{item.tags.join(' · ')}</span>
+        ) : (
+          <span className="muted">{DASH}</span>
+        ),
     },
   ]
 
@@ -257,12 +420,9 @@ export function UiPage() {
                 ? '调试会话与自动运行竞争同一资源租约；切页签保持会话，关闭工作区才释放'
                 : tab === 'templates'
                   ? '模板按调试会话隔离，经 vendor TemplateStore 管理（需先建立调试会话）'
-                  : '套件与用例的读接口在 P2 提供（test_suites / 用例表）'
-          }
-          actions={
-            <Button kind="soft" size="small" icon="download">
-              导出清单
-            </Button>
+                  : tab === 'suites'
+                    ? '套件来自 test_suites；用例数取自最新 discover 版本'
+                    : '用例清单存在套件版本的 manifest 里，每次 discover 追加新版本'
           }
         />
         {tab === 'runs' ? (
@@ -301,15 +461,143 @@ export function UiPage() {
             error={templatesError}
             onCreated={() => void queryClient.invalidateQueries({ queryKey: ['templates'] })}
           />
-        ) : (
-          tab === 'debug' ? null : (
-            <Empty
-              icon="layers"
-              title={tab === 'suites' ? '用例套件尚未接入' : '用例清单尚未接入'}
-              description="套件与用例的读接口（test_suites / 用例表）在 P2 提供。当前不展示任何占位数据。"
+        ) : tab === 'suites' ? (
+          <>
+            {suitesError ? (
+              <div className="mb" style={{ padding: '0 20px' }}>
+                <Notice tone="red" title={'套件列表获取失败（' + suitesError.code + '）'}>
+                  {suitesError.message}
+                </Notice>
+              </div>
+            ) : null}
+            <Table
+              columns={suiteColumns}
+              rows={suites}
+              rowKey={(suite) => suite.id}
+              ariaLabel="用例套件"
+              onRowClick={openSuite}
+              empty={
+                <Empty
+                  icon="layers"
+                  title={
+                    suitesQuery.isLoading
+                      ? '正在加载套件…'
+                      : targetScope !== 'all' && (suitesQuery.data?.items.length ?? 0) > 0
+                        ? // 套件存在但被目标端筛掉了：别让用户以为库里一个套件都没有
+                          TARGET_CATALOG[targetScope].label + ' 还没有登记套件'
+                        : '还没有登记任何套件'
+                  }
+                  description={
+                    suitesQuery.isLoading
+                      ? 'GET /api/v1/suites?test_type=ui'
+                      : '套件由后端登记；每个套件用 POST /api/v1/suites/{id}/discover 收集用例生成版本。'
+                  }
+                />
+              }
+              footer={<span>共 {suites.length} 个套件 · 类型 {MODULE_NAMES.ui}</span>}
             />
-          )
-        )}
+          </>
+        ) : tab === 'cases' ? (
+          <>
+            {suitesError ? (
+              <div className="mb" style={{ padding: '0 20px' }}>
+                <Notice tone="red" title={'套件列表获取失败（' + suitesError.code + '）'}>
+                  {suitesError.message}
+                </Notice>
+              </div>
+            ) : null}
+            {versionsError ? (
+              <div className="mb" style={{ padding: '0 20px' }}>
+                <Notice tone="red" title={'套件版本获取失败（' + versionsError.code + '）'}>
+                  {versionsError.message}
+                </Notice>
+              </div>
+            ) : null}
+            {activeSuiteId ? (
+              <div style={{ padding: '0 20px' }}>
+                <Toolbar>
+                  <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    套件
+                    <select
+                      value={activeSuiteId}
+                      onChange={(event) => {
+                        setSuiteId(event.target.value || null)
+                        setVersionNo(null)
+                      }}
+                      aria-label="选择套件"
+                    >
+                      {suites.map((suite) => (
+                        <option key={suite.id} value={suite.id}>
+                          {suite.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    版本
+                    <select
+                      value={activeVersion ? String(activeVersion.version) : ''}
+                      onChange={(event) =>
+                        setVersionNo(event.target.value ? Number(event.target.value) : null)
+                      }
+                      aria-label="选择版本"
+                      disabled={versions.length === 0}
+                    >
+                      {versions.map((version) => (
+                        <option key={version.id} value={String(version.version)}>
+                          v{version.version} · {version.case_count} 条
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {activeVersion ? (
+                    <span className="muted small">
+                      {activeVersion.source_commit ?? 'local'} · 发现于{' '}
+                      {fmtDateTime(activeVersion.created_at)}
+                      {activeVersion.manifest?.suite_root
+                        ? ' · ' + String(activeVersion.manifest.suite_root)
+                        : ''}
+                    </span>
+                  ) : null}
+                </Toolbar>
+              </div>
+            ) : null}
+            <Table
+              columns={caseColumns}
+              rows={suiteCases}
+              rowKey={(item, index) => item.case_key + ':' + index}
+              ariaLabel="套件用例清单"
+              empty={
+                <Empty
+                  icon="layers"
+                  title={
+                    !activeSuiteId
+                      ? '还没有可查看的套件'
+                      : versionsQuery.isLoading
+                        ? '正在加载用例…'
+                        : activeVersion
+                          ? '该版本没有用例清单'
+                          : '这个套件还没有 discover 过'
+                  }
+                  description={
+                    !activeSuiteId
+                      ? '先在「用例套件」页签登记套件，或在后端用 POST /api/v1/suites/{id}/discover 收集用例。'
+                      : activeVersion
+                        ? 'manifest.cases 为空：discover 收集到 0 条用例时后端会拒绝写入版本。'
+                        : 'POST /api/v1/suites/{id}/discover 会在宿主跑 pytest --collect-only 生成第一个版本。'
+                  }
+                />
+              }
+              footer={
+                activeVersion ? (
+                  <span>
+                    共 {suiteCases.length} 条用例 · {activeSuite?.name ?? ''} v{activeVersion.version}
+                  </span>
+                ) : null
+              }
+            />
+          </>
+        ) : null}
         {/* 原型 nativeInspectorPage：页面内工作区（设备下拉在 toolbar），不再是抽屉。
             隐藏而不卸载：切页签只改显示，调试会话与 WS 保持。 */}
         {debugEngaged ? (
@@ -350,7 +638,7 @@ function toDebugTarget(device: ResourceRecord): DebugTarget {
       ? '运行 ' + device.lease.run_id.slice(0, 8) + ' 占用中'
       : '调试会话占用中'
     : null
-  return { serial: device.resource_key ?? device.resource_key, label: device.name, leaseHint: hint }
+  return { serial: device.resource_key, label: device.name, leaseHint: hint }
 }
 
 /**
@@ -467,7 +755,6 @@ function TemplatesPanel({
         <label className="small">
           逻辑名（.png）
           <input
-            className="search"
             style={{ width: '100%' }}
             value={logical}
             onChange={(event) => setLogical(event.target.value)}
@@ -477,7 +764,6 @@ function TemplatesPanel({
         <label className="small">
           快照 id（调试抽屉「采集快照」返回）
           <input
-            className="search"
             style={{ width: '100%' }}
             value={snapshotId}
             onChange={(event) => setSnapshotId(event.target.value)}
@@ -491,7 +777,6 @@ function TemplatesPanel({
             <label className="small" key={key}>
               裁剪 {label}
               <input
-                className="search"
                 style={{ width: '100%' }}
                 inputMode="numeric"
                 value={region[key]}
@@ -503,7 +788,6 @@ function TemplatesPanel({
         <label className="small">
           期望旧摘要（覆盖同名模板时必填）
           <input
-            className="search"
             style={{ width: '100%' }}
             value={expectedSha}
             onChange={(event) => setExpectedSha(event.target.value)}

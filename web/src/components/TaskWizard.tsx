@@ -31,9 +31,9 @@ import type {
   CreateTaskResponse,
   Platform,
   ResourceRecord,
-  SuiteVersionRecord,
   TestModule,
 } from '../types'
+import type { SuiteVersionRecord } from '../api/types'
 import { Button } from './Button'
 import { Dialog } from './Dialog'
 import { Notice } from './Notice'
@@ -114,16 +114,16 @@ export function validateStep1(form: WizardForm): WizardErrors {
   const identifier = form.identifier.trim()
   if (!identifier) {
     errors.identifier =
-      form.platform === 'android' ? '请填写应用包名。' : form.platform === 'web' ? '请填写站点地址。' : '请填写 Bundle ID。'
+      form.platform === 'android' ? '所选应用未登记包名，请先在应用档案补全。' : form.platform === 'web' ? '所选应用未登记站点地址，请先在应用档案补全。' : '所选应用未登记 Bundle ID，请先在应用档案补全。'
   } else if (form.platform === 'android') {
     if (!PACKAGE_PATTERN.test(identifier)) {
-      errors.identifier = '请使用合法的应用包名，例如 com.example.app'
+      errors.identifier = '所选应用登记的包名不合法（应形如 com.example.app），请在应用档案修正。'
     } else if (identifier.length > PACKAGE_MAX) {
       errors.identifier = `包名最多 ${PACKAGE_MAX} 个字符。`
     }
   } else if (form.platform === 'web') {
     if (!isValidSiteUrl(identifier)) {
-      errors.identifier = '请填写以 http:// 或 https:// 开头的合法站点地址。'
+      errors.identifier = '所选应用登记的站点地址不合法（需 http/https URL），请在应用档案修正。'
     } else if (identifier.length > PACKAGE_MAX) {
       errors.identifier = `站点地址最多 ${PACKAGE_MAX} 个字符。`
     }
@@ -306,7 +306,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
     if (form.suiteVersionId && !suiteVersions.some((v) => v.id === form.suiteVersionId)) {
       setForm((prev) => ({ ...prev, suiteVersionId: '' }))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // 仅跟随版本清单数据变化，form/setForm 走函数式更新不需要进依赖
   }, [suiteVersionsQuery.data])
 
   // Android 才需要选设备；其它端不请求资源列表

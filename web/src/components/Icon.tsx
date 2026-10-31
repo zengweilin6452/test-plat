@@ -76,7 +76,10 @@ export function Icon({ name, size = 19, className, title }: IconProps) {
       aria-hidden={title ? undefined : true}
       role={title ? 'img' : undefined}
       focusable="false"
-      dangerouslySetInnerHTML={{ __html: title ? '<title>' + title + '</title>' + PATHS[name] : PATHS[name] }}
-    />
+    >
+      {title ? <title>{title}</title> : null}
+      {/* PATHS 是本模块静态常量表，不含任何外部输入 */}
+      <g dangerouslySetInnerHTML={{ __html: PATHS[name] }} />
+    </svg>
   )
 }

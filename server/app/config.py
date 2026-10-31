@@ -60,7 +60,7 @@ class Settings(BaseSettings):
 
     @property
     def control_token_path(self) -> Path:
-        """内部协议令牌文件（§8.3）：API 启动时生成，runner 通过 --control-token 读取。"""
+        """内部协议令牌文件（§8.3）：API 启动时生成，runner 经环境变量 TESTDOCK_CONTROL_TOKEN 获得。"""
         return self.data_dir / "control.token"
 
 

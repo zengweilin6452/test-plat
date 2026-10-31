@@ -36,6 +36,7 @@ DB CHECK（server/alembic/versions/0001_initial.py:474）：
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from collections.abc import Iterable
@@ -44,6 +45,8 @@ from pathlib import Path
 from typing import Any
 
 from ..domain.profiles import ProfileNormalizationError, normalize_profile
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "MISSING_DEVICE_UNSUPPORTED",
@@ -148,7 +151,12 @@ def metric_version(vendor_src: str | Path | None = None) -> str:
     try:
         report_module = _import_report_module(vendor_src)
         schema_version = int(report_module.SCHEMA_VERSION)
-    except Exception:  # pragma: no cover - vendor 缺失时退化，仍保持可写库
+    except Exception:  # noqa: BLE001 - vendor 缺失时退化，仍保持可写库；但要留下损坏证据
+        logger.warning(
+            "vendor mobile_perf 不可用或损坏，metric_version 退化为 %s",
+            METRIC_VERSION_LEGACY,
+            exc_info=True,
+        )
         return METRIC_VERSION_LEGACY
     return f"{schema_version}.0"
 
