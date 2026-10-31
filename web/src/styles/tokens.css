@@ -640,43 +640,10 @@ dialog.drawer { margin: 0 0 0 auto; width: min(570px, 100vw); height: 100dvh; ma
 .rev-row .rev-no { font-family: var(--font-mono); color: var(--blue); }
 .rev-row .rev-meta { color: var(--muted-faint); font-size: var(--fs-2xs); margin-top: 2px; }
 
-/* ── 调试工作区（P5：右侧全高面板，占住右边工作区）──────────
-   调试不再是浮在内容上的窄抽屉：面板从顶栏下沿贴到窗口底部、占右侧 56vw，
-   同时把 .main 收窄到剩下的宽度，页面内容留在左边，不会被盖住。
-   窗口放不下「侧栏 + 内容 + 面板」时（≤1440px）面板铺满工作区。 */
-:root { --debug-pane-w: clamp(760px, 56vw, 1120px); }
-
-.debug-pane {
-  position: fixed; top: var(--topbar-h); right: 0; bottom: 0;
-  width: var(--debug-pane-w); max-width: 100vw;
-  display: flex; flex-direction: column;
-  background: var(--paper); border-left: 1px solid var(--line);
-  box-shadow: -22px 0 52px rgba(16, 30, 54, .12); z-index: 40;
-}
-.debug-pane-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-7); padding: var(--space-7) 22px; border-bottom: 1px solid var(--line); }
-.debug-pane-head h2 { font-size: var(--fs-h3); margin: 0; }
-.debug-pane-head p { margin: 4px 0 0; color: var(--muted); font-size: var(--fs-sm); }
-.debug-pane-body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-8) 22px var(--space-10); }
-.debug-pane-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-7); padding: var(--space-5) 22px; border-top: 1px solid var(--line); }
-/* 打开面板时内容区让到左边。只加 padding 不够：.main 的 max-width(--main-max 1630)
-   仍会伸到面板底下，所以直接按 app 宽度减去面板宽度收窄（面板 fixed 在右边缘）。 */
-body.debug-pane-open .main {
-  max-width: calc(100% - var(--debug-pane-w));
-  /* margin:auto 会把收窄后的内容居中到面板底下，必须钉在左边缘 */
-  margin-left: 0;
-  margin-right: 0;
-}
-/* 侧栏 218 + 内容 + 面板三者放不下时，面板铺满整块工作区：否则左侧只剩
-   一条被挤碎的窄栏（统计卡一个字一行），比让内容让位更糟。 */
-@media (max-width: 1440px) {
-  body.debug-pane-open .main { max-width: none; }
-  .debug-pane { width: 100vw; }
-}
-
-/* 两栏：左画面 + 右树/定位/图像识别。最小宽按面板最窄时（760-44-24）算，
-   低于它就换单栏，避免内层 minmax 撑破面板。 */
-.debug-work { display: grid; grid-template-columns: minmax(280px, .95fr) minmax(340px, 1.05fr); gap: var(--space-9); align-items: start; }
-@media (max-width: 680px) { .debug-work { grid-template-columns: 1fr; } }
+/* ── 调试工作区（原型 nativeInspectorPage：页面内三栏，不再是右浮层）──
+   旧的 .debug-pane / body.debug-pane-open / .debug-work 已随页面内嵌方案删除；
+   只保留 footer 样式（关闭会话仍需要一条分隔线）。 */
+.debug-pane-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-7); padding: var(--space-5) 0; border-top: 1px solid var(--line); margin-top: var(--space-8); }
 
 .debug-section + .debug-section { margin-top: var(--space-9); }
 .debug-section > header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); margin-bottom: var(--space-4); }
@@ -703,27 +670,48 @@ body.debug-pane-open .main {
 .debug-kv { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-6); font-size: var(--fs-sm); color: var(--muted); }
 
 /* ── 调试工作区（原型 .inspector 三栏）与执行资源卡片 ── */
-.inspector { display: grid; grid-template-columns: minmax(240px, 300px) minmax(200px, 1fr) minmax(250px, 1.1fr); gap: var(--space-8); align-items: start; }
-@media (max-width: 1100px) { .inspector { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 820px) { .inspector { grid-template-columns: 1fr; } }
-.phone-panel { padding: 16px; background: #eef2f8; border-radius: 12px; border: 1px solid #dfe6f0; }
-.phone-panel img { width: 100%; border-radius: 8px; display: block; }
-.tree { padding: 14px 12px; font-family: Consolas, monospace; font-size: 10px; max-height: 320px; overflow: auto; }
-.tree-row { padding: 8px 8px; border-radius: 5px; white-space: nowrap; border: 0; background: none; width: 100%; text-align: left; color: #7687a2; cursor: pointer; }
+.inspector { display: grid; grid-template-columns: 280px minmax(210px, 1fr) minmax(260px, 1.1fr); gap: 18px; align-items: start; }
+@media (max-width: 1200px) {
+  .inspector { grid-template-columns: 260px minmax(0, 1fr); }
+  .inspector > section:last-child { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .inspector { grid-template-columns: 1fr; }
+  .inspector > section:last-child { grid-column: auto; }
+}
+/* 原型 panel-head h2 为 14px；全局 .panel-head 是 12px，只在 inspector 内放宽 */
+.inspector .panel-head h2 { font-size: var(--fs-body); }
+.phone-panel { padding: 16px; background: #eef2f8; border-radius: 12px; border: 1px solid #dfe6f0; min-width: 0; }
+.phone-panel .phone-stage { background: transparent; border: 0; padding: 8px 0; min-height: 0; }
+.tree { padding: 8px 6px; font-family: Consolas, monospace; font-size: 10px; max-height: 420px; overflow: auto; }
+.tree-row { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-radius: 5px; white-space: nowrap; border: 0; background: none; width: 100%; text-align: left; color: #7687a2; cursor: pointer; font: inherit; }
+.tree-row:hover { background: var(--hover-row); }
 .tree-row.level1 { padding-left: 20px; }
 .tree-row.level2 { padding-left: 34px; }
 .tree-row.selected { background: #edf1ff; color: var(--blue); }
+.tree-foot { padding: 17px; border-top: 1px solid var(--line); }
 .attribute-list { padding: 17px; }
 .attribute { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-bottom: 1px solid #f2f4f8; font-size: 11px; }
 .locator-option { border: 1px solid #e2e8f3; border-radius: 7px; padding: 10px 12px; margin: 10px 0; font-size: 11px; width: 100%; }
-.locator-option.active { border-color: var(--blue); }
+.locator-option.active { background: #f7f9ff; border-color: #b4c2fc; }
+/* 定位结果：第 3 栏内的紧凑行（原型是单行 #locator-result，这里有真实 x/y/尺寸/置信度） */
+.locator-match { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid #f2f4f8; font-size: 11px; }
+/* 图像模式：原型 imagePanel 的两个 .panel.panel-pad.image-form 列 */
+.image-form { display: grid; gap: 12px; align-content: start; }
+.image-coords { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.image-status { min-height: 40px; }
+.image-template-list { max-height: 260px; overflow: auto; }
+.image-form h2 { font-size: var(--fs-body); }
+.image-form .field { display: flex; flex-direction: column; gap: 7px; font-size: var(--fs-sm); color: var(--ink-soft); }
+.image-form .field input, .image-form .field select { width: 100%; min-width: 0; }
+.image-form label { margin: 0; }
 
 /* 调试工作区：页面级（原型 nativeInspectorPage），不再是右侧浮层 */
 .debug-workspace { padding: 0 0 var(--space-9); }
 .debug-workspace-body { display: grid; gap: var(--space-9); }
-/* 图像模板模式：隐藏层级树与元素描述列，聚焦图像流程（原型 inspectMode） */
+/* 图像模板模式：隐藏层级树与元素描述两列，聚焦图像流程（原型 inspectMode） */
 .inspector.mode-image > div:nth-child(2),
-.inspector.mode-image > section:nth-child(3) { display: none; }
+.inspector.mode-image > div:nth-child(3) { display: none; }
 
 /* 真机调试：原型 .phone 手机外壳包住实时画面 */
 .phone-stage { background: #eef2f8; border: 1px solid #dfe6f0; display: flex; justify-content: center; padding: 16px 8px; }

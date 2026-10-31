@@ -42,3 +42,21 @@
 - **报告中心**：清单表格改为原型 `report-card` 卡片栅格（module-pill 平台/模块 + 结论徽章 + 运行名 + RUN 编号/资源 + 一句话结论 + 结束时间 + 查看报告）；页头描述改为原型口径"保留每次运行的原始结论，从结果回到证据。"；工具条提示改"重跑创建新记录，不覆盖历史证据"；移除两个"待接入"占位卡与已禁用的"导出报告"死按钮（证据在报告抽屉，AC-REP-03 已交付）。服务端 completed 过滤、搜索与游标分页保留（工单 10 验收项）。
 - **页头描述对齐**：项目与应用 / 测试工作台 / 任务中心三页的描述改为原型原文。
 - 排查后判定**有意保留的差异**（规格驱动，非偏差）：接入说明页用真实契约替代原型的"虚构示例"声明（AC-INT-01）；任务中心 run_state 过滤替代原型把 passed/failed 混进状态筛选（工单 20）；通过率空样本显示 null 而非原型的 0%（工单 18）；UI 自动化页的执行记录页签（原型的运行清单在任务中心）。
+
+## Comments（2026-10-31 真机调试页对齐原型 nativeInspectorPage）
+
+- 现象：用户反馈「真机调试页面和原型 UI 不一致」；同视口（2560×1215）浏览器对照确认差异集中在：调试页外层多包 `<Panel>`、三栏是裸 `.debug-section` 没有卡片、切换器挤在 toolbar、设备状态徽章被 WS 状态顶替、图像模式整块在 inspector 下方。
+- 本轮改动（`web/src/components/DebugDrawer.tsx`、`web/src/pages/UiPage.tsx`、`web/src/styles/tokens.css`）：
+  1. 调试页不再包在 UiPage 的 `<Panel>`+`.panel-head` 内；切换器（原生节点/图像模板，`.btn.soft` 激活态）回到 toolbar 之前独立一行。
+  2. 三栏 = `.phone-panel` | `.panel`（UI 层级树） | `.panel`（元素与定位描述）；列宽 280px / `minmax(210px,1fr)` / `minmax(260px,1.1fr)`、gap 18px，标题 h2 14px；层级树改用原型 `.tree-row`（选中高亮、节点计数、底部提示）。
+  3. toolbar：设备下拉 `name / os` + 设备状态徽章「可用」+ WS 状态 muted + 返回设备池 + 采集检查/恢复预览单按钮切换（freeze/play 图标）；`leaseHint` 恢复渲染。
+  4. 元素与定位描述：属性 5 行 + 定位候选（resource-id 优先）+ `Target(...)` 表达式 + 定位方式/定位值表单 + 验证定位/复制表达式 + 紧凑结果行（原型 `#locator-result` 的位置）；定位结果从左侧栏移入第 3 栏。
+  5. 图像模式：第 2、3 栏改为「框选与保存模板」「图像匹配验证」两个 `.panel.panel-pad.image-form`（原型 imagePanel 的切割方式），删除 `.inspector.mode-image` 隐藏列与 inspector 下方全宽模板区；模板匹配仍走真实 vendor 接口，零匹配如实显示。
+  6. 真机联调发现并修复：详情轮询在后台标签页被 TanStack Query 暂停，导致 opening→active 永不推进（加 `refetchIntervalInBackground`）；模板坐标改用快照像素尺寸（capture 响应的 width/height），不再拿缩放的实时流尺寸，图像模式坐标范围显示 1080×2400。
+  7. 关闭会话后回到「执行记录」页签，避免停在调试页时按 ready 设备立刻重建会话；关闭后无活动会话、无未释放租约。
+- 验证：
+  - 真机 749622c9：自动建会话 → WS 已连接 → 采集检查（143 节点）→ resource-id `com.miui.home:id/drag_layer` 唯一匹配 → 图像模板匹配返回 vendor 真实「零匹配:目标未出现」→ 关闭会话释放设备。
+  - 截图：`.runtime/shots/debug-app-before.png`（改前）、`debug-proto.png`（原型）、`debug-ui-final.png`（改后 native）、`debug-app-image2.png`（改后 image）。
+  - 栅格实测：三栏 280 / 586 / 644px，gap 18（与原型 280 / 1fr / 1.1fr 一致）。
+  - `npx tsc --noEmit`、`npm run build`、`npm test`（17 例）全过。
+- 有意保留：定位验证表单（by/value 是真实 vendor 契约）、结果行的 x/y/尺寸/置信度、关闭会话 footer、跨页签保活、错误/空态；原型演示专属（直接控制、返回/主屏、SNAP-DEMO、模拟分数）未照搬。差异全表见 `.scratch/prototype-alignment/debug-ui-diff.md`。

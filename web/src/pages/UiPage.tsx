@@ -57,7 +57,7 @@ const TABS: TabItem<UiTab>[] = [
   { value: 'runs', label: '执行记录' },
   { value: 'suites', label: '用例套件' },
   { value: 'cases', label: '用例' },
-  { value: 'debug', label: '调试' },
+  { value: 'debug', label: '设备调试' },
   { value: 'templates', label: '模板' },
 ]
 
@@ -410,15 +410,14 @@ export function UiPage() {
         </div>
       ) : null}
 
-      <Panel>
+      {tab === 'debug' ? null : (
+        <Panel>
         <PanelHead
           title={TABS.find((item) => item.value === tab)?.label ?? ''}
           hint={
             tab === 'runs'
               ? '失败运行的现场证据（截图 / 日志 / 步骤断言）随报告提供'
-              : tab === 'debug'
-                ? '调试会话与自动运行竞争同一资源租约；切页签保持会话，关闭工作区才释放'
-                : tab === 'templates'
+              : tab === 'templates'
                   ? '模板按调试会话隔离，经 vendor TemplateStore 管理（需先建立调试会话）'
                   : tab === 'suites'
                     ? '套件来自 test_suites；用例数取自最新 discover 版本'
@@ -598,27 +597,30 @@ export function UiPage() {
             />
           </>
         ) : null}
-        {/* 原型 nativeInspectorPage：页面内工作区（设备下拉在 toolbar），不再是抽屉。
-            隐藏而不卸载：切页签只改显示，调试会话与 WS 保持。 */}
-        {debugEngaged ? (
-          <div style={{ display: tab === 'debug' ? undefined : 'none' }}>
-            <DebugDrawer
-              open={debugEngaged}
-              target={
-                debugTarget
-                ?? (readyDevices[0] ? toDebugTarget(readyDevices[0]) : null)
-              }
-              devices={readyDevices}
-              onTargetChange={(target) => setDebugTarget(target)}
-              onClose={() => {
-                setDebugTarget(null)
-                setDebugEngaged(false)
-              }}
-              onSessionChange={setDebugSessionId}
-            />
-          </div>
-        ) : null}
-      </Panel>
+        </Panel>
+      )}
+
+      {tab === 'debug' || debugEngaged ? (
+        <div style={{ display: tab === 'debug' ? undefined : 'none' }}>
+          <DebugDrawer
+            open={debugEngaged || tab === 'debug'}
+            target={
+              debugTarget
+              ?? (readyDevices[0] ? toDebugTarget(readyDevices[0]) : null)
+            }
+            devices={readyDevices}
+            onTargetChange={(target) => setDebugTarget(target)}
+            onClose={() => {
+              setDebugTarget(null)
+              setDebugEngaged(false)
+              // 关闭会话后回到执行记录：停留在调试页签会立刻按 ready 设备重建会话
+              setTab('runs')
+            }}
+            onSessionChange={setDebugSessionId}
+          />
+        </div>
+      ) : null}
+
 
       <TaskWizard
         open={wizardOpen}

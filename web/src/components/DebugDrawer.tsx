@@ -1,9 +1,10 @@
 /**
  * 设备调试工作区（P5）。
  *
- * 布局：不再是浮在内容上的窄抽屉，而是占据右侧工作区的全高面板（`.debug-pane`），
- * 打开时给 `.main` 让出等宽内边距，页面内容缩到左边，画面、层级树、定位与图像识别
- * 都有足够宽度看清（原先 570px 三栏挤在一起）。
+ * 布局：原型 nativeInspectorPage 的页面内三栏（不再挂 `<Panel>`，也不再是右浮层）：
+ * 定位方式切换器一行 → toolbar → 左 `.phone-panel`（真机画面）+ 中/右两个 `.panel`
+ * （UI 层级树 / 元素与定位描述）。图像模板模式把第 2、3 栏换成「框选与保存模板」
+ * 与「图像匹配验证」两个 `.panel.image-form`，对应原型 inspectorPage 的切割方式。
  *
  * 数据来源（全部经平台代理到活动调试会话的 vendor viewer）：
  *  - 实时预览：WS /api/v1/ws/debug/{id}，vendor 下发 **JSON 文本帧**
@@ -42,7 +43,7 @@ import {
 import type { LocatorMatch, SnapshotTreeNode, TemplateRecord } from '../api/types'
 import type { ResourceRecord } from '../types'
 import { Badge } from './Badge'
-import { Button, LinkButton } from './Button'
+import { Button } from './Button'
 import { Empty } from './Empty'
 import { Notice } from './Notice'
 import { useToast } from './Toast'
@@ -82,10 +83,15 @@ const LOCATOR_OPTIONS: { value: LocatorBy; label: string }[] = [
 
 /** 资源行 → 工作区目标（下拉切换与入口跳转共用同一形状） */
 export function toWorkspaceTarget(device: ResourceRecord): DebugTarget {
+  const hint = device.lease
+    ? device.lease.run_id
+      ? '运行 ' + device.lease.run_id.slice(0, 8) + ' 占用中'
+      : '调试会话占用中'
+    : null
   return {
     serial: device.resource_key ?? '',
     label: device.name,
-    leaseHint: null,
+    leaseHint: hint,
   }
 }
 
@@ -135,43 +141,67 @@ function nodeBounds(node: SnapshotTreeNode): string | null {
   return `${left},${top} → ${right},${bottom}`
 }
 
-/** 递归渲染层级树（children 存下标，超过 200 层视为脏数据直接停） */
+/** 递归渲染层级树（children 存下标，超过 200 层视为脏数据直接停）。
+ *  行样式照原型 .tree-row：当前选中节点高亮，整行可点（真实场景允许选任意节点）。 */
 function TreeBranch({
   node,
   depth,
   byIndex,
   onPick,
+  selectedIndex,
+  frozen,
 }: {
   node: SnapshotTreeNode
   depth: number
   byIndex: Map<number, SnapshotTreeNode>
   onPick: (node: SnapshotTreeNode) => void
+  selectedIndex: number | null
+  frozen: boolean
 }) {
   const [open, setOpen] = useState(depth < 2)
   const kids = (node.children ?? [])
     .map((index) => byIndex.get(index))
     .filter((kid): kid is SnapshotTreeNode => Boolean(kid))
   const bounds = nodeBounds(node)
+  const selected = frozen && selectedIndex === node.index
   return (
-    <div style={{ paddingLeft: depth ? 16 : 0 }}>
-      <div className="flex" style={{ gap: 6, alignItems: 'center' }}>
+    <div>
+      <div
+        className={'tree-row' + (selected ? ' selected' : '')}
+        style={{ paddingLeft: 8 + depth * 16 }}
+        role="treeitem"
+        aria-selected={selected}
+        tabIndex={0}
+        onClick={() => onPick(node)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            onPick(node)
+          }
+        }}
+      >
         {kids.length > 0 && depth < 200 ? (
           <button
             type="button"
             className="link-btn"
             style={{ minWidth: 14 }}
             aria-label={open ? '收起' : '展开'}
-            onClick={() => setOpen(!open)}
+            onClick={(event) => {
+              event.stopPropagation()
+              setOpen(!open)
+            }}
           >
             {open ? '▾' : '▸'}
           </button>
         ) : (
           <span style={{ minWidth: 14 }} />
         )}
-        <button type="button" className="link-btn" onClick={() => onPick(node)} title="选中该节点做定位验证">
-          <span className="mono">{nodeLabel(node)}</span>
-          {bounds ? <span className="muted"> {bounds}</span> : null}
-        </button>
+        <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {nodeLabel(node)}
+        </span>
+        {bounds ? (
+          <span className="muted" style={{ marginLeft: 'auto', fontSize: 9 }}>{bounds}</span>
+        ) : null}
       </div>
       {open && depth < 200
         ? kids.map((kid) => (
@@ -181,6 +211,8 @@ function TreeBranch({
               depth={depth + 1}
               byIndex={byIndex}
               onPick={onPick}
+              selectedIndex={selectedIndex}
+              frozen={frozen}
             />
           ))
         : null}
@@ -232,6 +264,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   const [closeError, setCloseError] = useState<string | null>(null)
   /** 当前帧尺寸（设备像素）：命中框与框选都按它换算成百分比 */
   const [frameSize, setFrameSize] = useState<FrameSize | null>(null)
+  /** 采集检查得到的快照像素尺寸：模板坐标以快照为准，不能拿缩放的实时流尺寸 */
+  const [snapshotSize, setSnapshotSize] = useState<FrameSize | null>(null)
   /** 框选中的区域（设备像素），松手后落到 region */
   const [region, setRegion] = useState<Region | null>(null)
   const [dragging, setDragging] = useState<Region | null>(null)
@@ -254,6 +288,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     setWsAttempt(0)
     setNodes(null)
     setSnapshotId(null)
+    setSnapshotSize(null)
     frozenRef.current = false
     setFrozen(false)
     setTreeError(null)
@@ -321,6 +356,9 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
       const state = query.state.data?.state
       return state && state !== 'active' ? 1500 : false
     },
+    // 调试页可能被切到后台（或由浏览器自动化驱动）：opening→active 的轮询
+    // 不能因为标签页不可见而暂停，否则画面一直停在「未连接」。
+    refetchIntervalInBackground: true,
   })
 
   /** 关闭会话：DELETE + 关 WS */
@@ -508,10 +546,16 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
       const captured = await captureSnapshot(id, true)
       if (!captured.snapshot_id) throw new Error('快照响应缺少 snapshot_id')
       const tree = await fetchSnapshotTree(id, captured.snapshot_id)
-      return { snapshotId: captured.snapshot_id, tree }
+      return {
+        snapshotId: captured.snapshot_id,
+        width: captured.width ?? null,
+        height: captured.height ?? null,
+        tree,
+      }
     },
-    onSuccess: ({ snapshotId: capturedId, tree }) => {
+    onSuccess: ({ snapshotId: capturedId, width, height, tree }) => {
       setSnapshotId(capturedId)
+      setSnapshotSize(width && height ? { w: width, h: height } : null)
       frozenRef.current = true
       setFrozen(true)
       setTreeError(null)
@@ -526,6 +570,9 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   })
 
   const tree = useMemo(() => buildTreeIndex(nodes ?? []), [nodes])
+
+  /** 坐标基准：优先快照像素（模板裁剪的服务端坐标），没有快照时退回实时流尺寸 */
+  const coordinateSize = snapshotSize ?? frameSize
 
   /** 会话必须 active 才能碰 vendor：opening 期间 /templates 一律
    * `debug_session_not_active`，提前请求只会在界面上挂一条红字。 */
@@ -631,14 +678,14 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
    *  （stage 只负责居中，多出来的留白不能被算进比例）。 */
   const pointToDevice = (event: React.MouseEvent): { x: number; y: number } | null => {
     const frame = stageRef.current
-    if (!frame || !frameSize) return null
+    if (!frame || !coordinateSize) return null
     const rect = frame.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return null
-    const x = ((event.clientX - rect.left) / rect.width) * frameSize.w
-    const y = ((event.clientY - rect.top) / rect.height) * frameSize.h
+    const x = ((event.clientX - rect.left) / rect.width) * coordinateSize.w
+    const y = ((event.clientY - rect.top) / rect.height) * coordinateSize.h
     return {
-      x: Math.min(Math.max(Math.round(x), 0), frameSize.w),
-      y: Math.min(Math.max(Math.round(y), 0), frameSize.h),
+      x: Math.min(Math.max(Math.round(x), 0), coordinateSize.w),
+      y: Math.min(Math.max(Math.round(y), 0), coordinateSize.h),
     }
   }
 
@@ -666,31 +713,72 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
 
   const overlayRegion = dragging ?? region
   const overlayBoxes = useMemo(() => {
-    if (!frameSize || !matches) return []
+    if (!coordinateSize || !matches) return []
     return matches
       .map((match, index) => ({ match, index }))
       .filter(({ match }) => typeof match.x === 'number' && typeof match.y === 'number'
         && typeof match.width === 'number' && typeof match.height === 'number')
       .map(({ match, index }) => ({
         index,
-        left: ((match.x as number) / frameSize.w) * 100,
-        top: ((match.y as number) / frameSize.h) * 100,
-        width: ((match.width as number) / frameSize.w) * 100,
-        height: ((match.height as number) / frameSize.h) * 100,
+        left: ((match.x as number) / coordinateSize.w) * 100,
+        top: ((match.y as number) / coordinateSize.h) * 100,
+        width: ((match.width as number) / coordinateSize.w) * 100,
+        height: ((match.height as number) / coordinateSize.h) * 100,
         // 图像匹配的分数在顶层 scores 里，元素匹配才有 match.confidence
         confidence:
           typeof match.confidence === 'number' ? match.confidence : scores?.[index] ?? null,
       }))
-  }, [frameSize, matches, scores])
+  }, [coordinateSize, matches, scores])
 
   const wsText = wsStatus === 'open' ? '已连接' : wsStatus === 'connecting' ? '连接中' : '未连接'
-  const wsTone = wsStatus === 'open' ? 'green' : wsStatus === 'connecting' ? 'blue' : 'gray'
+
+  /** 设备档案分辨率（原型 d.res）；vendor 实时流可能是缩放帧，不能拿它冒充分辨率 */
+  const currentDevice = devices.find((device) => device.resource_key === target?.serial) ?? null
+  const deviceResolution = currentDevice?.profile?.screen_resolution
+    ?? (frameSize ? frameSize.w + ' × ' + frameSize.h : '—')
+
+  /** 原型「Target(...)」表达式：当前定位方式 + 定位值（图像则带阈值） */
+  const locatorExpression = useMemo(() => {
+    if (!locator.trim()) return ''
+    if (locatorBy === 'image') {
+      return 'Target(Locator.IMAGE, "' + locator.trim() + '", confidence=' + matchThreshold + ')'
+    }
+    const names: Record<LocatorBy, string> = {
+      resource_id: 'RESOURCE_ID',
+      text: 'TEXT',
+      accessibility_id: 'ACCESSIBILITY_ID',
+      u2_selector: 'U2_SELECTOR',
+      xpath: 'XPATH',
+      image: 'IMAGE',
+    }
+    return 'Target(Locator.' + names[locatorBy] + ', "' + locator.trim() + '")'
+  }, [locatorBy, locator, matchThreshold])
 
   if (!open) return null
 
   return (
     <div className="debug-workspace" aria-label={target ? target.label + ' · 调试' : '设备调试'}>
-      {/* 原型 nativeInspectorPage 的 toolbar：设备下拉 + 状态 + 采集检查 */}
+      {/* 原型 inspectorPage：定位方式切换器在 toolbar 之前，独立一行 */}
+      <div className="flex wrap mb" role="group" aria-label="定位方式">
+        {([['native', '原生节点'], ['image', '图像模板']] as const).map(([value, label]) => (
+          <Button
+            key={value}
+            size="small"
+            kind={inspectMode === value ? 'soft' : 'default'}
+            aria-pressed={inspectMode === value}
+            onClick={() => setInspectMode(value)}
+          >
+            {label}
+          </Button>
+        ))}
+        <span className="small muted">
+          {inspectMode === 'native'
+            ? '冻结快照后点击树节点；定位结果来自 vendor 实时校验。'
+            : '图像模板从服务端保留的快照裁剪登记，匹配经 vendor TemplateStore 校验。'}
+        </span>
+      </div>
+
+      {/* 原型 nativeInspectorPage 的 toolbar：设备下拉 + 状态 + 采集/恢复（同一个按钮） */}
       <div className="toolbar mb">
         <select
           aria-label="调试设备"
@@ -701,51 +789,47 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
           }}
         >
           {devices.length === 0 ? <option value="">没有可调试设备</option> : null}
-          {devices.map((device) => (
-            <option key={device.id} value={device.resource_key}>
-              {device.name} / {device.resource_key}
-            </option>
-          ))}
+          {devices.map((device) => {
+            // 原型口径：name / os；档案缺失时如实回落设备编号
+            const os = device.profile?.os_name
+              ? (device.profile.os_name + ' ' + (device.profile.os_version ?? '')).trim()
+              : device.resource_key
+            return (
+              <option key={device.id} value={device.resource_key}>
+                {device.name} / {os}
+              </option>
+            )
+          })}
         </select>
-        <Badge tone={wsTone} dot>{wsText}</Badge>
-        {frozen ? <Badge tone="amber" dot>画面已冻结</Badge> : null}
+        <Badge tone={target ? 'green' : 'gray'} dot>{target ? '可用' : '无设备'}</Badge>
+        <span className="small muted">{wsText}</span>
+        {target?.leaseHint ? <span className="small muted">· {target.leaseHint}</span> : null}
         <span className="spacer" />
+        <Button size="small" onClick={handleClose}>返回设备池</Button>
         {frozen ? (
           <Button
             size="small"
+            icon="play"
             onClick={() => {
               // socket 一直活着，恢复后下一帧就会覆盖 canvas
               frozenRef.current = false
               setFrozen(false)
             }}
           >
-            恢复实时
+            恢复预览
           </Button>
-        ) : null}
-        <div className="flex wrap" role="group" aria-label="定位方式">
-          {([['native', '原生节点'], ['image', '图像模板']] as const).map(([value, label]) => (
-            <Button
-              key={value}
-              size="small"
-              kind={inspectMode === value ? 'primary' : 'default'}
-              aria-pressed={inspectMode === value}
-              onClick={() => setInspectMode(value)}
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
-        <Button size="small" onClick={handleClose}>返回设备池</Button>
-        <Button
-          kind="primary"
-          size="small"
-          icon="image"
-          disabled={!sessionActive || snapshotMutation.isPending}
-          title={sessionActive ? '冻结当前画面并采集 UI 树' : '调试会话尚未激活'}
-          onClick={() => snapshotMutation.mutate()}
-        >
-          {snapshotMutation.isPending ? '采集中…' : '采集检查'}
-        </Button>
+        ) : (
+          <Button
+            kind="primary"
+            size="small"
+            icon="freeze"
+            disabled={!sessionActive || snapshotMutation.isPending}
+            title={sessionActive ? '冻结当前画面并采集 UI 树' : '调试会话尚未激活'}
+            onClick={() => snapshotMutation.mutate()}
+          >
+            {snapshotMutation.isPending ? '采集中…' : '采集检查'}
+          </Button>
+        )}
       </div>
 
       <div className="debug-workspace-body">
@@ -759,177 +843,106 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
             <Notice tone="red" title="关闭失败">{closeError}</Notice>
           </div>
         ) : null}
-
-        {!target ? null : !session && !createMutation.isPending && !wsNotice ? (
-          <Empty
-            icon="phone"
-            title="尚未建立调试会话"
-            description="POST /api/v1/debug-sessions 建立会话后，这里展示实时预览、快照树、定位验证与图像识别。"
-          />
+        {!target && !createMutation.isPending ? (
+          <div className="mb">
+            <Notice tone="amber" title="没有可调试设备">
+              当前没有 ready 且空闲的 Android 设备（可能正被运行或其他调试会话占用）；设备空闲后自动建立会话。
+            </Notice>
+          </div>
         ) : null}
         {createMutation.isPending ? (
-          <Empty icon="phone" title="正在创建调试会话" description="正在请求 POST /api/v1/debug-sessions" />
+          <div className="mb">
+            <Notice tone="blue" title="正在创建调试会话">正在请求 POST /api/v1/debug-sessions</Notice>
+          </div>
         ) : null}
 
-        {session ? (
-          <div className={'inspector' + (inspectMode === 'image' ? ' mode-image' : '')}>
-            {/* 左栏：实时预览（命中框 / 框选都叠在这里） */}
-            <div>
-              <section className="debug-section">
-                <header>
-                  <h3>实时预览</h3>
-                  <span className="muted small">
-                    {frozen && snapshotId
-                      ? '画面已冻结 · snapshot ' + snapshotId
-                      : matches
-                        ? '命中 ' + matches.length + ' 个'
-                        : '拖拽画面可框选模板区域'}
-                  </span>
-                </header>
-                <div
-                  className="debug-stage phone-stage"
-                  onMouseDown={handleStageDown}
-                  onMouseMove={handleStageMove}
-                  onMouseUp={handleStageUp}
-                  onMouseLeave={handleStageUp}
-                >
-                <div className="phone">
-                  <div className="phone-camera" />
-                  <div className="debug-frame" ref={stageRef} style={{ display: frameSize ? undefined : 'none' }}>
-                    <canvas ref={canvasRef} aria-label="设备画面预览" />
-                    {overlayBoxes.map((box) => (
-                      <div
-                        key={box.index}
-                        className="debug-box"
-                        style={{ left: box.left + '%', top: box.top + '%', width: box.width + '%', height: box.height + '%' }}
-                      >
-                        <span>
-                          #{box.index + 1}
-                          {typeof box.confidence === 'number' ? ' ' + box.confidence.toFixed(2) : ''}
-                        </span>
-                      </div>
-                    ))}
-                    {overlayRegion && frameSize ? (
-                      <div
-                        className="debug-box pick"
-                        style={{
-                          left: (overlayRegion.x / frameSize.w) * 100 + '%',
-                          top: (overlayRegion.y / frameSize.h) * 100 + '%',
-                          width: (overlayRegion.w / frameSize.w) * 100 + '%',
-                          height: (overlayRegion.h / frameSize.h) * 100 + '%',
-                        }}
-                      >
-                        <span>
-                          {overlayRegion.w}×{overlayRegion.h}
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-                  {!frameSize ? (
-                    <div className="debug-stage-empty">
-                      {wsStatus === 'open' ? '等待设备画面…' : '画面尚未连接（' + wsText + '）'}
+        {/* 原型 nativeInspectorPage：三栏常驻（左 .phone-panel + 中右两个 .panel） */}
+        <div className={'inspector' + (inspectMode === 'image' ? ' mode-image' : '')}>
+          {/* 第 1 栏：手机外壳内的真机实时画面 */}
+          <section className="phone-panel">
+            <div className="between">
+              <Badge tone={frozen ? 'amber' : 'blue'} dot>{frozen ? '冻结快照' : '实时画面'}</Badge>
+              <span className="small muted">{wsText}</span>
+            </div>
+            <div
+              className="debug-stage phone-stage"
+              onMouseDown={handleStageDown}
+              onMouseMove={handleStageMove}
+              onMouseUp={handleStageUp}
+              onMouseLeave={handleStageUp}
+            >
+              <div className="phone">
+                <div className="phone-camera" />
+                <div className="debug-frame" ref={stageRef} style={{ display: frameSize ? undefined : 'none' }}>
+                  <canvas ref={canvasRef} aria-label="设备画面预览" />
+                  {overlayBoxes.map((box) => (
+                    <div
+                      key={box.index}
+                      className="debug-box"
+                      style={{ left: box.left + '%', top: box.top + '%', width: box.width + '%', height: box.height + '%' }}
+                    >
+                      <span>
+                        #{box.index + 1}
+                        {typeof box.confidence === 'number' ? ' ' + box.confidence.toFixed(2) : ''}
+                      </span>
+                    </div>
+                  ))}
+                  {overlayRegion && coordinateSize ? (
+                    <div
+                      className="debug-box pick"
+                      style={{
+                        left: (overlayRegion.x / coordinateSize.w) * 100 + '%',
+                        top: (overlayRegion.y / coordinateSize.h) * 100 + '%',
+                        width: (overlayRegion.w / coordinateSize.w) * 100 + '%',
+                        height: (overlayRegion.h / coordinateSize.h) * 100 + '%',
+                      }}
+                    >
+                      <span>
+                        {overlayRegion.w}×{overlayRegion.h}
+                      </span>
                     </div>
                   ) : null}
                 </div>
-                </div>
-                <div className="debug-kv" style={{ marginTop: 8 }}>
-                  <span>绿框 = 最近一次定位命中</span>
-                  <span>橙框 = 框选区域（用于新建模板）</span>
-                </div>
-                {detailError ? (
-                  <div className="mt">
-                    <Notice tone="red" title={'会话详情获取失败（' + detailError.code + '）'}>
-                      {detailError.message}
-                      {upstreamHint(detailError) ? (
-                        <div className="small" style={{ marginTop: 6 }}>{upstreamHint(detailError)}</div>
-                      ) : null}
-                    </Notice>
+                {!frameSize ? (
+                  <div className="debug-stage-empty">
+                    {wsStatus === 'open' ? '等待设备画面…' : '画面尚未连接（' + wsText + '）'}
                   </div>
                 ) : null}
-              </section>
-
-              {/* 定位结果表放在画面下方：两栏都不挤，坐标一眼能读 */}
-              <section className="debug-section">
-                <header>
-                  <h3>定位结果</h3>
-                  <span className="muted small">
-                    {matches === null ? '尚未验证' : validateNote ?? ''}
-                    {locatorSnapshotId
-                      ? ' · 定位快照 ' + locatorSnapshotId +
-                        (frozen && snapshotId && locatorSnapshotId !== snapshotId
-                          ? '（vendor 重新采集，与冻结画面不同）'
-                          : '')
-                      : ''}
-                  </span>
-                </header>
-                {validateError ? <Notice tone="red" title="验证失败">{validateError}</Notice> : null}
-                {matches !== null && !validateError ? (
-                  matches.length === 0 ? (
-                    <span className="muted small">{validateNote ?? '无匹配节点'}</span>
-                  ) : (
-                    <div className="table-wrap">
-                      <table className="task-table" aria-label="定位验证结果">
-                        <thead>
-                          <tr>
-                            <th>#</th>
-                            <th>x</th>
-                            <th>y</th>
-                            <th>宽</th>
-                            <th>高</th>
-                            <th>置信度</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {matches.map((match, index) => (
-                            <tr key={index}>
-                              <td>{index + 1}</td>
-                              <td className="mono">{match.x ?? DASH}</td>
-                              <td className="mono">{match.y ?? DASH}</td>
-                              <td className="mono">{match.width ?? DASH}</td>
-                              <td className="mono">{match.height ?? DASH}</td>
-                              <td className="mono">
-                                {typeof match.confidence === 'number'
-                                  ? match.confidence.toFixed(3)
-                                  : typeof scores?.[index] === 'number'
-                                    ? scores[index].toFixed(3)
-                                    : DASH}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                ) : (
-                  <span className="muted small">在右栏选节点或填表达式后点「验证定位」，命中框会画在画面上。</span>
-                )}
-              </section>
+              </div>
             </div>
+            <div className="between small muted">
+              <span>{snapshotId ? '快照 ' + snapshotId : frozen ? '快照待采集' : '设备画面未冻结'}</span>
+              <span>{deviceResolution}</span>
+            </div>
+            <div className="debug-kv" style={{ marginTop: 8 }}>
+              <span>绿框 = 最近一次定位命中</span>
+              <span>橙框 = 框选区域（用于新建模板）</span>
+            </div>
+            {detailError ? (
+              <div className="mt">
+                <Notice tone="red" title={'会话详情获取失败（' + detailError.code + '）'}>
+                  {detailError.message}
+                  {upstreamHint(detailError) ? (
+                    <div className="small" style={{ marginTop: 6 }}>{upstreamHint(detailError)}</div>
+                  ) : null}
+                </Notice>
+              </div>
+            ) : null}
+          </section>
 
-            {/* 右栏：层级树 / 定位验证 / 图像识别 */}
-            <div>
-              <section className="debug-section">
-                <header>
-                  <h3>UI 层级树</h3>
-                  <span className="muted small">
-                    {snapshotId ? 'snapshot ' + snapshotId : '先点「采集检查」冻结画面与 UI 树'}
-                  </span>
-                </header>
-                {snapshotId ? (
-                  <div className="muted small mono" style={{ marginBottom: 6 }}>snapshot {snapshotId}</div>
-                ) : null}
-                {treeError ? (
-                  <div className="mb">
+          {inspectMode === 'native' ? (
+            <>
+              {/* 第 2 栏：UI 层级树 */}
+              <section className="panel">
+                <div className="panel-head">
+                  <h2>UI 层级树</h2>
+                  <span className="small muted">{nodes === null ? '未采集' : nodes.length + ' 个节点'}</span>
+                </div>
+                <div className="tree" role="tree" aria-label="UI 层级树">
+                  {treeError ? (
                     <Notice tone="red" title="快照 / 层级树获取失败">{treeError}</Notice>
-                  </div>
-                ) : null}
-                <div className="debug-tree">
-                  {nodes === null ? (
-                    <span className="muted">
-                      点「采集快照」后展示 vendor 采集的层级树（POST /snapshots → GET /tree）。
-                    </span>
-                  ) : nodes.length === 0 ? (
-                    <span className="muted">该快照没有 UI 树（vendor 未采集或设备不支持）。</span>
+                  ) : nodes === null ? null : nodes.length === 0 ? (
+                    <p className="small muted" style={{ padding: 12 }}>该快照没有 UI 树（vendor 未采集或设备不支持）。</p>
                   ) : (
                     tree.roots.map((node) => (
                       <TreeBranch
@@ -937,6 +950,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                         node={node}
                         depth={0}
                         byIndex={tree.byIndex}
+                        selectedIndex={selected?.index ?? null}
+                        frozen={frozen}
                         onPick={(picked) => {
                           setSelected(picked)
                           // 选中节点时把它的标识直接填进定位值，减少手输
@@ -952,85 +967,66 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                     ))
                   )}
                 </div>
+                <div className="tree-foot small muted">
+                  {frozen && snapshotId
+                    ? '已绑定同一次冻结快照，点击节点查看定位描述。'
+                    : '先点击「采集检查」，冻结画面与 UI 树。'}
+                </div>
               </section>
 
-                            {/* 第三栏：元素与定位描述（原型 attribute-list / locator-option） */}
-              <section className="debug-section">
-                <header>
-                  <h3>元素与定位描述</h3>
+              {/* 第 3 栏：元素与定位描述 + 定位验证（原型 attribute-list / locator-option） */}
+              <section className="panel">
+                <div className="panel-head">
+                  <h2>元素与定位描述</h2>
                   <span className="badge gray">原生定位</span>
-                </header>
-                {selected ? (
-                  <div className="attribute-list">
-                    <div className="attribute"><span>text</span><span>{selected.text || '—'}</span></div>
-                    <div className="attribute"><span>resource-id</span><span className="mono">{selected.resource_id || '—'}</span></div>
-                    <div className="attribute"><span>class</span><span className="mono">{selected.class_name || '—'}</span></div>
-                    <div className="attribute"><span>clickable</span><span>{selected.clickable ? 'true' : 'false'}</span></div>
-                    <div className="attribute"><span>bounds</span><span className="mono">{nodeBounds(selected) || '—'}</span></div>
-                  </div>
-                ) : (
-                  <div className="attribute-list">
-                    <Empty icon="check" title="等待拾取" description="在层级树中点击节点，这里显示它的属性与定位候选。" />
-                  </div>
-                )}
-                {selected ? (
-                  <>
-                    <h3 style={{ margin: '14px 0 4px', fontSize: 12 }}>定位候选</h3>
-                    {selected.resource_id ? (
-                      <button
-                        type="button"
-                        className={'locator-option' + (locatorBy === 'resource_id' ? ' active' : '')}
-                        onClick={() => { setLocatorBy('resource_id'); setLocator(String(selected.resource_id)) }}
-                      >
-                        <div className="between"><b>resource-id</b><span className="badge green">优先候选</span></div>
-                        <code>{String(selected.resource_id)}</code>
-                      </button>
-                    ) : null}
-                    {selected.text ? (
-                      <button
-                        type="button"
-                        className={'locator-option' + (locatorBy === 'text' ? ' active' : '')}
-                        onClick={() => { setLocatorBy('text'); setLocator(String(selected.text)) }}
-                      >
-                        <div className="between"><b>text</b><span className="small text-amber">文案变动会失效</span></div>
-                        <code>{String(selected.text)}</code>
-                      </button>
-                    ) : null}
-                    <pre className="code-block">{locatorBy === 'resource_id'
-                      ? 'Target(Locator.RESOURCE_ID, "' + locator + '")'
-                      : 'Target(Locator.TEXT, "' + locator + '")'}</pre>
-                    <div className="flex wrap" style={{ gap: 8 }}>
-                      <LinkButton
-                        onClick={() => {
-                          const expression = locatorBy === 'resource_id'
-                            ? 'Target(Locator.RESOURCE_ID, "' + locator + '")'
-                            : 'Target(Locator.TEXT, "' + locator + '")'
-                          void navigator.clipboard?.writeText(expression)
-                          toast.show('表达式已复制')
-                        }}
-                      >
-                        复制表达式
-                      </LinkButton>
-                    </div>
-                  </>
-                ) : null}
+                </div>
+                <div className="attribute-list">
+                  {selected ? (
+                    <>
+                      <div className="attribute"><span>text</span><span>{selected.text || '—'}</span></div>
+                      <div className="attribute"><span>resource-id</span><span className="mono">{selected.resource_id || '—'}</span></div>
+                      <div className="attribute"><span>class</span><span className="mono">{selected.class_name || '—'}</span></div>
+                      <div className="attribute"><span>clickable</span><span>{selected.clickable ? 'true' : 'false'}</span></div>
+                      <div className="attribute"><span>bounds</span><span className="mono">{nodeBounds(selected) || '—'}</span></div>
+                    </>
+                  ) : (
+                    <Empty
+                      icon="search"
+                      title="等待拾取"
+                      description={frozen ? '在层级树中点击节点，这里显示其属性与定位候选。' : '先点击「采集检查」冻结画面与 UI 树。'}
+                    />
+                  )}
 
-                <header>
-                  <h3>定位验证</h3>
-                </header>
-                <div style={{ display: 'grid', gap: 10 }}>
-                  <div className="muted small">
-                    选中节点：
-                    {selected ? (
-                      <span className="mono">
-                        {' '}
-                        {nodeLabel(selected)}
-                        {nodeBounds(selected) ? ' ' + nodeBounds(selected) : ''}
-                      </span>
-                    ) : (
-                      ' 未选择（在层级树中点击节点）'
-                    )}
-                  </div>
+                  {selected ? (
+                    <>
+                      {selected.resource_id || selected.text ? (
+                        <h3 style={{ margin: '20px 0 10px', fontSize: 12 }}>定位候选</h3>
+                      ) : null}
+                      {selected.resource_id ? (
+                        <button
+                          type="button"
+                          className={'locator-option' + (locatorBy === 'resource_id' ? ' active' : '')}
+                          onClick={() => { setLocatorBy('resource_id'); setLocator(String(selected.resource_id)) }}
+                        >
+                          <div className="between"><b>resource-id</b><span className="badge green">优先候选</span></div>
+                          <code>{String(selected.resource_id)}</code>
+                        </button>
+                      ) : null}
+                      {selected.text ? (
+                        <button
+                          type="button"
+                          className={'locator-option' + (locatorBy === 'text' ? ' active' : '')}
+                          onClick={() => { setLocatorBy('text'); setLocator(String(selected.text)) }}
+                        >
+                          <div className="between"><b>text</b><span className="small text-amber">文案变动会失效</span></div>
+                          <code>{String(selected.text)}</code>
+                        </button>
+                      ) : null}
+                    </>
+                  ) : null}
+
+                  {locatorExpression ? <pre className="code-block">{locatorExpression}</pre> : null}
+
                   <div className="debug-form">
                     <label>
                       定位方式
@@ -1051,47 +1047,141 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                         placeholder={locatorBy === 'image' ? '模板逻辑名，如 buttons/confirm.png' : '文本 / resource-id / xpath'}
                       />
                     </label>
+                    {locatorBy === 'image' ? (
+                      <label className="full">
+                        阈值 0.10-1.00
+                        <input
+                          value={matchThreshold}
+                          onChange={(event) => setMatchThreshold(event.target.value)}
+                          aria-label="图像匹配阈值"
+                        />
+                      </label>
+                    ) : null}
                   </div>
-                  {locatorBy === 'image' ? (
-                    <label className="muted small">
-                      阈值 0.10-1.00
+
+                  <div className="flex wrap" style={{ marginTop: 10, gap: 8 }}>
+                    <Button
+                      kind="primary"
+                      size="small"
+                      icon="check"
+                      disabled={!locator.trim() || validateMutation.isPending}
+                      onClick={() =>
+                        validateMutation.mutate({
+                          by: locatorBy,
+                          value: locator,
+                          threshold: matchThreshold,
+                        })
+                      }
+                    >
+                      {validateMutation.isPending ? '验证中…' : '验证定位'}
+                    </Button>
+                    <Button
+                      size="small"
+                      icon="copy"
+                      disabled={!locatorExpression}
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(locatorExpression)
+                        toast.show('表达式已复制')
+                      }}
+                    >
+                      复制表达式
+                    </Button>
+                  </div>
+
+                  {validateError ? (
+                    <div className="mt">
+                      <Notice tone="red" title="验证失败">{validateError}</Notice>
+                    </div>
+                  ) : null}
+
+                  <div className="mt" role="status">
+                    <p className="small muted">
+                      {matches === null ? '验证后在这里显示匹配结果。' : validateNote ?? ''}
+                      {locatorSnapshotId
+                        ? ' · 定位快照 ' + locatorSnapshotId +
+                          (frozen && snapshotId && locatorSnapshotId !== snapshotId
+                            ? '（vendor 重新采集，与冻结画面不同）'
+                            : '')
+                        : ''}
+                    </p>
+                    {matches !== null && matches.length > 0 ? (
+                      <div className="mt">
+                        {matches.map((match, index) => (
+                          <div className="locator-match" key={index}>
+                            <span className="muted">#{index + 1}</span>
+                            <span className="mono">
+                              {match.x ?? DASH},{match.y ?? DASH} · {match.width ?? DASH}×{match.height ?? DASH}
+                            </span>
+                            <span className="mono">
+                              {typeof match.confidence === 'number'
+                                ? match.confidence.toFixed(3)
+                                : typeof scores?.[index] === 'number'
+                                  ? scores[index].toFixed(3)
+                                  : DASH}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </section>
+            </>
+          ) : (
+            <>
+              {/* 图像模式第 2 栏：原型 imagePanel 的「框选与保存模板」 */}
+              <section className="panel panel-pad image-form">
+                <h2 style={{ fontSize: 14 }}>框选与保存模板</h2>
+                <p className="small muted">
+                  {snapshotId ? '在冻结画面上拖拽框选，或填写坐标。' : '先点击「采集检查」冻结画面。'}
+                  坐标单位：设备像素，范围 {coordinateSize ? coordinateSize.w + ' × ' + coordinateSize.h : '—'}。
+                </p>
+                <div className="image-coords">
+                  {([['x', 'X'], ['y', 'Y'], ['w', '宽度'], ['h', '高度']] as const).map(([key, label]) => (
+                    <label className="field" key={key}>
+                      <span>{label}</span>
                       <input
-                        value={matchThreshold}
-                        onChange={(event) => setMatchThreshold(event.target.value)}
-                        style={{ width: 72 }}
-                        aria-label="图像匹配阈值"
+                        inputMode="numeric"
+                        aria-label={'框选' + label}
+                        value={region ? String(region[key]) : ''}
+                        onChange={(event) => setRegion(editRegion(region, key, event.target.value))}
                       />
                     </label>
-                  ) : null}
+                  ))}
+                </div>
+                <p className="small muted">
+                  {region ? '选区 [X, Y, 宽度, 高度]：[' + region.x + ', ' + region.y + ', ' + region.w + ', ' + region.h + ']' : '尚未框选区域'}
+                </p>
+                <div className="debug-kv">
+                  <span>快照：{snapshotId ? snapshotId.slice(0, 12) : '未采集（模板只能从服务端保留的快照裁剪）'}</span>
+                </div>
+                <label className="field">
+                  <span>模板逻辑名（.png，POSIX 相对路径）</span>
+                  <input
+                    value={newLogical}
+                    onChange={(event) => setNewLogical(event.target.value)}
+                    placeholder="buttons/confirm.png"
+                  />
+                </label>
+                {templateError ? <Notice tone="red" title="模板登记失败">{templateError}</Notice> : null}
+                <div className="flex wrap" style={{ gap: 8 }}>
                   <Button
                     kind="primary"
                     size="small"
-                    icon="check"
-                    disabled={!locator.trim() || validateMutation.isPending}
-                    onClick={() =>
-                      validateMutation.mutate({
-                        by: locatorBy,
-                        value: locator,
-                        threshold: matchThreshold,
-                      })
-                    }
+                    icon="plus"
+                    disabled={createTemplateMutation.isPending || !snapshotId || !region || !newLogical.trim()}
+                    onClick={() => createTemplateMutation.mutate()}
                   >
-                    {validateMutation.isPending ? '验证中…' : '验证定位'}
+                    {createTemplateMutation.isPending ? '登记中…' : '从框选登记模板'}
                   </Button>
+                  <Button size="small" onClick={() => setRegion(null)} disabled={!region}>清除框选</Button>
                 </div>
-                </section>
+              </section>
 
-
-
-            </div>
-          </div>
-        ) : null}
-
-        {/* 图像识别：模板库 + 从快照框选建档 + 图像匹配（全宽，inspector 之外） */}
-        <section className="debug-section">
-              <section className="debug-section">
-                <header>
-                  <h3>图像识别（模板库）</h3>
+              {/* 图像模式第 3 栏：原型 imagePanel 的「重新匹配验证」 */}
+              <section className="panel panel-pad image-form">
+                <div className="between">
+                  <h2 style={{ fontSize: 14 }}>图像匹配验证</h2>
                   <Button
                     size="small"
                     icon="image"
@@ -1100,30 +1190,39 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                   >
                     {templatesQuery.isFetching ? '刷新中…' : '刷新'}
                   </Button>
-                </header>
+                </div>
+                <label className="field">
+                  <span>匹配阈值（0.10 至 1.00）</span>
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={1}
+                    step={0.01}
+                    value={matchThreshold}
+                    aria-label="图像匹配阈值"
+                    onChange={(event) => setMatchThreshold(event.target.value)}
+                  />
+                </label>
                 {templatesError ? (
-                  <div className="mb">
-                    <Notice tone="red" title={'模板清单获取失败（' + templatesError.code + '）'}>
-                      {templatesError.message}
-                    </Notice>
-                  </div>
+                  <Notice tone="red" title={'模板清单获取失败（' + templatesError.code + '）'}>
+                    {templatesError.message}
+                  </Notice>
                 ) : null}
-                <div className="debug-list">
+                <div className="image-template-list">
                   {templates.length === 0 ? (
-                    <div className="muted small" style={{ padding: 10 }}>
+                    <p className="small muted">
                       {!sessionActive
-                      ? '等待调试会话激活…'
-                      : templatesQuery.isLoading
-                        ? '正在加载模板…'
-                        : '该调试会话还没有模板：先在画面上框选区域并登记。'}
-                    </div>
+                        ? '等待调试会话激活…'
+                        : templatesQuery.isLoading
+                          ? '正在加载模板…'
+                          : '该调试会话还没有模板：先在第 2 栏框选区域并登记。'}
+                    </p>
                   ) : (
                     <table className="task-table" aria-label="模板清单">
                       <thead>
                         <tr>
                           <th>逻辑名</th>
                           <th>版本</th>
-                          <th>摘要</th>
                           <th>操作</th>
                         </tr>
                       </thead>
@@ -1132,7 +1231,6 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                           <tr key={template.logical}>
                             <td className="mono">{template.logical}</td>
                             <td className="mono">{String(template.version_id ?? '').slice(0, 8) || DASH}</td>
-                            <td className="mono">{String(template.image_sha256 ?? '').slice(0, 10) || DASH}</td>
                             <td>
                               <Button
                                 size="small"
@@ -1141,7 +1239,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                                 onClick={() => {
                                   setLocatorBy('image')
                                   setLocator(template.logical)
-                                  validateMutation.mutate({ by: 'image', value: template.logical })
+                                  validateMutation.mutate({ by: 'image', value: template.logical, threshold: matchThreshold })
                                 }}
                               >
                                 图像匹配
@@ -1153,80 +1251,48 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                     </table>
                   )}
                 </div>
-
-                <div className="debug-kv" style={{ margin: '10px 0 8px' }}>
-                  <span>
-                    快照：{snapshotId ? snapshotId.slice(0, 12) : '未采集（模板只能从服务端保留的快照裁剪）'}
-                  </span>
-                  <span>
-                    框选：{region ? `${region.x},${region.y} ${region.w}×${region.h}` : '未框选（在左侧画面上拖拽）'}
-                  </span>
-                </div>
-                <div className="debug-form">
-                  <label>
-                    x
-                    <input
-                      inputMode="numeric"
-                      value={region ? String(region.x) : ''}
-                      onChange={(event) => setRegion(editRegion(region, 'x', event.target.value))}
-                    />
-                  </label>
-                  <label>
-                    y
-                    <input
-                      inputMode="numeric"
-                      value={region ? String(region.y) : ''}
-                      onChange={(event) => setRegion(editRegion(region, 'y', event.target.value))}
-                    />
-                  </label>
-                  <label>
-                    宽
-                    <input
-                      inputMode="numeric"
-                      value={region ? String(region.w) : ''}
-                      onChange={(event) => setRegion(editRegion(region, 'w', event.target.value))}
-                    />
-                  </label>
-                  <label>
-                    高
-                    <input
-                      inputMode="numeric"
-                      value={region ? String(region.h) : ''}
-                      onChange={(event) => setRegion(editRegion(region, 'h', event.target.value))}
-                    />
-                  </label>
-                  <label className="full">
-                    模板逻辑名（.png，POSIX 相对路径）
-                    <input
-                      value={newLogical}
-                      onChange={(event) => setNewLogical(event.target.value)}
-                      placeholder="buttons/confirm.png"
-                    />
-                  </label>
-                </div>
-                {templateError ? (
-                  <div className="mt">
-                    <Notice tone="red" title="模板登记失败">{templateError}</Notice>
-                  </div>
+                {locatorExpression && locatorBy === 'image' ? (
+                  <pre className="code-block">{locatorExpression}</pre>
                 ) : null}
-                <div className="flex" style={{ marginTop: 10, gap: 8 }}>
+                <div className="image-status" role="status">
+                  {validateError ? <Notice tone="red" title="验证失败">{validateError}</Notice> : null}
+                  {!validateError && matches !== null ? (
+                    <p className="small muted">
+                      {validateNote ?? ''}
+                      {matches.length > 0 ? ' · 命中 ' + matches.length + ' 个区域' : ''}
+                      {locatorSnapshotId ? ' · 定位快照 ' + locatorSnapshotId : ''}
+                    </p>
+                  ) : null}
+                  {!validateError && matches === null ? (
+                    <p className="small muted">选择模板并填写有效阈值后点击「图像匹配」。</p>
+                  ) : null}
+                </div>
+                <div className="flex wrap" style={{ gap: 8 }}>
                   <Button
                     kind="primary"
                     size="small"
-                    icon="plus"
-                    disabled={
-                      createTemplateMutation.isPending || !snapshotId || !region || !newLogical.trim()
-                    }
-                    onClick={() => createTemplateMutation.mutate()}
+                    icon="check"
+                    disabled={!locator.trim() || locatorBy !== 'image' || validateMutation.isPending}
+                    onClick={() => validateMutation.mutate({ by: 'image', value: locator, threshold: matchThreshold })}
                   >
-                    {createTemplateMutation.isPending ? '登记中…' : '从框选登记模板'}
+                    {validateMutation.isPending ? '验证中…' : '验证匹配'}
                   </Button>
-                  <Button size="small" onClick={() => setRegion(null)} disabled={!region}>
-                    清除框选
+                  <Button
+                    size="small"
+                    icon="copy"
+                    disabled={!locatorExpression}
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(locatorExpression)
+                      toast.show('表达式已复制')
+                    }}
+                  >
+                    复制 IMAGE 表达式
                   </Button>
                 </div>
               </section>
-        </section>
+            </>
+          )}
+        </div>
       </div>
 
       <footer className="debug-pane-foot">
