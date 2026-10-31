@@ -123,15 +123,19 @@ export function buildTreeIndex(nodes: SnapshotTreeNode[]): {
 }
 
 /**
- * 节点展示名：文本优先，其次 resource_id / 类名；都没有显示 #下标。
- * 空串按「没有」处理 —— vendor 对无文本节点给的是 text="" 而不是 null，
- * 否则 content_desc 会被空串挡掉。
+ * 节点展示名：与 mobile-auto viewer（static/app.js nodeLabel）同口径——
+ * 短类名 · resource_id · text · content_desc 组合，缺项跳过。
+ * 空串按「没有」处理（vendor 对无文本节点给 text=""，filter(Boolean) 挡掉）。
+ * 无标识的纯容器由 hasNodeIdentity 整行跳过，#下标 只是兜底。
  */
 export function nodeLabel(node: SnapshotTreeNode): string {
-  for (const candidate of [node.text, node.content_desc, node.resource_id, node.class_name]) {
-    if (typeof candidate === 'string' && candidate.trim()) return candidate
-  }
-  return '#' + node.index
+  const parts = [
+    node.class_name ? node.class_name.split('.').pop() : '',
+    node.resource_id ?? '',
+    node.text ?? '',
+    node.content_desc ?? '',
+  ].filter((part) => typeof part === 'string' && part.trim())
+  return parts.length > 0 ? parts.join(' · ') : '#' + node.index
 }
 
 function nodeBounds(node: SnapshotTreeNode): string | null {
@@ -139,6 +143,12 @@ function nodeBounds(node: SnapshotTreeNode): string | null {
   if (!Array.isArray(bounds) || bounds.length !== 4) return null
   const [left, top, right, bottom] = bounds
   return `${left},${top} → ${right},${bottom}`
+}
+
+/** 与 mobile-auto viewer renderTree 同规则：text / resource_id / content_desc
+ *  三者全无的纯容器（FrameLayout、虚拟 root 等）整行跳过，子树原位上移。 */
+export function hasNodeIdentity(node: SnapshotTreeNode): boolean {
+  return Boolean(node.text || node.resource_id || node.content_desc)
 }
 
 /** 递归渲染层级树（children 存下标，超过 200 层视为脏数据直接停）。
@@ -162,6 +172,23 @@ function TreeBranch({
   const kids = (node.children ?? [])
     .map((index) => byIndex.get(index))
     .filter((kid): kid is SnapshotTreeNode => Boolean(kid))
+  if (!hasNodeIdentity(node)) {
+    return (
+      <>
+        {kids.map((kid) => (
+          <TreeBranch
+            key={kid.index}
+            node={kid}
+            depth={depth}
+            byIndex={byIndex}
+            onPick={onPick}
+            selectedIndex={selectedIndex}
+            frozen={frozen}
+          />
+        ))}
+      </>
+    )
+  }
   const bounds = nodeBounds(node)
   const selected = frozen && selectedIndex === node.index
   return (
@@ -196,7 +223,7 @@ function TreeBranch({
         ) : (
           <span style={{ minWidth: 14 }} />
         )}
-        <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <span className="mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }} title={nodeLabel(node)}>
           {nodeLabel(node)}
         </span>
         {bounds ? (

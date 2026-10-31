@@ -18,7 +18,7 @@ for (const extension of ['.ts', '.tsx']) {
 const { moduleName, isPerformanceType, MODULE_NAMES } = require('../src/constants.ts')
 const { conclusionText } = require('../src/pages/ReportsPage.tsx')
 const { metricCell, metricMissingReason, junitCounts } = require('../src/components/ReportDrawer.tsx')
-const { buildTreeIndex, nodeLabel } = require('../src/components/DebugDrawer.tsx')
+const { buildTreeIndex, nodeLabel, hasNodeIdentity } = require('../src/components/DebugDrawer.tsx')
 
 test('后端 test_type（ui/performance/joint）都有展示名，不会被当成未指定', () => {
   assert.equal(moduleName('ui'), MODULE_NAMES.ui)
@@ -93,4 +93,22 @@ test('层级树按 children 下标还原父子关系', () => {
   assert.equal(nodeLabel(nodes[3]), '确认')
   assert.equal(nodeLabel({ index: 9, class_name: 'Button' }), 'Button')
   assert.equal(nodeLabel({ index: 7 }), '#7')
+  // 与 mobile-auto viewer 同口径：多字段组合「短类名 · resource-id · text · content-desc」
+  assert.equal(
+    nodeLabel({
+      index: 4,
+      class_name: 'android.widget.TextView',
+      resource_id: 'com.example:id/title',
+      text: '星河生活',
+      content_desc: '标题',
+    }),
+    'TextView · com.example:id/title · 星河生活 · 标题',
+  )
+  // viewer renderTree 同规则：text/resource_id/content_desc 全无 → 整行跳过
+  assert.equal(hasNodeIdentity({ index: 0, class_name: 'root' }), false)
+  assert.equal(hasNodeIdentity({ index: 1, class_name: 'android.widget.FrameLayout' }), false)
+  assert.equal(hasNodeIdentity({ index: 2, class_name: 'X', text: '' }), false)
+  assert.equal(hasNodeIdentity({ index: 3, text: '登录' }), true)
+  assert.equal(hasNodeIdentity({ index: 4, resource_id: 'com.example:id/ok' }), true)
+  assert.equal(hasNodeIdentity({ index: 5, content_desc: '确认' }), true)
 })
