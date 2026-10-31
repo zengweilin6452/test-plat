@@ -10,10 +10,10 @@
  * 「同步设备池」触发 POST /resources/sync（device-registration.md §4.1），按节点汇总结果。
  */
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import { fetchProjects, fetchResources, syncResources } from '../api/endpoints'
-import { DebugDrawer, type DebugTarget } from '../components/DebugDrawer'
 import { ResourceStatusBadge } from '../components/Badge'
 import { Button } from '../components/Button'
 import { PageHeading } from '../components/Card'
@@ -22,6 +22,8 @@ import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
 import { TARGET_CATALOG } from '../constants'
 import { DASH } from '../lib/fmt'
+import { toWorkspaceTarget } from '../components/DebugDrawer'
+import { useDebugHandoff } from '../store/debugHandoff'
 import { useTargetScope } from '../store/scope'
 import { useProjectScope } from '../store/project'
 import type { ResourceRecord, ResourceSyncResponse } from '../types'
@@ -40,7 +42,8 @@ function summarizeSync(result: ResourceSyncResponse): string {
 export function DevicesPage() {
   const { targetScope, setTargetScope } = useTargetScope()
   const { projectId, setProjectId } = useProjectScope()
-  const [debugTarget, setDebugTarget] = useState<DebugTarget | null>(null)
+  const navigate = useNavigate()
+  const setPending = useDebugHandoff((state) => state.setPending)
   // 首次进入（URL 与 localStorage 都没选过项目）时自动选第一个未归档项目；只兜底一次，
   // 之后用户可以切回「全部项目」，不会再被强制选中。
   const autoPicked = useRef(false)
@@ -95,7 +98,9 @@ export function DevicesPage() {
   const stateCount = (state: DeviceState) => rows.filter((item) => deviceState(item) === state).length
 
   function openDebug(row: ResourceRecord) {
-    setDebugTarget({ serial: row.resource_key ?? row.resource_key, label: row.name, leaseHint: null })
+    // 原型：打开调试 = go('ui') + uiTab='inspect'；调试工作区在 UI 自动化页内
+    setPending(toWorkspaceTarget(row))
+    navigate('/ui')
   }
 
   return (
@@ -260,11 +265,6 @@ export function DevicesPage() {
         设备占用状态与 UI、性能任务共用；接入时由宿主协调设备租约与短事务准入。平台不执行连接、安装或授权操作。
       </div>
 
-      <DebugDrawer
-        open={Boolean(debugTarget)}
-        target={debugTarget}
-        onClose={() => setDebugTarget(null)}
-      />
     </>
   )
 }

@@ -40,6 +40,7 @@ import {
   validateTemplate,
 } from '../api/endpoints'
 import type { LocatorMatch, SnapshotTreeNode, TemplateRecord } from '../api/types'
+import type { ResourceRecord } from '../types'
 import { Badge } from './Badge'
 import { Button, LinkButton } from './Button'
 import { Empty } from './Empty'
@@ -78,6 +79,15 @@ const LOCATOR_OPTIONS: { value: LocatorBy; label: string }[] = [
   { value: 'xpath', label: 'xpath' },
   { value: 'image', label: '图像模板（逻辑名）' },
 ]
+
+/** 资源行 → 工作区目标（下拉切换与入口跳转共用同一形状） */
+export function toWorkspaceTarget(device: ResourceRecord): DebugTarget {
+  return {
+    serial: device.resource_key ?? '',
+    label: device.name,
+    leaseHint: null,
+  }
+}
 
 interface Region {
   x: number
@@ -181,12 +191,16 @@ function TreeBranch({
 interface DebugDrawerProps {
   open: boolean
   target: DebugTarget | null
+  /** 可调设备清单（原型 toolbar 的设备下拉；ready 设备） */
+  devices: ResourceRecord[]
+  /** toolbar 下拉切换调试设备 */
+  onTargetChange: (target: DebugTarget | null) => void
   onClose: () => void
   /** 会话建立/释放时上抛，供模板页签等按会话隔离的调用方使用 */
   onSessionChange?: (sessionId: string | number | null) => void
 }
 
-export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDrawerProps) {
+export function DebugDrawer({ open, target, devices, onTargetChange, onClose, onSessionChange }: DebugDrawerProps) {
   const toast = useToast()
   const queryClient = useQueryClient()
 
@@ -333,12 +347,15 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
     void queryClient.invalidateQueries({ queryKey: ['resources'] })
   }, [closeMutation, onClose, queryClient, reset, teardownSocket])
 
-  /** 面板占住右侧工作区：给 body 打标记，让 .main 让出等宽内边距 */
+  /** 页面级工作区：离开调试标签（卸载）时释放会话，设备不被占死 */
+  const unmountCloseRef = useRef(handleClose)
+  unmountCloseRef.current = handleClose
   useEffect(() => {
-    if (!open) return
-    document.body.classList.add('debug-pane-open')
-    return () => document.body.classList.remove('debug-pane-open')
-  }, [open])
+    return () => {
+      if (sessionRef.current !== null) unmountCloseRef.current()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   /** Esc 关闭（原先是原生 <dialog> 自带的行为） */
   useEffect(() => {
@@ -657,28 +674,40 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
   if (!open) return null
 
   return (
-    <aside
-      className="debug-pane"
-      role="dialog"
-      aria-modal="false"
-      aria-label={target ? target.label + ' · 调试' : '设备调试'}
-    >
-      <header className="debug-pane-head">
-        <div>
-          <h2>{target ? target.label + ' · 调试' : '设备调试'}</h2>
-          <p>
-            serial {target?.serial ?? DASH}
-            {session ? ' · 会话 ' + String(session.id).slice(0, 8) : ''}
-            {frameSize ? ' · 画面 ' + frameSize.w + '×' + frameSize.h : ''}
-          </p>
-        </div>
-        <div className="flex" style={{ gap: 8 }}>
-          <Badge tone={wsTone} dot>{wsText}</Badge>
-          <Button iconOnly icon="close" aria-label="关闭调试" onClick={handleClose} />
-        </div>
-      </header>
+    <div className="debug-workspace" aria-label={target ? target.label + ' · 调试' : '设备调试'}>
+      {/* 原型 nativeInspectorPage 的 toolbar：设备下拉 + 状态 + 采集检查 */}
+      <div className="toolbar mb">
+        <select
+          aria-label="调试设备"
+          value={target?.serial ?? ''}
+          onChange={(event) => {
+            const picked = devices.find((d) => d.resource_key === event.target.value)
+            if (picked) onTargetChange(toWorkspaceTarget(picked))
+          }}
+        >
+          {devices.length === 0 ? <option value="">没有可调试设备</option> : null}
+          {devices.map((device) => (
+            <option key={device.id} value={device.resource_key}>
+              {device.name} / {device.resource_key}
+            </option>
+          ))}
+        </select>
+        <Badge tone={wsTone} dot>{wsText}</Badge>
+        <span className="spacer" />
+        <Button size="small" onClick={handleClose}>返回设备池</Button>
+        <Button
+          kind="primary"
+          size="small"
+          icon="image"
+          disabled={!sessionActive || snapshotMutation.isPending}
+          title={sessionActive ? '冻结当前画面并采集 UI 树' : '调试会话尚未激活'}
+          onClick={() => snapshotMutation.mutate()}
+        >
+          {snapshotMutation.isPending ? '采集中…' : '采集检查'}
+        </Button>
+      </div>
 
-      <div className="debug-pane-body">
+      <div className="debug-workspace-body">
         {wsNotice ? (
           <div className="mb">
             <Notice tone="amber" title="调试会话">{wsNotice}</Notice>
@@ -825,16 +854,10 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
             <div>
               <section className="debug-section">
                 <header>
-                  <h3>快照层级树</h3>
-                  <Button
-                    size="small"
-                    icon="image"
-                    disabled={snapshotMutation.isPending || !sessionActive}
-                    title={sessionActive ? undefined : '调试会话尚未激活'}
-                    onClick={() => snapshotMutation.mutate()}
-                  >
-                    {snapshotMutation.isPending ? '采集中…' : '采集快照'}
-                  </Button>
+                  <h3>UI 层级树</h3>
+                  <span className="muted small">
+                    {snapshotId ? 'snapshot ' + snapshotId : '先点「采集检查」冻结画面与 UI 树'}
+                  </span>
                 </header>
                 {snapshotId ? (
                   <div className="muted small mono" style={{ marginBottom: 6 }}>snapshot {snapshotId}</div>
@@ -1163,7 +1186,7 @@ export function DebugDrawer({ open, target, onClose, onSessionChange }: DebugDra
           {closeMutation.isPending ? '正在关闭…' : '关闭会话'}
         </Button>
       </footer>
-    </aside>
+    </div>
   )
 }
 

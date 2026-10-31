@@ -717,3 +717,7 @@ body.debug-pane-open .main {
 .attribute { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-bottom: 1px solid #f2f4f8; font-size: 11px; }
 .locator-option { border: 1px solid #e2e8f3; border-radius: 7px; padding: 10px 12px; margin: 10px 0; font-size: 11px; width: 100%; }
 .locator-option.active { border-color: var(--blue); }
+
+/* 调试工作区：页面级（原型 nativeInspectorPage），不再是右侧浮层 */
+.debug-workspace { padding: 0 0 var(--space-9); }
+.debug-workspace-body { display: grid; gap: var(--space-9); }
