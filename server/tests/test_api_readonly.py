@@ -38,13 +38,14 @@ def app_client():
         yield client
 
 
-def test_health_reports_db_target(app_client):
+def test_health_reports_db_state_without_target(app_client):
     resp = app_client.get("/api/v1/health")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    # 不得泄露密码：只返回 host:port/db 这段
-    assert "@" not in body["database_target"]
+    assert body["db"] == "ok"
+    # 不输出数据库主机（凭据 / 拓扑都不泄露）
+    assert "database_target" not in body
 
 
 def test_overview_shape(app_client):

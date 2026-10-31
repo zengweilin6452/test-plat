@@ -270,3 +270,129 @@ export interface HealthDoc {
   database_target?: string
   [key: string]: unknown
 }
+
+/** ---- GET /api/v1/analyses?run_id= （性能分析页，P4）---- */
+
+/** 分析里的单条指标（median 口径；value 为 null 时看 missing_reason，绝不用 0 顶替） */
+export interface AnalysisMetric {
+  key: string
+  metric_key: string
+  statistic?: string | null
+  scope?: string | null
+  window_key?: string | null
+  metric_version?: string | null
+  median?: number | null
+  value?: number | null
+  unit?: string | null
+  sample_count?: number | null
+  supported?: boolean | null
+  missing_reason?: string | null
+  missing_reason_text?: string | null
+  [key: string]: unknown
+}
+
+/** 门禁检查项：vendor judge 产出的 checks 行 */
+export interface GateCheck {
+  metricKey: string
+  median?: number | null
+  op?: string | null
+  threshold?: number | null
+  level?: 'fail' | 'warn' | string | null
+  ok?: boolean | null
+  baselineValue?: number | null
+  baselineSourceRunId?: string | null
+  sampleCount?: number | null
+  sourceRunId?: string | null
+  window?: { startedAt?: string | null; stoppedAt?: string | null } | null
+  reason?: string | null
+  [key: string]: unknown
+}
+
+export interface BaselineOption {
+  id: string
+  baseline_name?: string | null
+  version?: number | null
+  source_run_id?: string | null
+  profile?: string | null
+  profile_error?: string | null
+  same_profile?: boolean | null
+  [key: string]: unknown
+}
+
+export interface AnalysisEvaluation {
+  id: string
+  component_id?: string | null
+  mode?: 'original' | 'reanalysis' | string | null
+  verdict?: 'passed' | 'failed' | 'not_tested' | null
+  reason_code?: string | null
+  reason_text?: string | null
+  policy_id?: string | null
+  policy_version?: number | null
+  baseline_id?: string | null
+  baseline_name?: string | null
+  baseline_version?: number | null
+  created_at?: string | null
+  [key: string]: unknown
+}
+
+export interface RunAnalysis {
+  run: {
+    id: string
+    application_id?: string | null
+    application_name?: string | null
+    task_id?: string | null
+    task_name?: string | null
+    test_type?: string | null
+    platform?: string | null
+    state?: string | null
+    outcome?: string | null
+    reason_code?: string | null
+    not_tested_reason?: string | null
+    started_at?: string | null
+    ended_at?: string | null
+    created_at?: string | null
+    [key: string]: unknown
+  }
+  verdict?: 'passed' | 'failed' | 'not_tested' | null
+  mode?: 'original' | 'reanalysis' | string | null
+  original_missing?: boolean
+  selected_evaluation_id?: string | null
+  reason?: string | null
+  reason_text?: string | null
+  checks?: GateCheck[] | null
+  metrics?: AnalysisMetric[] | null
+  thresholds?: Record<string, unknown> | null
+  context?: {
+    device_profile?: string | null
+    device_profile_error?: string | null
+    window?: string | null
+    statistic?: string | null
+    platform?: string | null
+    [key: string]: unknown
+  } | null
+  components?: { id: string; kind?: string | null; state?: string | null; outcome?: string | null; reason_code?: string | null }[] | null
+  evaluations?: AnalysisEvaluation[] | null
+  baseline_options?: BaselineOption[] | null
+  trial?: unknown
+  [key: string]: unknown
+}
+
+/** POST /api/v1/runs/{id}/gate-evaluations 的响应（试算新增判定行） */
+export interface GateEvaluationResponse {
+  id: string
+  evaluation_id?: string | null
+  mode?: 'original' | 'reanalysis' | string | null
+  verdict?: 'passed' | 'failed' | 'not_tested' | null
+  reason?: string | null
+  reason_code?: string | null
+  reason_text?: string | null
+  checks?: GateCheck[] | null
+  policy_id?: string | null
+  policy_version?: number | null
+  baseline_id?: string | null
+  request_key?: string | null
+  created_at?: string | null
+  created?: boolean
+  note?: string | null
+  [key: string]: unknown
+}

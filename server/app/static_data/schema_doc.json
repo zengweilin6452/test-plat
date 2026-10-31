@@ -18,11 +18,12 @@
     },
     {
       "name": "执行资源",
-      "count": 5,
+      "count": 6,
       "tables": [
         "execution_nodes",
         "resource_profiles",
         "execution_resources",
+        "device_checks",
         "debug_sessions",
         "resource_leases"
       ]
@@ -1256,7 +1257,7 @@
           "unique": false,
           "default": null,
           "foreign_key": null,
-          "description": ""
+          "description": "最近一次被节点同步确认在线的时间；NULL = 从未同步过"
         }
       ],
       "constraints": [
@@ -1373,6 +1374,160 @@
         }
       ],
       "comment": "真机、模拟器或浏览器槽位。每个实例只承载一个活动运行。 Web 并发通过多个独立槽位表示；资源重新建档须在无活动租约时处理。"
+    },
+    {
+      "name": "device_checks",
+      "title": "设备短检查",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "nullable": true,
+          "primary_key": true,
+          "unique": false,
+          "default": null,
+          "foreign_key": null,
+          "description": "检查 id"
+        },
+        {
+          "name": "project_id",
+          "type": "uuid",
+          "nullable": false,
+          "primary_key": false,
+          "unique": false,
+          "default": null,
+          "foreign_key": {
+            "table": "projects",
+            "columns": [
+              "id"
+            ]
+          },
+          "description": "所属项目"
+        },
+        {
+          "name": "resource_id",
+          "type": "uuid",
+          "nullable": false,
+          "primary_key": false,
+          "unique": false,
+          "default": null,
+          "foreign_key": null,
+          "description": "被检查的执行资源"
+        },
+        {
+          "name": "kind",
+          "type": "text",
+          "nullable": false,
+          "primary_key": false,
+          "unique": false,
+          "default": null,
+          "foreign_key": null,
+          "description": "检查类型：readiness / identity"
+        },
+        {
+          "name": "test_type",
+          "type": "text",
+          "nullable": false,
+          "primary_key": false,
+          "unique": false,
+          "default": null,
+          "foreign_key": null,
+          "description": "检查目标测试类型"
+        },
+        {
+          "name": "holder_id",
+          "type": "text",
+          "nullable": false,
+          "primary_key": false,
+          "unique": false,
+          "default": null,
+          "foreign_key": null,
+          "description": "检查持有者标识"
+        },
+        {
+          "name": "state",
+          "type": "text",
+          "nullable": false,
+          "primary_key": false,
+          "unique": false,
+          "default": null,
+          "foreign_key": null,
+          "description": "检查状态：opening / running / finished / failed / lost"
+        },
+        {
+          "name": "requested_at",
+          "type": "timestamptz",
+          "nullable": false,
+          "primary_key": false,
+          "unique": false,
+          "default": "now()",
+          "foreign_key": null,
+          "description": "请求时间"
+        },
+        {
+          "name": "started_at",
+          "type": "timestamptz",
+          "nullable": true,
+          "primary_key": false,
+          "unique": false,
+          "default": null,
+          "foreign_key": null,
+          "description": "开始时间"
+        },
+        {
+          "name": "finished_at",
+          "type": "timestamptz",
+          "nullable": true,
+          "primary_key": false,
+          "unique": false,
+          "default": null,
+          "foreign_key": null,
+          "description": "结束时间"
+        },
+        {
+          "name": "expires_at",
+          "type": "timestamptz",
+          "nullable": false,
+          "primary_key": false,
+          "unique": false,
+          "default": null,
+          "foreign_key": null,
+          "description": "租约到期时间；过期即视为丢失"
+        },
+        {
+          "name": "result",
+          "type": "postgresql.JSONB()",
+          "nullable": true,
+          "primary_key": false,
+          "unique": false,
+          "default": null,
+          "foreign_key": null,
+          "description": "检查结果（readiness / identity 判定）"
+        },
+        {
+          "name": "error_code",
+          "type": "text",
+          "nullable": true,
+          "primary_key": false,
+          "unique": false,
+          "default": null,
+          "foreign_key": null,
+          "description": "失败错误码"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamptz",
+          "nullable": false,
+          "primary_key": false,
+          "unique": false,
+          "default": "now()",
+          "foreign_key": null,
+          "description": "创建时间"
+        }
+      ],
+      "constraints": [],
+      "indexes": [],
+      "comment": "设备短检查（readiness / identity）；与运行、调试共用 resource_leases 互斥"
     },
     {
       "name": "debug_sessions",
@@ -1677,7 +1832,7 @@
           "unique": false,
           "default": null,
           "foreign_key": null,
-          "description": ""
+          "description": "短检查（device_checks）通道；与 run_id/debug_session_id 三选一"
         }
       ],
       "constraints": [
@@ -2608,7 +2763,7 @@
           "unique": false,
           "default": null,
           "foreign_key": null,
-          "description": ""
+          "description": "项目内请求幂等键"
         },
         {
           "name": "fingerprint",
@@ -2618,7 +2773,7 @@
           "unique": false,
           "default": null,
           "foreign_key": null,
-          "description": ""
+          "description": "规范化创建内容摘要"
         },
         {
           "name": "task_id",
@@ -2628,7 +2783,7 @@
           "unique": false,
           "default": null,
           "foreign_key": null,
-          "description": ""
+          "description": "键首次绑定的任务"
         },
         {
           "name": "created_at",
@@ -2643,7 +2798,7 @@
       ],
       "constraints": [],
       "indexes": [],
-      "comment": ""
+      "comment": "任务创建幂等键；跨重启复用"
     },
     {
       "name": "test_runs",
@@ -2852,7 +3007,7 @@
           "unique": false,
           "default": null,
           "foreign_key": null,
-          "description": ""
+          "description": "取消受理时间；持久化事实，重复受理不改写"
         },
         {
           "name": "cancel_requested_by",
@@ -2862,7 +3017,7 @@
           "unique": false,
           "default": null,
           "foreign_key": null,
-          "description": ""
+          "description": "取消受理人"
         },
         {
           "name": "display_no",
@@ -2872,7 +3027,7 @@
           "unique": false,
           "default": null,
           "foreign_key": null,
-          "description": ""
+          "description": "全局展示序号，RUN-0001 由它格式化；持久分配，历史变动不重编号"
         }
       ],
       "constraints": [

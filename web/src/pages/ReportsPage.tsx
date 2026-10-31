@@ -17,7 +17,7 @@ import { useQuery } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import { fetchRuns } from '../api/endpoints'
 import { StatusBadge } from '../components/Badge'
-import { LinkButton } from '../components/Button'
+import { Button, LinkButton } from '../components/Button'
 import { PageHeading } from '../components/Card'
 import { ContextBar, Toolbar } from '../components/PageBits'
 import { Empty } from '../components/Empty'
@@ -65,6 +65,8 @@ export function ReportsPage() {
   // 只有完成的运行才有报告：completed 过滤在服务端完成，前端不再从
   // 全量列表里筛 —— 第 201 份之后的报告也能靠游标翻到（AC-REP-01）。
   const completed = runsQuery.data?.items ?? []
+  const nextCursor = runsQuery.data?.next_cursor ?? null
+  const pageNo = pages.length + 1
 
 
   return (
@@ -142,6 +144,28 @@ export function ReportsPage() {
           ))}
         </div>
       )}
+
+      {completed.length > 0 ? (
+        <div className="between mt">
+          <span className="muted small">
+            第 {pageNo} 页 · 本页 {completed.length} 条
+          </span>
+          <div className="flex">
+            <Button
+              disabled={pages.length === 0 || runsQuery.isFetching}
+              onClick={() => setPages((stack) => stack.slice(0, -1))}
+            >
+              上一页
+            </Button>
+            <Button
+              disabled={!nextCursor || runsQuery.isFetching}
+              onClick={() => setPages((stack) => [...stack, nextCursor])}
+            >
+              下一页
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       <ReportDrawer
         open={Boolean(activeRun)}

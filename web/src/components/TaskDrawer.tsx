@@ -5,7 +5,9 @@
  * 1. 最新修订摘要 —— 任务行自带的最新修订（test_type / readiness / revision_id）+ 修订接口里的同号修订详情；
  * 2. 修订历史时间线 —— GET /api/v1/tasks/{id}/revisions，按修订号倒序；
  * 3. 就绪状态与「验证任务」—— POST /api/v1/tasks/{id}/validate，
- *    422 readiness_incomplete 时把 details 里的缺失项原样列出（不自行推导、不伪造通过）。
+ *    422 readiness_incomplete 时把 details 里的缺失项原样列出（不自行推导、不伪造通过）；
+ * 4. 绑定构建与套件版本 —— PATCH /api/v1/tasks/{id}（lock_version 做 CAS），
+ *    补齐后端验证要求的 build_id / suite_version_id，之后才能验证与首次启动运行。
  *
  * 硬约束：
  * - outcome 为 null 时绝不显示「已通过 / 未通过」，只显示生命周期 / 就绪态；
@@ -15,7 +17,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError } from '../api/client'
-import { fetchTaskRevisions, validateTask } from '../api/endpoints'
+import {
+  createRun,
+  fetchBuilds,
+  fetchSuiteVersions,
+  fetchSuites,
+  fetchTaskRevisions,
+  patchTask,
+  validateTask,
+} from '../api/endpoints'
 import { moduleName, TARGET_CATALOG } from '../constants'
 import { displayStatus, displayTaskStatus } from '../lib/display'
 import { DASH, fmtDateTime } from '../lib/fmt'
@@ -32,6 +42,7 @@ import { Drawer } from './Dialog'
 import { Empty } from './Empty'
 import { Notice } from './Notice'
 import { useToast } from './Toast'
+import { newRequestKey } from './TaskWizard'
 
 /** 后端可能返回 revisions 为数组或 { items } —— 两种都接住，缺失时返回空数组而不是假数据 */
 function readRevisions(payload: unknown): TaskRevisionRecord[] {
@@ -91,11 +102,25 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
   const toast = useToast()
   const [validationError, setValidationError] = useState<ReturnType<typeof describeError> | null>(null)
   const [lastValidated, setLastValidated] = useState<TaskValidateResponse | null>(null)
+  // 绑定表单：套件选择驱动版本列表；构建默认取最新修订已绑定的值
+  const [suiteId, setSuiteId] = useState('')
+  const [suiteVersionId, setSuiteVersionId] = useState('')
+  const [buildId, setBuildId] = useState('')
+  // 抽屉拿到的 task 是列表快照：验证 / 绑定都会 bump lock_version，
+  // 这里跟着响应更新，避免第二次保存拿着旧版本号撞 409 stale_version
+  const [lockVersion, setLockVersion] = useState<number | null>(null)
+  // 绑定会追加一条 draft 修订：本地 readiness 跟着回落，不能继续显示"已验证"
+  const [readinessOverride, setReadinessOverride] = useState<TaskReadiness | null>(null)
 
   useEffect(() => {
     if (open) {
       setValidationError(null)
       setLastValidated(null)
+      setSuiteId('')
+      setSuiteVersionId('')
+      setBuildId('')
+      setLockVersion(task?.lock_version ?? null)
+      setReadinessOverride(null)
     }
   }, [open, task?.id])
 
@@ -114,13 +139,49 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
 
   /** 最新修订：优先用修订接口的第 1 条；接口不可用时退回任务行字段（并明确标注来源） */
   const latestRevision = revisions[0] ?? null
-  const readiness: TaskReadiness | null = lastValidated?.readiness ?? task?.readiness ?? null
+  const readiness: TaskReadiness | null =
+    readinessOverride ?? lastValidated?.readiness ?? task?.readiness ?? null
+  const testType = latestRevision?.test_type ?? task?.test_type ?? null
+  const boundBuildId = latestRevision?.build_id ?? null
+  const boundSuiteVersionId = latestRevision?.suite_version_id ?? null
+
+  const buildsQuery = useQuery({
+    queryKey: ['builds', task?.application.id],
+    queryFn: ({ signal }) => fetchBuilds(task!.application.id, signal),
+    enabled: open && Boolean(task?.application.id),
+    retry: false,
+  })
+  const suitesQuery = useQuery({
+    queryKey: ['suites', testType],
+    queryFn: ({ signal }) => fetchSuites(testType ?? undefined, signal),
+    enabled: open && Boolean(testType),
+    retry: false,
+  })
+  const versionsQuery = useQuery({
+    queryKey: ['suite-versions', suiteId],
+    queryFn: ({ signal }) => fetchSuiteVersions(suiteId, signal),
+    enabled: open && Boolean(suiteId),
+    retry: false,
+  })
+
+  // 只列本应用的构建与本类型的套件（/suites 不支持按应用过滤，前端筛）
+  const builds = useMemo(
+    () => (buildsQuery.data?.items ?? []).filter((item) => item.application_id === task?.application.id),
+    [buildsQuery.data, task?.application.id],
+  )
+  const suites = useMemo(
+    () => (suitesQuery.data?.items ?? []).filter((item) => item.application.id === task?.application.id),
+    [suitesQuery.data, task?.application.id],
+  )
+  const versions = versionsQuery.data?.items ?? []
 
   const validate = useMutation({
     mutationFn: (taskId: string) => validateTask(taskId),
     onSuccess: (result) => {
       setValidationError(null)
       setLastValidated(result)
+      const nextLock = (result as { lock_version?: number }).lock_version
+      if (typeof nextLock === 'number') setLockVersion(nextLock)
       toast.show('任务已通过验证：修订 readiness = validated')
       // 列表与修订历史都要反映新状态
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
@@ -128,6 +189,54 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
     },
     onError: (error) => {
       setValidationError(describeError(error))
+    },
+  })
+
+  // 补齐草稿的构建 / 套件版本绑定（CAS：lock_version）
+  const bindMutation = useMutation({
+    mutationFn: (body: { build_id?: string; suite_version_id?: string }) =>
+      patchTask(task!.id, { lock_version: lockVersion ?? task!.lock_version, ...body }),
+    onSuccess: (updated) => {
+      setValidationError(null)
+      setLastValidated(null)
+      setReadinessOverride(updated?.readiness ?? 'draft')
+      if (typeof updated?.lock_version === 'number') setLockVersion(updated.lock_version)
+      toast.show('已保存绑定，可执行验证。')
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      void queryClient.invalidateQueries({ queryKey: ['task-revisions', task?.id] })
+    },
+    onError: (error) => {
+      const described = describeError(error)
+      if (described.code === 'stale_version') {
+        setValidationError(described)
+        toast.show('任务已被他人更新，请关闭抽屉后重新打开再试。')
+      } else {
+        setValidationError(described)
+      }
+    },
+  })
+
+  // 只有选出了与当前绑定不同的值才允许保存，避免空 PATCH 追加无意义修订
+  const bindDirty =
+    (Boolean(buildId) && buildId !== (boundBuildId ?? '')) ||
+    (Boolean(suiteVersionId) && suiteVersionId !== (boundSuiteVersionId ?? ''))
+
+  const runMutation = useMutation({
+    mutationFn: (revisionId: string) =>
+      createRun({
+        application_id: task!.application.id,
+        task_id: task!.id,
+        revision_id: revisionId,
+        platform: task!.platform,
+        request_key: newRequestKey(),
+      }),
+    onSuccess: (created) => {
+      toast.show('运行已发起：' + created.display_id + '，可在 UI 自动化页跟踪')
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+    onError: (error) => {
+      const described = describeError(error)
+      toast.show('发起运行失败（' + described.code + '）：' + described.message)
     },
   })
 
@@ -143,10 +252,20 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
         kind="primary"
         icon="check"
         onClick={() => validate.mutate(task.id)}
-        disabled={validate.isPending || readiness === 'validated'}
+        disabled={validate.isPending || readiness === 'validated' || runMutation.isPending}
       >
         {validate.isPending ? '验证中…' : readiness === 'validated' ? '已验证' : '验证任务'}
       </Button>
+      {readiness === 'validated' && (lastValidated?.revision?.id ?? task.revision_id) ? (
+        <Button
+          kind="primary"
+          icon="play"
+          disabled={runMutation.isPending}
+          onClick={() => runMutation.mutate((lastValidated?.revision?.id ?? task.revision_id)!)}
+        >
+          {runMutation.isPending ? '发起中…' : '启动运行'}
+        </Button>
+      ) : null}
     </>
   ) : null
 
@@ -249,6 +368,122 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
                 </Notice>
               </div>
             ) : null}
+          </div>
+
+          <div className="drawer-section">
+            <h3>绑定构建与套件版本</h3>
+            <p className="muted small">
+              验证要求修订同时绑定构建与套件版本；保存会追加一条新的 draft 修订，需要重新验证。
+            </p>
+            <dl className="summary-dl">
+              <dt>当前绑定</dt>
+              <dd className="mono">
+                {boundBuildId ?? DASH} / {boundSuiteVersionId ?? DASH}
+              </dd>
+            </dl>
+
+            {buildsQuery.isError || suitesQuery.isError ? (
+              <Notice
+                tone="red"
+                title={
+                  '绑定选项获取失败（' +
+                  describeError(buildsQuery.error ?? suitesQuery.error).code +
+                  '）'
+                }
+              >
+                {describeError(buildsQuery.error ?? suitesQuery.error).message}
+              </Notice>
+            ) : (
+              <>
+                <div className="field">
+                  <label htmlFor={`bind-build-${task.id}`}>构建版本</label>
+                  <select
+                    id={`bind-build-${task.id}`}
+                    value={buildId || boundBuildId || ''}
+                    onChange={(event) => setBuildId(event.target.value)}
+                  >
+                    <option value="">选择构建…</option>
+                    {builds.map((build) => (
+                      <option key={build.id} value={build.id}>
+                        {build.version}
+                        {build.build_key ? ` · ${build.build_key}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {builds.length === 0 && !buildsQuery.isLoading ? (
+                    <div className="field-hint">该应用还没有登记构建，先在应用页上传或登记构建。</div>
+                  ) : null}
+                </div>
+
+                <div className="field">
+                  <label htmlFor={`bind-suite-${task.id}`}>套件</label>
+                  <select
+                    id={`bind-suite-${task.id}`}
+                    value={suiteId}
+                    onChange={(event) => {
+                      setSuiteId(event.target.value)
+                      setSuiteVersionId('')
+                    }}
+                  >
+                    <option value="">选择套件…</option>
+                    {suites.map((suite) => (
+                      <option key={suite.id} value={suite.id}>
+                        {suite.name}
+                        {suite.latest_version ? ` · v${suite.latest_version.version}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {suites.length === 0 && !suitesQuery.isLoading ? (
+                    <div className="field-hint">该应用还没有 {moduleName(testType)} 套件。</div>
+                  ) : null}
+                </div>
+
+                <div className="field">
+                  <label htmlFor={`bind-suite-version-${task.id}`}>套件版本</label>
+                  <select
+                    id={`bind-suite-version-${task.id}`}
+                    value={suiteVersionId}
+                    disabled={!suiteId}
+                    onChange={(event) => setSuiteVersionId(event.target.value)}
+                  >
+                    <option value="">
+                      {suiteId ? (versionsQuery.isLoading ? '加载中…' : '选择版本…') : '先选套件'}
+                    </option>
+                    {versions.map((version) => (
+                      <option key={version.id} value={version.id}>
+                        v{version.version}
+                        {version.case_count !== undefined ? ` · ${version.case_count} 用例` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {versionsQuery.isError ? (
+                    <div className="field-hint">版本清单获取失败：{describeError(versionsQuery.error).message}</div>
+                  ) : null}
+                </div>
+
+                <div className="mt">
+                  <Button
+                    kind="primary"
+                    disabled={bindMutation.isPending || !bindDirty}
+                    onClick={() => {
+                      const body: { build_id?: string; suite_version_id?: string } = {}
+                      if (buildId && buildId !== boundBuildId) body.build_id = buildId
+                      if (suiteVersionId && suiteVersionId !== boundSuiteVersionId) {
+                        body.suite_version_id = suiteVersionId
+                      }
+                      bindMutation.mutate(body)
+                    }}
+                  >
+                    {bindMutation.isPending ? '保存中…' : '保存绑定'}
+                  </Button>
+                  {!bindDirty ? (
+                    <span className="muted small" style={{ marginLeft: 8 }}>
+                      未修改
+                    </span>
+                  ) : null}
+                </div>
+              </>
+            )}
           </div>
 
           <div className="drawer-section">

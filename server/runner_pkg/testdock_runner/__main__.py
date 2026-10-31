@@ -141,12 +141,13 @@ def _report_fail(
     error_code: str,
     message: str,
     stage: str,
+    result=None,
 ) -> None:
     if control is None:
         return
     # joint 的组件事实随 fail 一并上报（如"采集启动失败、UI 未执行"），
     # 平台据此落组件行，而不是让 errored 运行没有任何组件记录。
-    components = getattr(result, "components", None) if "result" in dir() else None
+    components = getattr(result, "components", None)
     try:
         control.fail(
             error_code=error_code,
@@ -182,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     context.start_heartbeat()
     options = _job_options(args)
     exit_code = EXIT_INFRA_ERROR
+    result = None  # 作业失败发生在赋值前时，fail 上报仍能安全引用
     try:
         if args.command == "debug":
             from .debug_job import run_debug_job
@@ -222,12 +224,12 @@ def main(argv: list[str] | None = None) -> int:
         if result.fence_lost:
             return EXIT_FENCE_MISMATCH
         if result.cancelled:
-            _report_fail(control, args, "cancelled", "runner cancelled", "cancelled")
+            _report_fail(control, args, "cancelled", "runner cancelled", "cancelled", result)
             return EXIT_CANCELLED
         if exit_code in (EXIT_OK, EXIT_CASE_FAILURE):
             _report_complete(control, args, result)
             return exit_code
-        _report_fail(control, args, result.reason or "runner_error", result.message, result.reason)
+        _report_fail(control, args, result.reason or "runner_error", result.message, result.reason, result)
         return exit_code if exit_code in (EXIT_OK, EXIT_CASE_FAILURE, EXIT_INFRA_ERROR) else EXIT_INFRA_ERROR
     except ControlError as exc:
         if exc.fence_mismatch:

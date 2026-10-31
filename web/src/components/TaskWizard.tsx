@@ -16,7 +16,14 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { describeError } from '../api/client'
-import { createTask, fetchApplications, fetchResources } from '../api/endpoints'
+import {
+  createTask,
+  fetchApplications,
+  fetchBuilds,
+  fetchResources,
+  fetchSuiteVersions,
+  fetchSuites,
+} from '../api/endpoints'
 import { MODULE_NAMES, TARGET_CATALOG } from '../constants'
 import { DASH } from '../lib/fmt'
 import type {
@@ -24,6 +31,7 @@ import type {
   CreateTaskResponse,
   Platform,
   ResourceRecord,
+  SuiteVersionRecord,
   TestModule,
 } from '../types'
 import { Button } from './Button'
@@ -63,6 +71,9 @@ export interface WizardForm {
   scenario: string
   resourceId: string
   duration: string
+  buildId: string
+  suiteId: string
+  suiteVersionId: string
 }
 
 export const INITIAL_FORM: WizardForm = {
@@ -75,6 +86,9 @@ export const INITIAL_FORM: WizardForm = {
   scenario: '',
   resourceId: '',
   duration: '300',
+  buildId: '',
+  suiteId: '',
+  suiteVersionId: '',
 }
 
 /** 字段级错误：key 与表单字段同名，便于把提示渲染到对应控件下方 */
@@ -130,6 +144,12 @@ export function validateStep2(form: WizardForm): WizardErrors {
   if (form.platform === 'android' && !form.resourceId) {
     errors.resourceId = '请选择已授权在线的设备。'
   }
+  // 验证（readiness=validated）的 DB CHECK 要求 build_id 与 suite_version_id
+  // 都非空；向导里选好，"配置 → 验证 → 执行"才走得通。
+  if (form.platform === 'android') {
+    if (!form.buildId) errors.buildId = '请选择构建版本。'
+    if (!form.suiteVersionId) errors.suiteVersionId = '请选择套件版本。'
+  }
   if (form.module !== 'ui') {
     const raw = form.duration.trim()
     if (!raw) {
@@ -166,7 +186,7 @@ function FieldError({ id, message }: { id: string; message: string | undefined }
 }
 
 /** 生成 UUIDv4 作幂等键（crypto.randomUUID 不可用时降级到 getRandomValues） */
-function newRequestKey(): string {
+export function newRequestKey(): string {
   const cryptoObj = window.crypto
   if (cryptoObj && typeof cryptoObj.randomUUID === 'function') return cryptoObj.randomUUID()
   const bytes = new Uint8Array(16)
@@ -179,7 +199,7 @@ function newRequestKey(): string {
 
 /** 组装 POST /tasks 请求体：只发契约字段，不塞前端自造字段 */
 export function buildCreateTaskRequest(form: WizardForm): CreateTaskRequest {
-  return {
+  const body: CreateTaskRequest = {
     name: form.name.trim(),
     test_type: form.module === 'perf' ? 'performance' : form.module,
     platform: form.platform,
@@ -197,6 +217,12 @@ export function buildCreateTaskRequest(form: WizardForm): CreateTaskRequest {
       }),
     },
   }
+  // 验证与首次执行的必要绑定：validate 要求 build + 套件版本，运行只引用
+  // validated 修订——创建时不带上，「配置 → 验证 → 执行」链路就断在 validate。
+  // 没选就不写这个键：undefined 在 JSON 里会消失，留着只会让请求体与契约对不上。
+  if (form.buildId) body.build_id = form.buildId
+  if (form.suiteVersionId) body.suite_version_id = form.suiteVersionId
+  return body
 }
 
 /** 设备可选性：offline / unauthorized 不可选（原型 §2.6 第 2 步） */
@@ -250,6 +276,38 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
     (application) => application.platform === form.platform,
   )
   const applicationsError = applicationsQuery.isError ? describeError(applicationsQuery.error) : null
+
+  // 构建与套件版本（validate 的必要绑定）：换应用后重新拉取
+  const buildsQuery = useQuery({
+    queryKey: ['builds', 'wizard', form.applicationId],
+    queryFn: ({ signal }) => fetchBuilds(form.applicationId, signal),
+    enabled: open && form.platform === 'android' && Boolean(form.applicationId),
+    retry: false,
+  })
+  const suitesQuery = useQuery({
+    queryKey: ['suites', 'wizard', form.module],
+    queryFn: ({ signal }) =>
+      fetchSuites(form.module === 'perf' ? 'performance' : form.module, signal),
+    enabled: open && form.platform === 'android',
+    retry: false,
+  })
+  const suites = (suitesQuery.data?.items ?? []).filter(
+    (suite) => suite.application.id === form.applicationId,
+  )
+  const suiteVersionsQuery = useQuery({
+    queryKey: ['suite-versions', 'wizard', form.suiteId],
+    queryFn: ({ signal }) => fetchSuiteVersions(form.suiteId, signal),
+    enabled: open && form.platform === 'android' && Boolean(form.suiteId),
+    retry: false,
+  })
+  const suiteVersions: SuiteVersionRecord[] = suiteVersionsQuery.data?.items ?? []
+  // 套件版本切换时校掉已发布的旧版本选择
+  useEffect(() => {
+    if (form.suiteVersionId && !suiteVersions.some((v) => v.id === form.suiteVersionId)) {
+      setForm((prev) => ({ ...prev, suiteVersionId: '' }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suiteVersionsQuery.data])
 
   // Android 才需要选设备；其它端不请求资源列表
   const resourcesQuery = useQuery({
@@ -602,6 +660,88 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
               {TARGET_CATALOG[form.platform].label} 端尚未接入执行能力，无需选择设备；任务会以草稿保存。
             </Notice>
           )}
+
+          {form.platform === 'android' ? (
+            <div className="form-grid two">
+              <div className="field">
+                <label htmlFor={fieldId('buildId')}>
+                  构建版本 <span className="text-red">*</span>
+                </label>
+                <select
+                  id={fieldId('buildId')}
+                  value={form.buildId}
+                  aria-invalid={Boolean(fieldErrors.buildId)}
+                  aria-describedby={fieldErrors.buildId ? `${fieldId('buildId')}-error` : undefined}
+                  onChange={(event) => update('buildId', event.target.value)}
+                >
+                  <option value="">请选择构建…</option>
+                  {(buildsQuery.data?.items ?? []).map((build) => (
+                    <option key={build.id} value={build.id}>
+                      {build.version}（{build.build_key}）
+                    </option>
+                  ))}
+                </select>
+                <div className="field-hint">
+                  {buildsQuery.isError
+                    ? '构建清单获取失败：请先在应用页登记构建。'
+                    : '验证（readiness=validated）必须绑定构建。'}
+                </div>
+                <FieldError id={`${fieldId('buildId')}-error`} message={fieldErrors.buildId} />
+              </div>
+              <div className="field">
+                <label htmlFor={fieldId('suiteVersionId')}>
+                  套件版本 <span className="text-red">*</span>
+                </label>
+                <div style={{ display: 'grid', gap: 6 }}>
+                  <select
+                    id={fieldId('suiteId')}
+                    value={form.suiteId}
+                    onChange={(event) => {
+                      setForm((prev) => ({ ...prev, suiteId: event.target.value, suiteVersionId: '' }))
+                    }}
+                    aria-label="选择套件"
+                  >
+                    <option value="">请选择套件…</option>
+                    {suites.map((suite) => (
+                      <option key={suite.id} value={suite.id}>
+                        {suite.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    id={fieldId('suiteVersionId')}
+                    value={form.suiteVersionId}
+                    aria-invalid={Boolean(fieldErrors.suiteVersionId)}
+                    aria-describedby={
+                      fieldErrors.suiteVersionId ? `${fieldId('suiteVersionId')}-error` : undefined
+                    }
+                    disabled={!form.suiteId}
+                    onChange={(event) => update('suiteVersionId', event.target.value)}
+                  >
+                    <option value="">
+                      {form.suiteId ? '请选择版本…' : '先选择套件…'}
+                    </option>
+                    {suiteVersions.map((version) => (
+                      <option key={version.id} value={version.id}>
+                        v{version.version}
+                        {typeof version.case_count === 'number' ? ` · ${version.case_count} 用例` : ''}
+                        {version.has_code_copy === false ? ' · 无固定代码副本（不可验证）' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field-hint">
+                  {suitesQuery.isError || suiteVersionsQuery.isError
+                    ? '套件清单获取失败：请先在套件来源登记套件版本。'
+                    : '验证要求套件版本带用例与固定代码副本。'}
+                </div>
+                <FieldError
+                  id={`${fieldId('suiteVersionId')}-error`}
+                  message={fieldErrors.suiteVersionId}
+                />
+              </div>
+            </div>
+          ) : null}
 
           <div className="form-grid two">
             <div className="field">

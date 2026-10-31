@@ -353,6 +353,9 @@ export interface CreateTaskRequest {
   name: string
   test_type: 'ui' | 'performance' | 'joint'
   platform: Platform
+  /** 验证（readiness=validated）的必要绑定；缺省时任务只能是草稿 */
+  build_id?: string
+  suite_version_id?: string | null
   config: {
     package_name?: string
     identifier?: string
@@ -428,4 +431,55 @@ export interface ReadinessIncompleteDetails {
   missing_checks?: unknown
   items?: unknown
   [key: string]: unknown
+}
+
+/** GET /api/v1/builds 的单条（工单 04 构建；字段以 services/builds.serialize_build 为准） */
+export interface BuildRecord {
+  id: string
+  application_id: string
+  version: string
+  build_key: string
+  source_commit?: string | null
+  sha256?: string | null
+  identity_state?: string
+  created_at?: string | null
+  [key: string]: unknown
+}
+
+export interface BuildsResponse {
+  items: BuildRecord[]
+  total: number
+}
+
+/** GET /api/v1/suites 的单条 */
+export interface SuiteRecord {
+  id: string
+  name: string
+  test_type: 'ui' | 'performance' | 'joint'
+  application: { id: string; name: string; platform: string }
+  version_count?: number
+  latest_version?: { id: string; version: number } | null
+  [key: string]: unknown
+}
+
+export interface SuitesResponse {
+  items: SuiteRecord[]
+  total?: number
+}
+
+/** GET /api/v1/suites/{id}/versions 的单条 */
+export interface SuiteVersionRecord {
+  id: string
+  suite_id: string
+  version: number
+  case_count?: number
+  has_code_copy?: boolean
+  manifest?: Record<string, unknown>
+  created_at?: string | null
+  [key: string]: unknown
+}
+
+export interface SuiteVersionsResponse {
+  items: SuiteVersionRecord[]
+  total?: number
 }

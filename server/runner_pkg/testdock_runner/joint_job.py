@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import collect_layout, write_report_json
-from .env import RunnerContext, fake_enabled
+from .env import RunnerContext, ensure_vendor_on_path, fake_enabled
 from .protocol import emit_stage, emit_text
 from . import EXIT_INFRA_ERROR
 from .ui_job import UiJobOptions, run_ui_job
@@ -66,11 +66,53 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _start_perf_collect(options: UiJobOptions):
+    """真实路径：打开 vendor PerfKit 交互式采集窗口（设计方案 §6.2）。
+
+    返回 CollectScope：with 语义由调用方手动 finalize——性能采集窗口必须
+    包围同一次 UI 执行（D8），UI 一返回就 finalize 停采。
+    采集项来自 perf 配置 items，缺省 PSS / 进程 CPU / FPS 三项。
+    """
+    ensure_vendor_on_path(options.vendor_dir)
+    from mobile_perf.kit import PerfKit
+    from mobile_perf.session import SessionSpec
+
+    perf = options.perf or {}
+    items = [str(item) for item in (perf.get("items") or ["mem_pss_mb", "cpu_process_pct", "fps_frame"])]
+    if not options.app_package:
+        raise ValueError("joint 运行缺少 app_package：采集需要目标前台应用")
+    runs_dir = options.artifacts_dir / "perf-runs"
+    kit = PerfKit(serial=options.serial or None, runs_dir=str(runs_dir))
+    spec = SessionSpec(
+        target=str(options.app_package),
+        items=items,
+        host_run_id=str(options.run_id),
+        runs_dir=str(runs_dir),
+    )
+    return kit.collect(spec)
+
+
 def run_joint_job(options: UiJobOptions, context: RunnerContext) -> JointJobResult:
     """采集包围 UI：先开采集，再跑一次 UI，UI 一返回立刻停采并归档。"""
     fake = fake_enabled(options.fake)
     emit_stage("perf_collect_start", 10, stage=1)
     collect_started_at = _now()
+
+    scope = None
+    if not fake:
+        try:
+            scope = _start_perf_collect(options)
+        except Exception as exc:  # noqa: BLE001 - 采集启动失败按矩阵收敛为 errored
+            emit_text("perf_collect_start_failed", detail=str(exc)[:300])
+            return JointJobResult(
+                exit_code=EXIT_INFRA_ERROR,
+                reason=PERF_COLLECT_START_FAILED,
+                message="性能采集启动失败，UI 未执行：" + str(exc)[:200],
+                components=[
+                    {"kind": "ui", "state": "cancelled", "reason_code": UI_CANCELLED_BEFORE_START},
+                    {"kind": "performance", "state": "errored", "reason_code": PERF_COLLECT_START_FAILED},
+                ],
+            )
 
     if os.environ.get("TESTDOCK_FAKE_PERF", "").strip() == "collect_start_failed":
         # 采集启动失败：UI 根本不开始。组件事实随 fail 一并上报，平台按矩阵
@@ -125,7 +167,14 @@ def run_joint_job(options: UiJobOptions, context: RunnerContext) -> JointJobResu
             ],
         )
 
-    # UI 一返回立即停采：不等待最小样本数、不补空闲样本（D11）
+    # UI 一返回立即停采：不等待最小样本数、不补空闲样本（D11）。
+    # 真实路径 finalize 走 vendor 归档/入库/报告全链路，报告含真实指标。
+    vendor_report = None
+    if scope is not None:
+        try:
+            vendor_report = scope.finalize()
+        except Exception as exc:  # noqa: BLE001 - 停采失败不吞 UI 结果，指标按缺失呈现
+            emit_text("perf_collect_stop_failed", detail=str(exc)[:300])
     collect_stopped_at = _now()
     emit_stage("perf_collect_stop", 90, stage=2)
 
@@ -138,6 +187,18 @@ def run_joint_job(options: UiJobOptions, context: RunnerContext) -> JointJobResu
     if fake:
         _write_fake_perf_report(options.artifacts_dir, window)
         metrics_summary = {"mem_pss_mb": {"unit": "MB", "median": 268.0, "sampleCount": 12}}
+    elif isinstance(vendor_report, dict):
+        # vendor 报告字段映射到平台 report.json 契约（runtime._report_json_payload 消费）
+        report_data = {
+            "runId": str(options.run_id),
+            "mode": "original",
+            "metricsSummary": vendor_report.get("metricsSummary") or {},
+            "thresholdsAtRun": vendor_report.get("thresholdsAtRun") or {},
+            "collectWindow": window,
+            "prototype": False,
+        }
+        write_report_json(options.artifacts_dir, report_data)
+        metrics_summary = report_data["metricsSummary"]
 
     components = list(ui_result.components or [])
     if not components:

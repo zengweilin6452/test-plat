@@ -140,4 +140,5 @@ def test_health_does_not_echo_credentials(client: TestClient) -> None:
     resp = client.get("/api/v1/health")
     assert resp.status_code == 200
     body = resp.json()
-    assert "@" not in body["database_target"]
+    # /health 不再输出数据库目标：既无凭据也无拓扑
+    assert "database_target" not in body

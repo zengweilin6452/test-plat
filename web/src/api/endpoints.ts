@@ -16,6 +16,10 @@ import type {
   TaskRevisionsResponse,
   TasksResponse,
   TaskValidateResponse,
+  BuildsResponse,
+  SuiteVersionsResponse,
+  SuitesResponse,
+  TaskRecord,
 } from '../types'
 
 /** overview 不接受 scope（后端按 Android 统计），保留参数位以便后续扩展 */
@@ -91,6 +95,33 @@ export function fetchTaskRevisions(taskId: string, signal?: AbortSignal) {
 /** POST /api/v1/tasks/{id}/validate —— readiness draft -> validated */
 export function validateTask(taskId: string) {
   return api.post<TaskValidateResponse>(`/tasks/${encodeURIComponent(taskId)}/validate`)
+}
+
+/** GET /api/v1/builds?application_id= —— 应用的构建清单（version 倒序由服务端保证） */
+export function fetchBuilds(applicationId: string, signal?: AbortSignal) {
+  return api.get<BuildsResponse>('/builds', { application_id: applicationId }, signal)
+}
+
+/** GET /api/v1/suites?test_type= —— 套件清单（含最新版本摘要） */
+export function fetchSuites(testType: string | undefined, signal?: AbortSignal) {
+  return api.get<SuitesResponse>('/suites', { test_type: testType || undefined }, signal)
+}
+
+/** GET /api/v1/suites/{id}/versions —— 套件版本（version 倒序，带 case_count/has_code_copy） */
+export function fetchSuiteVersions(suiteId: string, signal?: AbortSignal) {
+  return api.get<SuiteVersionsResponse>(
+    '/suites/' + encodeURIComponent(suiteId) + '/versions',
+    undefined,
+    signal,
+  )
+}
+
+/** PATCH /api/v1/tasks/{id} —— CAS 补齐草稿的 build_id / suite_version_id */
+export function patchTask(
+  taskId: string,
+  body: { lock_version: number; build_id?: string; suite_version_id?: string },
+) {
+  return api.patch<TaskRecord>('/tasks/' + encodeURIComponent(taskId), body)
 }
 
 /** POST /api/v1/runs —— 发起运行；重跑用 parent_run_id 关联原运行（工单 11） */
@@ -270,4 +301,38 @@ export function fetchRunArtifacts(runId: string, signal?: AbortSignal) {
 /** GET /api/v1/health —— 能力核查：{status, db, vendor, runners} */
 export function fetchHealth(signal?: AbortSignal) {
   return api.get<HealthDoc>('/health', undefined, signal)
+}
+
+/** ---- 以下为性能分析端点（routers/analyses.py，P4）---- */
+
+import type { GateEvaluationResponse, RunAnalysis } from './types'
+
+/**
+ * GET /api/v1/analyses?run_id= —— 单次运行的分析。
+ * 默认返回**原始判定**；传 evaluation_id 才切到那条（通常是试算产生的 reanalysis）。
+ */
+export function fetchAnalysis(
+  runId: string,
+  evaluationId?: string | null,
+  signal?: AbortSignal,
+) {
+  return api.get<RunAnalysis>(
+    '/analyses',
+    { run_id: runId, evaluation_id: evaluationId || undefined },
+    signal,
+  )
+}
+
+/**
+ * POST /api/v1/runs/{id}/gate-evaluations —— 规则试算：只新增判定行，
+ * 绝不改写原始判定与历史报告。request_key 幂等。
+ */
+export function createGateEvaluation(
+  runId: string,
+  body: { request_key: string; policy_id?: string | null; baseline_run_id?: string | null },
+) {
+  return api.post<GateEvaluationResponse>(
+    '/runs/' + encodeURIComponent(runId) + '/gate-evaluations',
+    body,
+  )
 }

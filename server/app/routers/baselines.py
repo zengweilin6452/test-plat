@@ -280,7 +280,13 @@ async def create_baseline(
         .mappings()
         .all()
     )
-    snapshot = [dict(row) for row in rows]
+    snapshot = []
+    for row in rows:
+        item = dict(row)
+        # 工单审查修复：快照行带上来源运行 ID——分析侧 `_snapshot_run_ids`
+        # 靠它反查默认基线的来源运行；没有它，已有基线会被判 baseline_missing。
+        item["source_run_id"] = str(run["id"])
+        snapshot.append(item)
     if not snapshot:
         raise HTTPException(status_code=409, detail="运行没有任何指标行，不能创建基线")
 

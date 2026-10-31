@@ -27,15 +27,15 @@ from _p2_common import TEST_DB  # noqa: E402
 pytestmark = pytest.mark.integration
 
 
-def test_schema_has_all_24_tables_with_counts(api_client):
-    """/schema 返回 24 表；7 组计数一致；泳道/写入流程齐备。"""
+def test_schema_has_all_26_tables_with_counts(api_client):
+    """/schema 返回 26 表；7 组计数一致；泳道/写入流程齐备。"""
     resp = api_client.get("/api/v1/schema")
     assert resp.status_code == 200, resp.text
     body = resp.json()
 
-    assert body["table_count"] == 24
+    assert body["table_count"] == 26
     table_names = {t["name"] for t in body["tables"]}
-    assert len(table_names) == 24
+    assert len(table_names) == 26
 
     # 7 组，每组计数与 tables 清单一致
     assert len(body["groups"]) == 7
@@ -45,7 +45,7 @@ def test_schema_has_all_24_tables_with_counts(api_client):
         grouped.update(group["tables"])
         # 每张组内表都必须真实存在
         assert grouped <= table_names
-    assert grouped == table_names, "分组必须覆盖全部 24 表且不重复"
+    assert grouped == table_names, "分组必须覆盖全部 26 表且不重复"
 
     # 4 泳道 + 4 写入流程
     assert len(body["lanes"]) == 4
@@ -74,7 +74,7 @@ def test_schema_key_fields_and_constraints(api_client):
     audits = by_name["audit_events"]
     assert {"actor_ref", "action", "entity_type", "changes"} <= {c["name"] for c in audits["columns"]}
 
-    # 每张表都要有中文注释（24 表 + 231 列的 COMMENT 全部来自迁移）
+    # 每张表都要有中文注释（26 表 + 259 列的 COMMENT 全部来自迁移，含 0004 新表）
     assert all(t["comment"] for t in body["tables"])
 
 

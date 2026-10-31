@@ -8,9 +8,10 @@
 原理：用 ast 解析 server/alembic/versions/0001_initial.py（**不 import 执行**，
 迁移里没有可安全复用的副作用，且 gen 独立运行不应依赖 alembic 环境），抽取：
 
-  - 24 张表的建表顺序、列（名/类型/可空/默认/主键）、CHECK / UNIQUE / FK 约束；
+  - 表清单与建表顺序、列（名/类型/可空/默认/主键）、CHECK / UNIQUE / FK 约束；
+    0001 之后由 0002+ 追加的迁移补齐（新表 / 新列 / COMMENT），当前 head = 0008；
   - 19 条索引（op.create_index 与 op.execute("CREATE ... INDEX ...") 两种写法）；
-  - 255 条 COMMENT（表用途 / 字段中文说明）。
+  - 表与列的 COMMENT（表用途 / 字段中文说明）。
 
 表分组（7 组）、泳道（4 条）与写入流程（4 条）的归属依据
 docs/platform-prototype/database-design.md §3 与原型 index.html 的
@@ -39,7 +40,14 @@ OUT_PATH = REPO_ROOT / "server" / "app" / "static_data" / "schema_doc.json"
 # --------------------------------------------------------------------------- #
 TABLE_GROUPS: dict[str, list[str]] = {
     "基础资产": ["projects", "project_members", "applications", "app_builds", "environments"],
-    "执行资源": ["execution_nodes", "resource_profiles", "execution_resources", "debug_sessions", "resource_leases"],
+    "执行资源": [
+        "execution_nodes",
+        "resource_profiles",
+        "execution_resources",
+        "device_checks",
+        "debug_sessions",
+        "resource_leases",
+    ],
     "测试定义": ["test_suites", "suite_versions"],
     "任务运行": ["test_tasks", "task_revisions", "task_request_keys", "test_runs"],
     "结果证据": ["run_components", "case_results", "artifacts"],
@@ -64,6 +72,7 @@ TABLE_TITLES: dict[str, str] = {
     "test_runs": "测试运行",
     "debug_sessions": "调试会话",
     "resource_leases": "资源租约",
+    "device_checks": "设备短检查",
     "run_components": "运行组件",
     "case_results": "用例结果",
     "artifacts": "证据文件",
@@ -353,7 +362,7 @@ def _parse_column(call: ast.Call, src: str) -> dict[str, object]:
         "unique": unique,
         "default": default,
         "foreign_key": fk_ref,
-        "description": "",
+        "description": _kwarg(call, "comment") or "",
     }
 
 
@@ -374,8 +383,9 @@ def _kwarg(call: ast.Call, key: str) -> object:
 def apply_migration_ast(tables: dict[str, dict[str, object]], source: str) -> None:
     """把一个 0002+ 迁移的 op.create_table / op.add_column 应用到字典草稿上。
 
-    只处理结构事实（列/主键/可空/默认）；op.execute 里的原始 SQL（回填、
-    COMMENT、序列）不解析——回填不改结构，COMMENT 由 0001 的口径覆盖。
+    结构事实（列/主键/可空/默认）来自 create_table / add_column；
+    op.execute 只解析 COMMENT ON TABLE|COLUMN —— 新表的注释只可能写在这里，
+    跳过会让「每张表都有中文注释」的数据设计口径对新表失效（回填与序列仍不解析）。
     """
     tree = ast.parse(source)
     for node in ast.walk(tree):
@@ -385,7 +395,24 @@ def apply_migration_ast(tables: dict[str, dict[str, object]], source: str) -> No
         if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
                 and func.value.id == "op"):
             continue
-        if func.attr == "add_column" and len(node.args) >= 2:
+        if func.attr == "execute" and node.args:
+            sql = _const(node.args[0])
+            if sql and sql.lstrip().upper().startswith("COMMENT ON"):
+                m = re.match(
+                    r"COMMENT ON (TABLE|COLUMN) ([\w.]+) IS '((?:[^']|'')*)'", sql.strip()
+                )
+                if m:
+                    kind, target, text = m.group(1).lower(), m.group(2), m.group(3).replace("''", "'")
+                    if kind == "table" and target in tables:
+                        tables[target]["comment"] = text
+                    elif kind == "column":
+                        tname, _, colname = target.partition(".")
+                        table = tables.get(tname)
+                        if table:
+                            for col in table["columns"]:  # type: ignore[index]
+                                if col["name"] == colname:
+                                    col["description"] = text
+        elif func.attr == "add_column" and len(node.args) >= 2:
             table_name = _const(node.args[0])
             column = _parse_column(node.args[1], source) if isinstance(node.args[1], ast.Call) else None
             if table_name and column and table_name in tables:

@@ -496,7 +496,44 @@ async def _default_baseline_run_id(
     run_ids = _snapshot_run_ids(snapshot)
     if not run_ids:
         return None
-    return run_ids[0]
+    # 只解析合法 UUID：快照是历史 JSON，脏值不应把整个判定打成 500
+    import uuid as _uuid_mod
+
+    def _is_uuid(value: Any) -> bool:
+        try:
+            _uuid_mod.UUID(str(value))
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    run_ids = [value for value in run_ids if _is_uuid(value)]
+    if not run_ids:
+        return None
+    # 工单审查修复：旧基线的快照行可能只带 component_id（历史写入缺
+    # source_run_id）——把它兜底解析回所属运行，而不是当成不存在的运行。
+    placeholders = ", ".join(f":id{i}" for i in range(len(run_ids)))
+    params = {f"id{i}": str(value) for i, value in enumerate(run_ids)}
+    resolved = (
+        await session.execute(
+            text(
+                "SELECT x.id::text AS candidate, r.id::text AS run_id "
+                "FROM (SELECT "
+                + " UNION ALL ".join(
+                    f"CAST(:id{i} AS uuid) AS id" for i in range(len(run_ids))
+                )
+                + ") x "
+                "LEFT JOIN run_components rc ON rc.id = x.id "
+                "LEFT JOIN test_runs r ON r.id = COALESCE(rc.run_id, x.id)"
+            ),
+            params,
+        )
+    ).mappings().all()
+    by_candidate = {row["candidate"]: row["run_id"] for row in resolved}
+    for candidate in run_ids:
+        run_id = by_candidate.get(str(candidate))
+        if run_id:
+            return run_id
+    return None
 
 
 def _snapshot_run_ids(snapshot: Any) -> list[Any]:

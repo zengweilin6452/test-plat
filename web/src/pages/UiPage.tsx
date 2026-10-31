@@ -80,6 +80,12 @@ export function UiPage() {
   // 调试抽屉当前持有的会话 id：模板按调试会话隔离（vendor TemplateStore 绑定
   // session.assets_dir），模板页签的所有请求都必须显式带上它。
   const [debugSessionId, setDebugSessionId] = useState<string | number | null>(null)
+  // 调试工作区一旦打开就保持挂载：切到「模板」页签时不能卸载 DebugDrawer，
+  // 否则组件卸载兜底会关掉会话，模板页签随即失去 session_id（模板按会话隔离）。
+  const [debugEngaged, setDebugEngaged] = useState(false)
+  useEffect(() => {
+    if (tab === 'debug') setDebugEngaged(true)
+  }, [tab])
   const planned = !isImplementedPlatform(targetScope)
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -248,7 +254,7 @@ export function UiPage() {
             tab === 'runs'
               ? '失败运行的现场证据（截图 / 日志 / 步骤断言）随报告提供'
               : tab === 'debug'
-                ? '调试会话与自动运行竞争同一资源租约；关闭抽屉即释放'
+                ? '调试会话与自动运行竞争同一资源租约；切页签保持会话，关闭工作区才释放'
                 : tab === 'templates'
                   ? '模板按调试会话隔离，经 vendor TemplateStore 管理（需先建立调试会话）'
                   : '套件与用例的读接口在 P2 提供（test_suites / 用例表）'
@@ -287,19 +293,6 @@ export function UiPage() {
               />
             )}
           </>
-        ) : tab === 'debug' ? (
-          /* 原型 nativeInspectorPage：页面内工作区（设备下拉在 toolbar），不再是抽屉 */
-          <DebugDrawer
-            open={tab === 'debug'}
-            target={
-              debugTarget
-              ?? (readyDevices[0] ? toDebugTarget(readyDevices[0]) : null)
-            }
-            devices={readyDevices}
-            onTargetChange={(target) => setDebugTarget(target)}
-            onClose={() => setDebugTarget(null)}
-            onSessionChange={setDebugSessionId}
-          />
         ) : tab === 'templates' ? (
           <TemplatesPanel
             sessionId={debugSessionId}
@@ -309,12 +302,34 @@ export function UiPage() {
             onCreated={() => void queryClient.invalidateQueries({ queryKey: ['templates'] })}
           />
         ) : (
-          <Empty
-            icon="layers"
-            title={tab === 'suites' ? '用例套件尚未接入' : '用例清单尚未接入'}
-            description="套件与用例的读接口（test_suites / 用例表）在 P2 提供。当前不展示任何占位数据。"
-          />
+          tab === 'debug' ? null : (
+            <Empty
+              icon="layers"
+              title={tab === 'suites' ? '用例套件尚未接入' : '用例清单尚未接入'}
+              description="套件与用例的读接口（test_suites / 用例表）在 P2 提供。当前不展示任何占位数据。"
+            />
+          )
         )}
+        {/* 原型 nativeInspectorPage：页面内工作区（设备下拉在 toolbar），不再是抽屉。
+            隐藏而不卸载：切页签只改显示，调试会话与 WS 保持。 */}
+        {debugEngaged ? (
+          <div style={{ display: tab === 'debug' ? undefined : 'none' }}>
+            <DebugDrawer
+              open={debugEngaged}
+              target={
+                debugTarget
+                ?? (readyDevices[0] ? toDebugTarget(readyDevices[0]) : null)
+              }
+              devices={readyDevices}
+              onTargetChange={(target) => setDebugTarget(target)}
+              onClose={() => {
+                setDebugTarget(null)
+                setDebugEngaged(false)
+              }}
+              onSessionChange={setDebugSessionId}
+            />
+          </div>
+        ) : null}
       </Panel>
 
       <TaskWizard

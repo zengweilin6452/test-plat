@@ -20,6 +20,8 @@ const { INITIAL_FORM, buildCreateTaskRequest, validateStep1, validateStep2, isDe
 const { createTask } = require('../src/api/endpoints.ts')
 const applicationId = '11111111-1111-4111-8111-111111111111'
 const resourceId = '22222222-2222-4222-8222-222222222222'
+const buildId = '33333333-3333-4333-8333-333333333333'
+const suiteVersionId = '44444444-4444-4444-8444-444444444444'
 const form = {
   ...INITIAL_FORM,
   applicationId,
@@ -28,6 +30,9 @@ const form = {
   appVersion: '1.2.3',
   scenario: 'login',
   resourceId,
+  // 后端 validate 要求 build_id + suite_version_id：向导必须能带上它们
+  buildId,
+  suiteVersionId,
 }
 
 test('UI 向导使用后端任务模型并保留配置', () => {
@@ -37,6 +42,8 @@ test('UI 向导使用后端任务模型并保留配置', () => {
     test_type: 'ui',
     platform: 'android',
     application_id: applicationId,
+    build_id: buildId,
+    suite_version_id: suiteVersionId,
     config: {
       package_name: 'com.example.acceptance',
       app_version: '1.2.3',
@@ -58,6 +65,9 @@ test('未选择登记应用时不能继续；包名与时长校验仍生效', ()
   assert.ok(validateStep2({ ...form, module: 'perf', duration: '9' }).duration)
   assert.deepEqual(validateStep1(form), {})
   assert.deepEqual(validateStep2(form), {})
+  // 构建 / 套件版本是 validate 的必要条件，缺了就不能进第 3 步
+  assert.ok(validateStep2({ ...form, buildId: '' }).buildId)
+  assert.ok(validateStep2({ ...form, suiteVersionId: '' }).suiteVersionId)
 })
 
 test('在线占用设备可排队，离线、未授权和维护设备不可选', () => {

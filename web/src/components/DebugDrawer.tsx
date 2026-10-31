@@ -207,6 +207,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   const [session, setSession] = useState<{ id: string | number } | null>(null)
   const [nodes, setNodes] = useState<SnapshotTreeNode[] | null>(null)
   const [snapshotId, setSnapshotId] = useState<string | null>(null)
+  /** 采集检查后冻结画面：WS 帧不再覆盖 canvas，框选与模板裁剪都基于同一张快照 */
+  const [frozen, setFrozen] = useState(false)
   const [treeError, setTreeError] = useState<string | null>(null)
   const [selected, setSelected] = useState<SnapshotTreeNode | null>(null)
   const [inspectMode, setInspectMode] = useState<'native' | 'image'>('native')
@@ -218,6 +220,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   /** 图像匹配的相关系数（vendor /templates/validate 的 scores，与 matches 对齐） */
   const [scores, setScores] = useState<number[] | null>(null)
   const [validateNote, setValidateNote] = useState<string | null>(null)
+  /** 最近一次定位验证实际使用的快照（vendor 每次定位都会重新采集） */
+  const [locatorSnapshotId, setLocatorSnapshotId] = useState<string | null>(null)
   const [validateError, setValidateError] = useState<string | null>(null)
   const [wsStatus, setWsStatus] = useState<'idle' | 'connecting' | 'open' | 'closed'>('idle')
   // 重试计数：作为建连 effect 的依赖。不能把 wsStatus 放进依赖——effect 自己
@@ -241,6 +245,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   const wsRef = useRef<WebSocket | null>(null)
   const sessionRef = useRef<string | number | null>(null)
   const wsRetriesRef = useRef(0)
+  /** frozen 的 ref 镜像：WS onmessage 闭包不随 frozen 重建（重建会断流重连） */
+  const frozenRef = useRef(false)
 
   const reset = useCallback(() => {
     setSession(null)
@@ -248,12 +254,15 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     setWsAttempt(0)
     setNodes(null)
     setSnapshotId(null)
+    frozenRef.current = false
+    setFrozen(false)
     setTreeError(null)
     setSelected(null)
     setMatches(null)
     setScores(null)
     setValidateNote(null)
     setValidateError(null)
+    setLocatorSnapshotId(null)
     setWsStatus('idle')
     setWsNotice(null)
     setCloseError(null)
@@ -401,6 +410,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
       }
       const kind = message.kind
       if (kind === 'frame' && typeof message.jpeg_base64 === 'string') {
+        // 已冻结：保留「采集检查」那一刻的画面，后续帧丢弃（恢复实时后自动接上）
+        if (frozenRef.current) return
         drawFrame(canvasRef.current, message.jpeg_base64, (size) => {
           setFrameSize((prev) => (prev && prev.w === size.w && prev.h === size.h ? prev : size))
         })
@@ -503,6 +514,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     },
     onSuccess: ({ snapshotId: capturedId, tree }) => {
       setSnapshotId(capturedId)
+      frozenRef.current = true
+      setFrozen(true)
       setTreeError(null)
       const list = Array.isArray(tree?.nodes) ? tree.nodes : []
       setNodes(list)
@@ -557,6 +570,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     },
     onSuccess: (result) => {
       setValidateError(null)
+      setLocatorSnapshotId(typeof result?.snapshot_id === 'string' ? result.snapshot_id : null)
       const list = Array.isArray(result?.matches) ? result.matches : []
       setMatches(list)
       setScores(Array.isArray(result?.scores) ? result.scores : null)
@@ -696,7 +710,20 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
           ))}
         </select>
         <Badge tone={wsTone} dot>{wsText}</Badge>
+        {frozen ? <Badge tone="amber" dot>画面已冻结</Badge> : null}
         <span className="spacer" />
+        {frozen ? (
+          <Button
+            size="small"
+            onClick={() => {
+              // socket 一直活着，恢复后下一帧就会覆盖 canvas
+              frozenRef.current = false
+              setFrozen(false)
+            }}
+          >
+            恢复实时
+          </Button>
+        ) : null}
         <div className="flex wrap" role="group" aria-label="定位方式">
           {([['native', '原生节点'], ['image', '图像模板']] as const).map(([value, label]) => (
             <Button
@@ -754,7 +781,11 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                 <header>
                   <h3>实时预览</h3>
                   <span className="muted small">
-                    {matches ? '命中 ' + matches.length + ' 个' : '拖拽画面可框选模板区域'}
+                    {frozen && snapshotId
+                      ? '画面已冻结 · snapshot ' + snapshotId
+                      : matches
+                        ? '命中 ' + matches.length + ' 个'
+                        : '拖拽画面可框选模板区域'}
                   </span>
                 </header>
                 <div
@@ -823,7 +854,15 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
               <section className="debug-section">
                 <header>
                   <h3>定位结果</h3>
-                  <span className="muted small">{matches === null ? '尚未验证' : validateNote ?? ''}</span>
+                  <span className="muted small">
+                    {matches === null ? '尚未验证' : validateNote ?? ''}
+                    {locatorSnapshotId
+                      ? ' · 定位快照 ' + locatorSnapshotId +
+                        (frozen && snapshotId && locatorSnapshotId !== snapshotId
+                          ? '（vendor 重新采集，与冻结画面不同）'
+                          : '')
+                      : ''}
+                  </span>
                 </header>
                 {validateError ? <Notice tone="red" title="验证失败">{validateError}</Notice> : null}
                 {matches !== null && !validateError ? (
