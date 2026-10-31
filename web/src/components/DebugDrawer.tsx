@@ -279,26 +279,28 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
       }
       setSession({ id: created.id })
       sessionRef.current = created.id
+      setWsNotice(null)
     },
     onError: (error) => {
+      createPendingRef.current = false
       const described = describeError(error)
       setWsNotice('调试会话创建失败（' + described.code + '）：' + described.message)
     },
   })
 
-  /** 打开面板 → 自动创建调试会话（否则停留在空态，没有任何入口能发起） */
+  /** 工作区打开且选定设备 → 自动创建调试会话；失败后换设备/重进即重试 */
   const createPendingRef = useRef(false)
   useEffect(() => {
-    if (!open) {
+    if (!open || !target?.serial) {
       createPendingRef.current = false
       return
     }
     if (session || createPendingRef.current) return
     createPendingRef.current = true
     createMutation.mutate()
-    // 只跟随 open 变化；session/mutation 状态用 ref 与守卫读取，避免重渲染反复建会话
+    // 跟随 open 与目标设备变化；session/mutation 用 ref 守卫避免重复建会话
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [open, target?.serial])
 
   const detailQuery = useQuery({
     queryKey: ['debug-session', session?.id],
@@ -756,12 +758,14 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                   </span>
                 </header>
                 <div
-                  className="debug-stage"
+                  className="debug-stage phone-stage"
                   onMouseDown={handleStageDown}
                   onMouseMove={handleStageMove}
                   onMouseUp={handleStageUp}
                   onMouseLeave={handleStageUp}
                 >
+                <div className="phone">
+                  <div className="phone-camera" />
                   <div className="debug-frame" ref={stageRef} style={{ display: frameSize ? undefined : 'none' }}>
                     <canvas ref={canvasRef} aria-label="设备画面预览" />
                     {overlayBoxes.map((box) => (
@@ -797,6 +801,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                       {wsStatus === 'open' ? '等待设备画面…' : '画面尚未连接（' + wsText + '）'}
                     </div>
                   ) : null}
+                </div>
                 </div>
                 <div className="debug-kv" style={{ marginTop: 8 }}>
                   <span>绿框 = 最近一次定位命中</span>

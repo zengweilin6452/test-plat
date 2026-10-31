@@ -724,3 +724,10 @@ body.debug-pane-open .main {
 /* 图像模板模式：隐藏层级树与元素描述列，聚焦图像流程（原型 inspectMode） */
 .inspector.mode-image > div:nth-child(2),
 .inspector.mode-image > section:nth-child(3) { display: none; }
+
+/* 真机调试：原型 .phone 手机外壳包住实时画面 */
+.phone-stage { background: #eef2f8; border: 1px solid #dfe6f0; display: flex; justify-content: center; padding: 16px 8px; }
+.phone-stage .phone { width: 226px; border: 6px solid #26354e; border-radius: 29px; background: #0b0f14; box-shadow: 0 12px 25px #1c305b15; overflow: hidden; position: relative; padding-top: 12px; }
+.phone-stage .phone-camera { width: 36px; height: 9px; border-radius: 7px; background: #26354e; border: 1px solid #3c4c64; position: absolute; left: 50%; transform: translateX(-50%); top: 4px; z-index: 2; }
+.phone-stage .debug-frame { width: 100%; }
+.phone-stage .debug-stage-empty { color: #7687a2; padding: 40px 10px; text-align: center; font-size: 11px; }
