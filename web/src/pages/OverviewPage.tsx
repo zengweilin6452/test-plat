@@ -61,7 +61,7 @@ export function OverviewPage() {
     <>
       <PageHeading
         title="工作台"
-        description="测试能力的入口与当前状态概览"
+        description="统一管理 Web 与移动应用的测试、执行资源与结果证据。"
         actions={
           <Button kind="primary" icon="play" onClick={refresh}>
             刷新概览

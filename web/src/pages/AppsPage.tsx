@@ -83,7 +83,7 @@ export function AppsPage() {
     <>
       <PageHeading
         title="项目与应用"
-        description="登记被测应用与目标端，作为任务的目标引用"
+        description="一个产品项目下分别登记 Web、Android 与 iOS 应用，作为创建与报告的入口。"
         actions={<PrimaryAction label="登记应用" />}
       />
       <ContextBar scope={targetScope} onScopeChange={setTargetScope} />

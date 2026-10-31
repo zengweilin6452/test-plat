@@ -154,7 +154,7 @@ export function TasksPage() {
     <>
       <PageHeading
         title="任务中心"
-        description="全部测试任务的配置、执行与结果入口"
+        description="统一管理测试任务的创建、执行流程和结果证据。"
         actions={<PrimaryAction label="新建任务" icon="plus" onClick={() => setWizardOpen(true)} />}
       />
       <ContextBar
