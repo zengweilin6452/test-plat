@@ -7,7 +7,7 @@
  *  - 套件与用例清单还没有读接口，页面只显示空态，不伪造数据
  * 硬约束：断言结果与失败现场都来自后端，接口未接入时只显示空态。
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, describeError } from '../api/client'
 import {
@@ -37,6 +37,7 @@ import { Tabs, type TabItem } from '../components/Tabs'
 import { MODULE_NAMES, TARGET_CATALOG, isImplementedPlatform } from '../constants'
 import { displayStatus } from '../lib/display'
 import { DASH, fmtDateTime } from '../lib/fmt'
+import { useDebugHandoff } from '../store/debugHandoff'
 import { useAppScope } from '../store/app'
 import type { ApplicationRecord } from '../types'
 import { useTargetScope } from '../store/scope'
@@ -67,6 +68,15 @@ export function UiPage() {
   const [wizardOpen, setWizardOpen] = useState(false)
   const [activeTask, setActiveTask] = useState<TaskRecord | null>(null)
   const [debugTarget, setDebugTarget] = useState<DebugTarget | null>(null)
+  // 执行资源页「打开调试」跳转进来：落在调试标签并锚定该设备（消费即清空）
+  const consumeHandoff = useDebugHandoff((state) => state.consume)
+  useEffect(() => {
+    const pending = consumeHandoff()
+    if (pending) {
+      setDebugTarget(pending)
+      setTab('debug')
+    }
+  }, [consumeHandoff])
   // 调试抽屉当前持有的会话 id：模板按调试会话隔离（vendor TemplateStore 绑定
   // session.assets_dir），模板页签的所有请求都必须显式带上它。
   const [debugSessionId, setDebugSessionId] = useState<string | number | null>(null)
@@ -278,11 +288,17 @@ export function UiPage() {
             )}
           </>
         ) : tab === 'debug' ? (
-          <DebugPanel
+          /* 原型 nativeInspectorPage：页面内工作区（设备下拉在 toolbar），不再是抽屉 */
+          <DebugDrawer
+            open={tab === 'debug'}
+            target={
+              debugTarget
+              ?? (readyDevices[0] ? toDebugTarget(readyDevices[0]) : null)
+            }
             devices={readyDevices}
-            devicesLoading={resourcesQuery.isLoading}
-            devicesError={resourcesQuery.isError ? describeError(resourcesQuery.error) : null}
-            onOpen={(target) => setDebugTarget(target)}
+            onTargetChange={(target) => setDebugTarget(target)}
+            onClose={() => setDebugTarget(null)}
+            onSessionChange={setDebugSessionId}
           />
         ) : tab === 'templates' ? (
           <TemplatesPanel
@@ -301,13 +317,6 @@ export function UiPage() {
         )}
       </Panel>
 
-      <DebugDrawer
-        open={Boolean(debugTarget)}
-        target={debugTarget}
-        onClose={() => setDebugTarget(null)}
-        onSessionChange={setDebugSessionId}
-      />
-
       <TaskWizard
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
@@ -319,56 +328,6 @@ export function UiPage() {
   )
 }
 
-
-/** 调试页签：选 ready 设备 → 开会话（复用 DebugDrawer） */
-function DebugPanel({
-  devices,
-  devicesLoading,
-  devicesError,
-  onOpen,
-}: {
-  devices: ResourceRecord[]
-  devicesLoading: boolean
-  devicesError: ReturnType<typeof describeError> | null
-  onOpen: (target: DebugTarget) => void
-}) {
-  if (devicesError) {
-    return (
-      <div className="panel-pad">
-        <Notice tone="red" title={'资源列表获取失败（' + devicesError.code + '）'}>
-          {devicesError.message}
-        </Notice>
-      </div>
-    )
-  }
-  if (devicesLoading) {
-    return <Empty icon="phone" title="正在加载资源" description="正在请求 /api/v1/resources" />
-  }
-  if (devices.length === 0) {
-    return (
-      <Empty
-        icon="phone"
-        title="没有可调试的设备"
-        description="调试会话要求资源 status=ready 且未被运行或调试占用。"
-      />
-    )
-  }
-  return (
-    <div className="panel-pad">
-      <div className="muted small" style={{ marginBottom: 10 }}>
-        点击设备打开调试抽屉：创建调试会话后可实时预览画面、浏览快照层级树并验证定位表达式。
-      </div>
-      <div className="flex wrap" style={{ gap: 8 }}>
-        {devices.map((device) => (
-          <Button key={device.id} size="small" icon="phone" onClick={() => onOpen(toDebugTarget(device))}>
-            {device.name}
-            <span className="muted small"> {device.resource_key ?? device.resource_key}</span>
-          </Button>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 function toDebugTarget(device: ResourceRecord): DebugTarget {
   const hint = device.lease
