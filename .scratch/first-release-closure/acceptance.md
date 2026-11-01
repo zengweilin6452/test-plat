@@ -311,7 +311,7 @@
 - 7 passed：冷启动直达首页、我的页学习统计、课程与动态端点、页签往返、知识库入口计数、平台身份注入、Android 驱动截图。
 - 3 skipped：2 个 web 专属用例（本示例环境无 browser 驱动）+ 1 个"当前会话有效直达首页"分支（登录页判据不适用）。
 - 2 failed（均为真实失败，不是平台执行链故障）：
-  1. `test_kb_list_scroll_keeps_items`：`AttributeError: 'UpstreamChannel' object has no attribute 'touch_down'`。平台 vendor 快照记录 `mobile_auto@24a1daa`，其 `UpstreamChannel` 只有 `touch()`；客户仓库 HEAD `f0d2ce0` 已提供 `touch_down`。滑动手势在旧 vendor 上不可用。**需先同步 vendor 才能全绿**；本轮按约束不改 `vendor/`。
+  1. `test_kb_list_scroll_keeps_items`：`AttributeError: 'UpstreamChannel' object has no attribute 'touch_down'`。平台 vendor 快照记录 `mobile_auto@24a1daa`，其 `UpstreamChannel` 只有 `touch()`，而同快照的 `core/device_ops.py` 已调用 `channel.touch_down`（内部不一致）；客户仓库 HEAD `f0d2ce0` 的 `UpstreamChannel` 已提供 `touch_down`。滑动手势在旧 vendor 上不可用。**需先同步 vendor 才能全绿**；本轮按约束不改 `vendor/`。
   2. `test_feedback_opens_webview`：点击"问题反馈"后立即断言 WebView，真机失败截图仍是加载中 spinner（无 WebView 节点）——套件缺少等待，属套件自身时序问题。
 - 证据：`evidence/beta-junit.xml`、`evidence/beta-evidence_4cbdd5f1…_failure-frame.png`（知识库页）、`evidence/beta-evidence_e41ce612…_failure-frame.png`（问题反馈加载中）、运行产物 `.runtime/real-verify/data/artifacts/0b3f0bf9-…/`。
 - 结论：客户套件已经通过 TestDock 的固定副本、身份基准、证据与报告链路**真实执行**；但**不能记为客户套件全绿**——2 个失败分别指向 vendor 快照版本落后与套件自身时序。
@@ -352,3 +352,9 @@
 1. **客户套件全绿**：需同步 vendor 到客户兼容版本（`UpstreamChannel.touch_down`）并修复套件自身的 WebView 等待；本轮不改 `vendor/`、不改客户套件代码。
 2. **逐像素 diff 百分比**：实现与原型存在已批准的信息架构差异，本轮以「同尺寸截图 + 布局指标 + 逐页核对」为准，不输出无意义的 diff 比例。
 3. 其余真机/来源边界见 §3.1、§5、§8.5；客户真实来源的“客户生产套件”内容仍以本节 Beta Academy 为准（客户仓库示例套件）。
+
+### 9.4 最终回归与环境收尾
+
+- 最终 HEAD 全量后端回归（`testdock_frc10`，迁移 `0008`）：**564 项，563 passed / 1 skipped / 0 failed，退出码 0**（计数方式同 §3 #1；新增 2 项为 mobile-config 身份与套件自有会话让位的回归）。前端本轮未改产品代码，§7 的 `tsc --noEmit` / `npm test` 48 passed / `npm run build` 结果仍适用。
+- 收尾：验收用的 `:8010`（HEAD 后端）与 `:5174`（Vite 反代）已停止；`testdock_real` 活动租约 0、无未关闭调试会话；设备 `749622c9` 仍在线；常驻 `:8000` / `:5173` 均 200，未被重启或改写。
+- 本轮提交：`976b8d5`（mobile-config 身份）、`6941ab2`（套件自有会话让位）、`90918d8`（客户套件 + 1440 证据与 §9）。未 push。
