@@ -85,7 +85,7 @@ export function IntegrationPage() {
               ) : null}
             </Notice>
           ) : healthQuery.isLoading ? (
-            <Empty icon="check" title="正在检查能力" description="正在请求 /api/v1/health" />
+            <Empty loading icon="check" title="正在检查能力" description="正在请求 /api/v1/health；返回前不判断各项能力是否可用。" />
           ) : health ? (
             <div className="flex wrap" style={{ gap: 8 }}>
               {checks.map((check) => (

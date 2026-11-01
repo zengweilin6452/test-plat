@@ -42,6 +42,7 @@ import { Tabs, type TabItem } from '../components/Tabs'
 import { MODULE_NAMES, TARGET_CATALOG, isImplementedPlatform } from '../constants'
 import { displayStatus } from '../lib/display'
 import { DASH, fmtDateTime } from '../lib/fmt'
+import { pagePhase, type PagePhase } from '../lib/pageState'
 import { useDebugHandoff } from '../store/debugHandoff'
 import { useAppScope } from '../store/app'
 import type { ApplicationRecord } from '../types'
@@ -83,6 +84,38 @@ export function pickVersion(
 export function versionCopyNotice(version: SuiteVersionRecord): string | null {
   if (version.has_code_copy !== false) return null
   return '该版本未保留固定代码副本：执行会被阻断，请用「重新发现」创建带副本的新版本。'
+}
+
+/**
+ * 「执行记录」页签的占位文案：加载中不能说「还没有 UI 自动化运行」，
+ * 规划中的目标端（iOS/Web）也不是真实空态，而是执行能力未接入。
+ */
+export function uiRunsEmptyCopy(
+  phase: PagePhase,
+  planned: boolean,
+): { title: string; description: string } {
+  if (phase === 'loading') {
+    return {
+      title: '正在加载 UI 执行记录',
+      description: '正在请求 GET /api/v1/runs；返回前不判断有没有运行。',
+    }
+  }
+  if (phase === 'error') {
+    return {
+      title: '执行记录暂不可用',
+      description: '接口返回错误（见上方错误码），请稍后重试或刷新页面。',
+    }
+  }
+  if (planned) {
+    return {
+      title: '该目标端尚未接入',
+      description: 'iOS / Web 目标端暂无执行能力，接入后按同一套接口开通；当前可切换目标端为 Android。',
+    }
+  }
+  return {
+    title: '还没有 UI 自动化运行',
+    description: '创建 UI 用例并提交运行后，执行记录会出现在这里。',
+  }
 }
 
 export function UiPage() {
@@ -149,6 +182,12 @@ export function UiPage() {
         run.display_id.toLowerCase().includes(key),
     )
   }, [runsQuery.data, keyword])
+  const runsPhase = pagePhase({
+    isLoading: runsQuery.isLoading,
+    isError: runsQuery.isError,
+    count: uiRuns.length,
+  })
+  const runsEmptyCopy = uiRunsEmptyCopy(runsPhase, planned)
 
   // ---- 调试 tab：ready 设备清单（与 DevicesPage 同源 /api/v1/resources）----
   const resourcesQuery = useQuery({
@@ -305,7 +344,11 @@ export function UiPage() {
       header: '操作',
       align: 'right',
       render: (suite) => (
-        <div className="flex"><LinkButton onClick={() => { setRunSuite(suite); setWizardOpen(true) }} disabled={!suite.latest_version}>运行套件</LinkButton><LinkButton
+        <div className="flex"><LinkButton
+          onClick={() => { setRunSuite(suite); setWizardOpen(true) }}
+          disabled={!suite.latest_version}
+          title={suite.latest_version ? undefined : '该套件还没有 discover 过，没有可运行的版本'}
+        >运行套件</LinkButton><LinkButton
           onClick={() => openSuite(suite)}
           disabled={!suite.latest_version}
           title={suite.latest_version ? undefined : '该套件还没有 discover 过，没有用例可看'}
@@ -406,15 +449,15 @@ export function UiPage() {
                 <span className="muted small">按运行名称或编号搜索</span>
               </Toolbar>
             </div>
-            {uiRuns.length === 0 && !error ? (
+            {runsPhase === 'loading' ? (
+              <Empty loading title={runsEmptyCopy.title} description={runsEmptyCopy.description} />
+            ) : runsPhase === 'error' ? (
+              <Empty title={runsEmptyCopy.title} description={runsEmptyCopy.description} />
+            ) : uiRuns.length === 0 ? (
               <Empty
                 icon="phone"
-                title={planned ? '该目标端尚未接入' : '还没有 UI 自动化运行'}
-                description={
-                  planned
-                    ? 'iOS / Web 目标端暂无执行能力，接入后按同一套接口开通。'
-                    : '创建 UI 用例并提交运行后，执行记录会出现在这里。'
-                }
+                title={runsEmptyCopy.title}
+                description={runsEmptyCopy.description}
               />
             ) : (
               <Table
@@ -446,22 +489,31 @@ export function UiPage() {
               ariaLabel="用例套件"
               onRowClick={openSuite}
               empty={
-                <Empty
-                  icon="layers"
-                  title={
-                    suitesQuery.isLoading
-                      ? '正在加载套件…'
-                      : targetScope !== 'all' && (suitesQuery.data?.items.length ?? 0) > 0
-                        ? // 套件存在但被目标端筛掉了：别让用户以为库里一个套件都没有
-                          TARGET_CATALOG[targetScope].label + ' 还没有登记套件'
-                        : '还没有登记任何套件'
-                  }
-                  description={
-                    suitesQuery.isLoading
-                      ? 'GET /api/v1/suites?test_type=ui'
-                      : '套件由后端登记；每个套件用 POST /api/v1/suites/{id}/discover 收集用例生成版本。'
-                  }
-                />
+                suitesQuery.isError ? (
+                  <Empty
+                    icon="layers"
+                    title="套件清单暂不可用"
+                    description="接口返回错误（见上方错误码），请稍后重试；这不代表没有登记套件。"
+                  />
+                ) : (
+                  <Empty
+                    icon="layers"
+                    loading={suitesQuery.isLoading}
+                    title={
+                      suitesQuery.isLoading
+                        ? '正在加载套件…'
+                        : targetScope !== 'all' && (suitesQuery.data?.items.length ?? 0) > 0
+                          ? // 套件存在但被目标端筛掉了：别让用户以为库里一个套件都没有
+                            TARGET_CATALOG[targetScope].label + ' 还没有登记套件'
+                          : '还没有登记任何套件'
+                    }
+                    description={
+                      suitesQuery.isLoading
+                        ? 'GET /api/v1/suites?test_type=ui'
+                        : '套件由后端登记；每个套件用 POST /api/v1/suites/{id}/discover 收集用例生成版本。'
+                    }
+                  />
+                )
               }
               footer={<span>共 {suites.length} 个套件 · 类型 {MODULE_NAMES.ui}</span>}
             />
@@ -542,25 +594,34 @@ export function UiPage() {
               rowKey={(item, index) => item.case_key + ':' + index}
               ariaLabel="套件用例清单"
               empty={
-                <Empty
-                  icon="layers"
-                  title={
-                    !activeSuiteId
-                      ? '还没有可查看的套件'
-                      : versionsQuery.isLoading
-                        ? '正在加载用例…'
+                versionsQuery.isError ? (
+                  <Empty
+                    icon="layers"
+                    title="用例清单暂不可用"
+                    description="套件版本接口返回错误（见上方错误码），请稍后重试；这不代表该版本没有用例。"
+                  />
+                ) : (
+                  <Empty
+                    icon="layers"
+                    loading={versionsQuery.isLoading}
+                    title={
+                      !activeSuiteId
+                        ? '还没有可查看的套件'
+                        : versionsQuery.isLoading
+                          ? '正在加载用例…'
+                          : activeVersion
+                            ? '该版本没有用例清单'
+                            : '这个套件还没有 discover 过'
+                    }
+                    description={
+                      !activeSuiteId
+                        ? '先在「用例套件」页签登记套件，或在后端用 POST /api/v1/suites/{id}/discover 收集用例。'
                         : activeVersion
-                          ? '该版本没有用例清单'
-                          : '这个套件还没有 discover 过'
-                  }
-                  description={
-                    !activeSuiteId
-                      ? '先在「用例套件」页签登记套件，或在后端用 POST /api/v1/suites/{id}/discover 收集用例。'
-                      : activeVersion
-                        ? 'manifest.cases 为空：discover 收集到 0 条用例时后端会拒绝写入版本。'
-                        : 'POST /api/v1/suites/{id}/discover 会在宿主跑 pytest --collect-only 生成第一个版本。'
-                  }
-                />
+                          ? 'manifest.cases 为空：discover 收集到 0 条用例时后端会拒绝写入版本。'
+                          : 'POST /api/v1/suites/{id}/discover 会在宿主跑 pytest --collect-only 生成第一个版本。'
+                    }
+                  />
+                )
               }
               footer={
                 activeVersion ? (

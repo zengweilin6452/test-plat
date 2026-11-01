@@ -161,7 +161,12 @@ export function DatabasePage() {
         title="数据设计"
         description="表关系、字段字典与写入流程（数据源 GET /api/v1/schema）"
         actions={
-          <Button icon="download" onClick={exportDictionary} disabled={!schemaQuery.isSuccess || tables.length === 0}>
+          <Button
+            icon="download"
+            onClick={exportDictionary}
+            disabled={!schemaQuery.isSuccess || tables.length === 0}
+            title={schemaQuery.isSuccess && tables.length > 0 ? undefined : 'schema 尚未加载完成，暂无可导出的字段字典'}
+          >
             导出字典
           </Button>
         }
@@ -188,7 +193,7 @@ export function DatabasePage() {
       <Tabs items={TABS} active={tab} onChange={setTab} ariaLabel="数据设计视图" />
 
       {schemaQuery.isLoading ? (
-        <Empty icon="box" title="正在加载 schema" description="正在请求 /api/v1/schema" />
+        <Empty loading icon="box" title="正在加载 schema" description="正在请求 /api/v1/schema；返回前不判断 schema 是否为空。" />
       ) : null}
 
       {schemaQuery.isSuccess && tables.length === 0 ? (

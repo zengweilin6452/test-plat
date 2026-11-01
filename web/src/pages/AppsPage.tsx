@@ -104,7 +104,7 @@ export function AppsPage() {
           hint="同一应用可按目标端分别登记，任务只引用已登记的目标"
         />
         {appsQuery.isLoading ? (
-          <Empty icon="layers" title="正在加载应用清单" description="正在请求 /api/v1/applications" />
+          <Empty loading icon="layers" title="正在加载应用清单" description="正在请求 /api/v1/applications；返回前不确定是否已登记应用。" />
         ) : rows.length === 0 && !error ? (
           <Empty
             icon="layers"

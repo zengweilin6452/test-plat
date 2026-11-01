@@ -261,7 +261,7 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
           ) : null}
 
           {reportQuery.isLoading ? (
-            <Empty icon="report" title="正在加载报告" description="正在请求 GET /api/v1/runs/{id}/report" />
+            <Empty loading icon="report" title="正在加载报告" description="正在请求 GET /api/v1/runs/{id}/report" />
           ) : null}
 
           {report ? (

@@ -221,6 +221,23 @@ export function hasNodeIdentity(node: SnapshotTreeNode): boolean {
   return Boolean(node.text || node.resource_id || node.content_desc)
 }
 
+/**
+ * 复制表达式：只有剪贴板真的写入成功才提示成功。
+ * 非安全上下文（http + 非 localhost）或浏览器拒绝剪贴板权限时给出失败提示，
+ * 不让「表达式已复制」变成假成功（工单 09）。
+ */
+export function copyExpression(text: string, show: (message: string) => void): void {
+  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard
+  if (!clipboard?.writeText) {
+    show('复制失败：当前环境不支持剪贴板，请手动选中表达式复制')
+    return
+  }
+  clipboard.writeText(text).then(
+    () => show('表达式已复制'),
+    () => show('复制失败：剪贴板被拒绝，请手动选中表达式复制'),
+  )
+}
+
 /** 递归渲染层级树（children 存下标，超过 200 层视为脏数据直接停）。
  *  行样式照原型 .tree-row：当前选中节点高亮，整行可点（真实场景允许选任意节点）。 */
 function TreeBranch({
@@ -1264,10 +1281,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                       size="small"
                       icon="copy"
                       disabled={!locatorExpression}
-                      onClick={() => {
-                        void navigator.clipboard?.writeText(locatorExpression)
-                        toast.show('表达式已复制')
-                      }}
+                      onClick={() => copyExpression(locatorExpression, toast.show)}
                     >
                       复制表达式
                     </Button>
@@ -1476,10 +1490,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                     size="small"
                     icon="copy"
                     disabled={!locatorExpression}
-                    onClick={() => {
-                      void navigator.clipboard?.writeText(locatorExpression)
-                      toast.show('表达式已复制')
-                    }}
+                    onClick={() => copyExpression(locatorExpression, toast.show)}
                   >
                     复制 IMAGE 表达式
                   </Button>

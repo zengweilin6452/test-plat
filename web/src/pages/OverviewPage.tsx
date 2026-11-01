@@ -25,12 +25,71 @@ import { TargetCardGrid } from '../components/TargetCard'
 import { moduleName, SCOPE_OPTIONS, TARGET_CATALOG } from '../constants'
 import { DASH, fmtDateTime } from '../lib/fmt'
 import { displayStatus } from '../lib/display'
+import { pagePhase, type PagePhase } from '../lib/pageState'
 import { StatusBadge } from '../components/Badge'
 import { useTargetScope } from '../store/scope'
-import type { RunRecord, RunState } from '../types'
+import type { OverviewSummary, RunRecord, RunState } from '../types'
 
 /** 执行中的状态集合（与后端 run_running 的统计口径一致） */
 export const ACTIVE_STATES: RunState[] = ['queued', 'dispatching', 'running', 'finalizing']
+
+interface EmptyCopy {
+  title: string
+  description: string
+}
+
+/**
+ * 统计卡脚注：没有 overview 时区分「正在加载 / 调用失败 / 接口已返回但没数据」。
+ * 绝不写成「接口未接入」—— 那会把加载中或网络失败误导成后端没上线。
+ */
+export function overviewFoot(overview: OverviewSummary | null | undefined, phase: PagePhase): string {
+  if (overview) return `执行中 ${overview.run_running} 次 · 已登记应用 ${overview.application_total} 个`
+  if (phase === 'loading') return '正在加载概览数据…'
+  if (phase === 'error') return '概览接口调用失败，见上方错误码后重试'
+  return '接口已连通但尚未返回计数（还没有运行记录）'
+}
+
+/** 通过率脚注：口径说明常在，加载/失败时先说清楚当前为什么没有值。 */
+export function passRateFoot(overview: OverviewSummary | null | undefined, phase: PagePhase): string {
+  if (overview) {
+    if (overview.pass_rate === null) return '分母为 0：还没有已判定的运行，不显示 0%'
+    return `已通过 ${overview.passed} ÷（已通过 + 未通过 ${overview.failed}）`
+  }
+  if (phase === 'loading') return '正在加载通过率…'
+  if (phase === 'error') return '通过率获取失败，见上方错误码后重试'
+  return '口径：已通过 ÷（已通过 + 未通过）；分母为 0 时显示破折号'
+}
+
+/** 「执行中的运行」面板占位文案 */
+export function activeRunsCopy(phase: PagePhase): EmptyCopy {
+  if (phase === 'loading') {
+    return {
+      title: '正在加载运行记录',
+      description: '正在请求 GET /api/v1/runs；返回后只显示排队、下发、执行与收尾中的运行。',
+    }
+  }
+  if (phase === 'error') {
+    return {
+      title: '运行记录暂不可用',
+      description: '接口返回错误（见上方错误码），点「刷新概览」重试；不是「没有执行中的运行」。',
+    }
+  }
+  return {
+    title: '当前没有执行中的运行',
+    description: '排队、下发、执行与收尾中的运行会出现在这里；已完成的运行见任务中心。',
+  }
+}
+
+/** 「最近运行」面板占位文案 */
+export function recentRunsCopy(phase: PagePhase): EmptyCopy {
+  if (phase === 'loading') {
+    return { title: '正在加载最近运行', description: '正在请求 GET /api/v1/runs；返回后按创建时间倒序显示。' }
+  }
+  if (phase === 'error') {
+    return { title: '运行记录暂不可用', description: '接口返回错误（见上方错误码），点「刷新」重试。' }
+  }
+  return { title: '还没有运行记录', description: '提交第一个任务后，运行会出现在这里与任务中心。' }
+}
 
 export function OverviewPage() {
   const [wizardOpen, setWizardOpen] = useState(false)
@@ -52,6 +111,17 @@ export function OverviewPage() {
   const overview = overviewQuery.data
   const runs = runsQuery.data?.items ?? []
   const activeRuns = runs.filter((run) => ACTIVE_STATES.includes(run.state))
+  // 加载 ≠ 空：四个统计卡与两个面板共用同一套阶段判定
+  const overviewPhase = pagePhase({
+    isLoading: overviewQuery.isLoading,
+    isError: overviewQuery.isError,
+    count: overview ? 1 : 0,
+  })
+  const runsPhase = pagePhase({
+    isLoading: runsQuery.isLoading,
+    isError: runsQuery.isError,
+    count: runs.length,
+  })
 
   const overviewError = overviewQuery.isError ? describeError(overviewQuery.error) : null
   const runsError = runsQuery.isError ? describeError(runsQuery.error) : null
@@ -101,13 +171,13 @@ export function OverviewPage() {
         <StatCard
           label="运行记录"
           value={overview ? overview.run_total : null}
-          foot={overview ? `执行中 ${overview.run_running} 次 · 已登记应用 ${overview.application_total} 个` : '接口未接入'}
+          foot={overviewFoot(overview, overviewPhase)}
         />
         <StatCard
           label="通过率"
           value={overview?.pass_rate ?? null}
           unit="%"
-          foot={overview ? `已通过 ${overview.passed} ÷（已通过 + 未通过 ${overview.failed}）` : '口径：已通过 ÷（已通过 + 未通过）'}
+          foot={passRateFoot(overview, overviewPhase)}
         />
         <StatCard
           label="需要关注"
@@ -137,15 +207,17 @@ export function OverviewPage() {
               </Button>
             }
           />
-          {runsError ? (
-            <Notice tone="red" title={'运行数据获取失败（' + runsError.code + '）'}>
-              {runsError.message}
+          {runsPhase === 'error' ? (
+            <Notice tone="red" title={'运行数据获取失败（' + runsError?.code + '）'}>
+              {runsError?.message}
             </Notice>
+          ) : runsPhase === 'loading' ? (
+            <Empty loading title={activeRunsCopy('loading').title} description={activeRunsCopy('loading').description} />
           ) : activeRuns.length === 0 ? (
             <Empty
               icon="pulse"
-              title="当前没有执行中的运行"
-              description="排队、下发、执行与收尾中的运行会出现在这里；已完成的运行见任务中心。"
+              title={activeRunsCopy('ready').title}
+              description={activeRunsCopy('ready').description}
             />
           ) : (
             <ul className="run-mini-list">
@@ -173,11 +245,16 @@ export function OverviewPage() {
 
         <Panel>
           <PanelHead title="最近运行" hint="按创建时间倒序，最多 50 条" />
-          {runs.length === 0 && !runsError ? (
+          {runsPhase === 'loading' ? (
+            <Empty loading title={recentRunsCopy('loading').title} description={recentRunsCopy('loading').description} />
+          ) : runsPhase === 'error' ? (
+            // 错误码由左侧「执行中的运行」面板的 Notice 统一展示，这里只说明该面板为什么空
+            <Empty title={recentRunsCopy('error').title} description={recentRunsCopy('error').description} />
+          ) : runs.length === 0 ? (
             <Empty
               icon="tasks"
-              title="还没有运行记录"
-              description="提交第一个任务后，运行会出现在这里与任务中心。"
+              title={recentRunsCopy('empty').title}
+              description={recentRunsCopy('empty').description}
             />
           ) : (
             <ul className="run-mini-list">
