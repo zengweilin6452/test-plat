@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## 现状指针
 
@@ -59,3 +59,10 @@ npm test
 - 不修改 `vendor/`、不安装依赖、不 push。
 
 ## Comments
+
+- 2026-11-01 修复：`POST/PUT /templates` 先校验 `validate-crop` 发放的一次性凭证（绑定 session / 新快照 / 命中框 / 阈值，TTL 120s，复用或任一项变化即 409 `crop_not_verified`，且不触达 vendor）；`validate-crop` 改为返回验证时的新快照、新画面命中框与凭证，只有唯一匹配才发放。登记改从验证的新快照裁剪，前端禁用只是体验层，服务端可独立拒绝。
+- 模板存储口径统一为共享根 `server/assets`（`domain.templates.template_assets_root()`），修正了「按会话隔离」的错误注释；跨会话可见由 `test_frc08_template_library.py` 钉住。
+- 顺带修正 dispatch 模板锁定不符时 reason_code 被默认成 `runner_spawn_failed` 的误报（现为 `template_pin_mismatch`）。
+- 提交：`e7c35a2`（实现）、`e673983`（冻结快照同源测试），合入 `7d322b3`。
+- 测试（`testdock_frc08`）：`test_frc08_debug_registration.py`、`test_frc08_template_library.py`、`test_crop_validation.py`、`test_issue04_run_lifecycle.py` 共 26 passed；前端 35 通过、`tsc --noEmit` 干净。
+- 遗留：凭证存进程内（多 worker 需共享存储）；阈值成为登记必填字段；`TESTDOCK_TEMPLATE_ASSETS_DIR` 仅影响平台侧读取。真机 749622c9 未占用，真机证据留 10。
