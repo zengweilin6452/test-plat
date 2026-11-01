@@ -22,6 +22,7 @@ from app.scheduler import dispatcher
 from sqlalchemy import text
 
 from tests._p3_common import TEST_DB, reset_db_engine, requires_db
+from tests._p3_common import CLIENT_HEADERS
 from tests._p3_common import make_run as make_run  # noqa: F401 - 夹具注册
 from tests._p3_common import api_client as client  # noqa: F401
 from tests._p3_common import p3_project as project  # noqa: F401
@@ -485,3 +486,67 @@ def test_dispatch_blocked_when_copy_content_tampered(
     assert live == 0
 
 
+def test_cancel_requested_in_dispatch_window_blocks_spawn(
+    client, project, make_run, spawns, sync_engine, monkeypatch
+):
+    """queued->dispatching 提交后、spawn 前被取消：不得再拉起 runner。
+
+    事务提交与 spawn 之间（包含身份复核/模板核对这段耗时）是一个真实窗口：
+    取消在这段时间被受理时，旧代码仍会 spawn 一个已经没人要的 runner。派发前
+    必须复查 cancel_requested_at/state，把收敛留给取消处理路径。
+    """
+    import asyncio
+
+    from app.scheduler import dispatcher
+
+    run_id = make_run(state="queued", request_key=str(uuid.uuid4()))
+
+    async def _cancelled_during_window(rid, *, serial):
+        # 事务已提交，此时取消被受理（模拟真实窗口）
+        with sync_engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE test_runs SET cancel_requested_at = now()"
+                    " WHERE id = CAST(:id AS uuid)"
+                ),
+                {"id": str(rid)},
+            )
+        return {"verdict": "skipped", "reason": "no_build", "detail": "测试替身"}
+
+    monkeypatch.setattr(dispatcher, "_verify_build_identity", _cancelled_during_window)
+
+    outcome = asyncio.run(dispatcher.dispatch_one(run_id=run_id))
+    assert outcome.ok is False
+    assert outcome.reason == "cancel_requested"
+    assert spawns == [], "取消已受理时不得 spawn runner"
+
+    with sync_engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT state, reason_code FROM test_runs WHERE id = CAST(:id AS uuid)"),
+            {"id": run_id},
+        ).mappings().one()
+        live = conn.execute(
+            text(
+                "SELECT count(*) FROM resource_leases"
+                " WHERE released_at IS NULL AND project_id = CAST(:pid AS uuid)"
+            ),
+            {"pid": project["project_id"]},
+        ).scalar_one()
+    # 派发侧不写 errored：终态与租约由取消受理路径收敛（当前停在 dispatching，
+    # reason_code 仍是领取阶段的 lease_acquired，没有被写成任何错误码）
+    assert row["state"] == "dispatching"
+    assert row["reason_code"] == "lease_acquired"
+    assert live == 1
+
+    response = client.post(f"/api/v1/runs/{run_id}/cancel", headers=CLIENT_HEADERS)
+    assert response.status_code == 202, response.text
+    assert response.json()["state"] == "cancelled"
+    with sync_engine.connect() as conn:
+        live = conn.execute(
+            text(
+                "SELECT count(*) FROM resource_leases"
+                " WHERE released_at IS NULL AND project_id = CAST(:pid AS uuid)"
+            ),
+            {"pid": project["project_id"]},
+        ).scalar_one()
+    assert live == 0, "取消收敛后设备必须被释放"

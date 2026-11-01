@@ -11,6 +11,9 @@ from starlette.responses import Response
 @pytest.mark.asyncio
 async def test_crop_validation_captures_again_and_never_registers(monkeypatch):
     calls = []
+    # vendor 的快照 id 是 uuid4().hex[:16]，平台按这个 id 空间校验后才拼上游 path
+    source_id = "0011223344556677"
+    fresh_id = "8899aabbccddeeff"
 
     async def session(*args):
         return "session"
@@ -18,8 +21,8 @@ async def test_crop_validation_captures_again_and_never_registers(monkeypatch):
     async def forward(sid, method, path, **kwargs):
         calls.append((method, path))
         if method == "POST":
-            return Response(json.dumps({"snapshot_id": "fresh"}))
-        return Response(b"source" if "/old/" in path else b"current")
+            return Response(json.dumps({"snapshot_id": fresh_id}))
+        return Response(b"source" if source_id in path else b"current")
 
     async def match(source, current, region, threshold):
         assert (source, current, region, threshold) == (b"source", b"current", [1, 2, 3, 4], .8)
@@ -28,7 +31,7 @@ async def test_crop_validation_captures_again_and_never_registers(monkeypatch):
     monkeypatch.setattr(debug, "_template_session", session)
     monkeypatch.setattr(debug, "_forward", forward)
     monkeypatch.setattr(debug, "_match_crop", match)
-    payload = json.dumps({"snapshot_id": "old", "region": [1, 2, 3, 4], "threshold": .8}).encode()
+    payload = json.dumps({"snapshot_id": source_id, "region": [1, 2, 3, 4], "threshold": .8}).encode()
 
     async def receive():
         return {"type": "http.request", "body": payload}
@@ -37,12 +40,12 @@ async def test_crop_validation_captures_again_and_never_registers(monkeypatch):
     body = json.loads(response.body)
     assert body["count"] == 0
     assert body["matches"] == [] and body["scores"] == []
-    assert body["snapshot_id"] == "fresh" and body["source_snapshot_id"] == "old"
+    assert body["snapshot_id"] == fresh_id and body["source_snapshot_id"] == source_id
     # 零匹配不发放登记凭证（工单 08：验证失败不得登记）
     assert body["region"] is None and body["verification"] is None
-    assert calls == [("GET", "/api/v1/snapshots/old/image"),
+    assert calls == [("GET", f"/api/v1/snapshots/{source_id}/image"),
                      ("POST", "/api/v1/snapshots"),
-                     ("GET", "/api/v1/snapshots/fresh/image")]
+                     ("GET", f"/api/v1/snapshots/{fresh_id}/image")]
 
 
 def test_real_vendor_match_accepts_crop_and_rejects_absent_crop(monkeypatch):
