@@ -112,11 +112,19 @@ function groupTables(tables: SchemaTable[]): { group: string; tables: SchemaTabl
   return [...map.entries()].map(([group, list]) => ({ group, tables: list }))
 }
 
+export function filterSchemaTables(tables: SchemaTable[], keyword: string, groupFilter: string): SchemaTable[] {
+  const key = keyword.trim().toLowerCase()
+  return tables.filter((table) => (!groupFilter || (table.group ?? '未分组') === groupFilter) &&
+    (!key || [table.name, table.note, ...(table.fields ?? []).flatMap((field) => [field.field, field.note])]
+      .some((value) => value?.toLowerCase().includes(key))))
+}
+
 export function DatabasePage() {
   const { targetScope, setTargetScope } = useTargetScope()
   const [tab, setTab] = useState<DbTab>('overview')
   const [selectedTable, setSelectedTable] = useState<string | null>(null)
   const [keyword, setKeyword] = useState('')
+  const [groupFilter, setGroupFilter] = useState('')
 
   const schemaQuery = useQuery({
     queryKey: ['schema'],
@@ -132,18 +140,20 @@ export function DatabasePage() {
   const relations = useMemo(() => normalizeRelations(doc), [doc])
   const grouped = useMemo(() => groupTables(tables), [tables])
 
-  const activeTable =
-    (selectedTable && tables.find((table) => table.name === selectedTable)) || tables[0] || null
-
   const keywordLower = keyword.trim().toLowerCase()
-  const dictionaryTables = useMemo(() => {
-    if (!keywordLower) return tables
-    return tables.filter(
-      (table) =>
-        table.name.toLowerCase().includes(keywordLower) ||
-        (table.fields ?? []).some((field) => field.field.toLowerCase().includes(keywordLower)),
-    )
-  }, [tables, keywordLower])
+  const dictionaryTables = useMemo(() => filterSchemaTables(tables, keywordLower, groupFilter), [tables, keywordLower, groupFilter])
+  const visibleTables = tab === 'dictionary' ? dictionaryTables : tables
+  const activeTable = visibleTables.find((table) => table.name === selectedTable) ?? visibleTables[0] ?? null
+
+  function exportDictionary() {
+    if (!doc) return
+    const url = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json;charset=utf-8' }))
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = 'testdock-field-dictionary.json'
+    anchor.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
 
   return (
     <>
@@ -151,7 +161,7 @@ export function DatabasePage() {
         title="数据设计"
         description="表关系、字段字典与写入流程（数据源 GET /api/v1/schema）"
         actions={
-          <Button icon="download" onClick={() => undefined}>
+          <Button icon="download" onClick={exportDictionary} disabled={!schemaQuery.isSuccess || tables.length === 0}>
             导出字典
           </Button>
         }
@@ -281,7 +291,12 @@ export function DatabasePage() {
           <Panel className="db-table-list">
             <div style={{ padding: '10px 12px' }}>
               <ToolbarLike value={keyword} onChange={setKeyword} />
+              <select aria-label="按表分组筛选" value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)}>
+                <option value="">全部分组</option>
+                {grouped.map((group) => <option key={group.group} value={group.group}>{group.group}</option>)}
+              </select>
             </div>
+            {dictionaryTables.length === 0 ? <div className="panel-pad muted small">没有匹配的表或字段</div> : null}
             {dictionaryTables.map((table) => (
               <button
                 key={table.name}
@@ -365,8 +380,8 @@ function ToolbarLike({ value, onChange }: { value: string; onChange: (value: str
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder="搜索表名 / 字段名"
-        aria-label="搜索表名或字段名"
+        placeholder="搜索表名 / 字段名 / 中文说明"
+        aria-label="搜索表名、字段名或中文说明"
       />
     </label>
   )

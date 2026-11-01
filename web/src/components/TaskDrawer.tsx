@@ -42,6 +42,7 @@ import { Drawer } from './Dialog'
 import { Empty } from './Empty'
 import { Notice } from './Notice'
 import { useToast } from './Toast'
+import { RunDrawer } from './RunDrawer'
 import { newRequestKey } from './TaskWizard'
 
 /** 后端可能返回 revisions 为数组或 { items } —— 两种都接住，缺失时返回空数组而不是假数据 */
@@ -98,6 +99,7 @@ interface TaskDrawerProps {
 }
 
 export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
+  const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const toast = useToast()
   const [validationError, setValidationError] = useState<ReturnType<typeof describeError> | null>(null)
@@ -231,7 +233,10 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
         request_key: newRequestKey(),
       }),
     onSuccess: (created) => {
-      toast.show('运行已发起：' + created.display_id + '，可在 UI 自动化页跟踪')
+      toast.show('运行已发起：' + created.display_id)
+      setActiveRunId(created.id)
+      void queryClient.invalidateQueries({ queryKey: ['runs'] })
+      void queryClient.invalidateQueries({ queryKey: ['overview'] })
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
     },
     onError: (error) => {
@@ -270,6 +275,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
   ) : null
 
   return (
+    <>
     <Drawer
       open={open && Boolean(task)}
       onClose={onClose}
@@ -280,7 +286,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
           : undefined
       }
       footer={footer}
-      footHint={task ? '验证会把最新修订从 draft 推到 validated；已绑定运行的修订不可再改' : undefined}
+      footHint={task ? '保存配置会产生新修订；历史运行保留当时的固定输入' : undefined}
     >
       {!task ? null : (
         <>
@@ -300,7 +306,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
               <dd>
                 {task.run ? (
                   <>
-                    <StatusBadge status={displayStatus(task.run.state, task.run.outcome)} />{' '}
+                    <StatusBadge status={displayStatus(task.run.state, task.run.outcome)} /> <Button size="small" onClick={() => setActiveRunId(task.run!.id)}>查看运行详情</Button>{' '}
                     {task.run.outcome === null && task.run.state === 'completed' ? (
                       <span className="muted small">后端未给出结论</span>
                     ) : null}
@@ -562,5 +568,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
         </>
       )}
     </Drawer>
+    <RunDrawer key={activeRunId} open={Boolean(activeRunId)} runId={activeRunId} onClose={() => setActiveRunId(null)} />
+    </>
   )
 }

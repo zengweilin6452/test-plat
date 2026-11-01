@@ -15,7 +15,7 @@ import { useTargetScope } from '../store/scope'
 // 与 docs/contracts/openapi.json 同源（AC-INT-01）：不把 runner 内部协议
 //（/internal/*，X-Control-Token）宣传成普通接入 API。
 const CAPS: { title: string; desc: string }[] = [
-  { title: '测试定义写入', desc: 'POST /api/v1/tasks 创建任务草稿；PATCH /tasks/{id} 与 /tasks/{id}/validate 形成修订并验证（幂等键 request_key）。' },
+  { title: '测试定义写入', desc: 'POST /api/v1/tasks 创建任务草稿；PATCH /tasks/{id} 与 POST /tasks/{id}/validate 形成修订并验证（幂等键 request_key）。' },
   { title: '构建与套件登记', desc: 'POST /api/v1/builds 登记构建（同 key 同身份复用）；POST /api/v1/suites 登记套件并固定代码副本。' },
   { title: '运行发起与跟踪', desc: 'POST /api/v1/runs 发起运行（幂等键重复提交返回 200 + duplicate）；GET /runs/{id}/events 按序号补拉，WS /ws/runs/{id} 实时跟踪。' },
   { title: '结果与证据', desc: '结果由 runner 经内部协议上报并落库（runs/cases/metrics/gate_evaluations）；浏览器经 GET /runs/{id}/report 与 /artifacts 读取，error/available/expired 分别呈现。' },
@@ -137,21 +137,23 @@ export function IntegrationPage() {
           </Panel>
 
           <Panel>
-            <PanelHead title="一次完整接入" hint="四步走通：定义 → 申请 → 执行 → 上报" />
+            <PanelHead title="一次完整接入" hint="验证任务后发起运行，由执行器管理资源与上报" />
             <div className="panel-pad">
               <div className="flow-box">
                 <span className="flow-node">定义</span>
                 <span aria-hidden="true">→</span>
-                <span className="flow-node">租约</span>
+                <span className="flow-node">验证</span>
                 <span aria-hidden="true">→</span>
                 <span className="flow-node">执行</span>
                 <span aria-hidden="true">→</span>
-                <span className="flow-node">上报</span>
+                <span className="flow-node">报告</span>
               </div>
-              <pre className="code-block">{`POST /api/v1/tasks                       # 写入任务草稿（TASK-）
-POST /api/v1/resources/{id}/lease         # 申请执行资源
-POST /api/v1/runs/{id}/results            # 上报断言与产物
-GET  /api/v1/runs/{id}/gate               # 读取门禁结论`}</pre>
+              <pre className="code-block">{`POST /api/v1/tasks                       # 创建任务草稿
+POST /api/v1/tasks/{id}/validate         # 验证当前修订，取得 revision_id
+POST /api/v1/runs                        # 提交 application_id/task_id/revision_id/device
+GET  /api/v1/runs/{id}/events             # 跟踪运行
+GET  /api/v1/runs/{id}/report             # 读取原始结论与证据
+GET  /api/v1/runs/{id}/report/export      # 导出报告 JSON`}</pre>
             </div>
           </Panel>
         </div>

@@ -16,16 +16,18 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { describeError } from '../api/client'
-import { createGateEvaluation, fetchAnalysis, fetchRuns, fetchTasks } from '../api/endpoints'
+import { request, describeError } from '../api/client'
+import { createGateEvaluation, fetchAnalysis, fetchRuns } from '../api/endpoints'
 import { Badge, StatusBadge } from '../components/Badge'
 import { Button } from '../components/Button'
 import { PageHeading, Panel, PanelHead } from '../components/Card'
 import { ContextBar, PlannedNotice, PrimaryAction } from '../components/PageBits'
 import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
+import { Tabs } from '../components/Tabs'
+import { useAppScope } from '../store/app'
 import { Table, type Column } from '../components/Table'
-import { TaskDrawer } from '../components/TaskDrawer'
+import { RunDrawer } from '../components/RunDrawer'
 import { TaskWizard, newRequestKey } from '../components/TaskWizard'
 import { useToast } from '../components/Toast'
 import { TARGET_CATALOG, isImplementedPlatform, isPerformanceType, moduleName } from '../constants'
@@ -37,7 +39,7 @@ import type {
   GateCheck,
   RunAnalysis,
 } from '../api/types'
-import type { CreateTaskResponse, Platform, RunOutcome, RunRecord, TaskRecord } from '../types'
+import type { CreateTaskResponse, Platform, RunOutcome, RunRecord } from '../types'
 
 /** 指标口径展示名；未登记的 key 原样显示，不猜单位 */
 const METRIC_LABELS: Record<string, string> = {
@@ -69,9 +71,12 @@ function verdictTone(verdict: string | null | undefined): 'green' | 'red' | 'amb
 
 export function PerfPage() {
   const { targetScope, setTargetScope } = useTargetScope()
+  const { appId } = useAppScope()
+  const [tab, setTab] = useState<'analysis' | 'baseline'>('analysis')
+  const [policyId, setPolicyId] = useState('')
   const planned = !isImplementedPlatform(targetScope)
   const [wizardOpen, setWizardOpen] = useState(false)
-  const [activeTask, setActiveTask] = useState<TaskRecord | null>(null)
+  const [activeRunId, setActiveRunId] = useState<string | null>(null)
   // 分析页状态：选中运行 / 选中的判定（试算后切到那条）/ 试算用基线
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [evaluationId, setEvaluationId] = useState<string | null>(null)
@@ -80,32 +85,12 @@ export function PerfPage() {
   const toast = useToast()
 
   const runsQuery = useQuery({
-    queryKey: ['runs', 'perf', targetScope],
-    queryFn: ({ signal }) => fetchRuns(targetScope, 100, signal),
+    queryKey: ['runs', 'perf', targetScope, appId],
+    queryFn: ({ signal }) => fetchRuns(targetScope, 100, signal, appId ? { application_id: appId } : undefined),
     retry: false,
   })
 
-  // 任务抽屉需要任务对象，而运行记录只带 task_id：按 id 反查任务列表（只读、失败不影响本页表格）
-  const tasksQuery = useQuery({
-    queryKey: ['tasks', 'by-id'],
-    queryFn: ({ signal }) => fetchTasks(undefined, undefined, signal),
-    retry: false,
-  })
-  const taskById = useMemo(() => {
-    const map = new Map<string, TaskRecord>()
-    for (const task of tasksQuery.data?.items ?? []) map.set(task.id, task)
-    return map
-  }, [tasksQuery.data])
-
-  function openTaskOfRun(run: RunRecord) {
-    const task = run.task_id ? taskById.get(run.task_id) : undefined
-    if (task) {
-      setActiveTask(task)
-      return
-    }
-    // 找不到对应任务时不伪造一条：明确告诉用户任务详情数据缺失
-    toast.show(run.task_id ? '任务 ' + run.task_id + ' 不在当前任务列表中，无法打开详情' : '该运行没有关联任务')
-  }
+  function openTaskOfRun(run: RunRecord) { setActiveRunId(run.id) }
 
   function handleCreated(created: CreateTaskResponse) {
     toast.show('任务已创建：' + created.display_id + '（编号 ' + created.id + '）')
@@ -139,12 +124,14 @@ export function PerfPage() {
   })
   const analysisError = analysisQuery.isError ? describeError(analysisQuery.error) : null
   const analysis: RunAnalysis | null = analysisQuery.data ?? null
+  useEffect(() => { setPolicyId('') }, [analysis?.run.application_id])
 
   const trialMutation = useMutation({
     mutationFn: () =>
       createGateEvaluation(currentRunId!, {
         request_key: newRequestKey(),
         baseline_run_id: baselineRunId || null,
+        policy_id: policyId || null,
       }),
     onSuccess: (result) => {
       const id = result.evaluation_id ?? result.id
@@ -238,9 +225,14 @@ export function PerfPage() {
         </div>
       ) : null}
 
+      <Tabs items={[{ value: 'analysis', label: '运行分析' }, { value: 'baseline', label: '基线与门禁' }]} active={tab} onChange={setTab} ariaLabel="性能测试视图" />
+      <div style={{ display: tab === 'baseline' ? undefined : 'none' }}>
+        <Panel className="mb"><PanelHead title="基线管理" hint="从已完成的性能或联动运行保存真实指标与设备档案" /><div className="panel-pad"><BaselineManager key={analysis?.run.application_id ?? appId ?? 'none'} applicationId={analysis?.run.application_id ?? appId} runs={finishedRuns} initialRunId={currentRunId} onSelected={setBaselineRunId} /></div></Panel>
+        <Panel className="mb"><PanelHead title="门禁策略" hint="保存生成新版本，历史报告仍使用原始策略" /><div className="panel-pad"><PolicyEditor key={analysis?.run.application_id ?? appId ?? 'none'} applicationId={analysis?.run.application_id ?? appId} onSelected={setPolicyId} /></div></Panel>
+      </div>
       <Panel>
         <PanelHead
-          title="运行分析"
+          title={tab === 'analysis' ? '运行分析' : '基线对比与试算'}
           hint="指标取 median；门禁逐项来自后端 checks，试算只新增判定行"
           actions={
             currentRunId ? (
@@ -297,8 +289,7 @@ export function PerfPage() {
             ) : analysis ? (
               <>
                 <VerdictNotice analysis={analysis} />
-                <MetricCards analysis={analysis} />
-                <ChecksTable analysis={analysis} />
+                {tab === 'analysis' ? <><MetricCards analysis={analysis} /><ChecksTable analysis={analysis} /></> : null}
                 <div className="content-grid mt">
                   <ContextCard analysis={analysis} />
                   <TrialCard
@@ -307,7 +298,7 @@ export function PerfPage() {
                     onBaselineChange={setBaselineRunId}
                     onTrial={() => trialMutation.mutate()}
                     pending={trialMutation.isPending}
-                    canTrial={Boolean(currentRunId)}
+                    canTrial={Boolean(currentRunId && policyId && baselineRunId)}
                   />
                 </div>
               </>
@@ -346,12 +337,14 @@ export function PerfPage() {
       </div>
 
       <TaskWizard
+        initialModule="perf"
+        initialApplicationId={appId ?? undefined}
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
         onCreated={handleCreated}
         initialPlatform={targetScope === 'all' ? 'android' : (targetScope as Platform)}
       />
-      <TaskDrawer open={Boolean(activeTask)} task={activeTask} onClose={() => setActiveTask(null)} />
+      <RunDrawer key={activeRunId} open={Boolean(activeRunId)} runId={activeRunId} onClose={() => setActiveRunId(null)} />
     </>
   )
 }
@@ -549,7 +542,8 @@ function TrialCard({
           value={baselineRunId}
           onChange={(event) => onBaselineChange(event.target.value)}
         >
-          <option value="">由平台选择（同档案优先）</option>
+          <option value="">请选择明确的基线</option>
+          {baselineRunId && !options.some((option) => option.source_run_id === baselineRunId) ? <option value={baselineRunId}>已选基线来源：{baselineRunId}</option> : null}
           {options.map((option) => (
             <option key={option.id} value={option.source_run_id ?? ''}>
               {option.baseline_name ?? '基线'}
@@ -565,8 +559,149 @@ function TrialCard({
         </Button>
       </div>
       <p className="small muted mt">
-        告警级超标保留 passed；样本不足、缺失指标或基线不可比则返回 not_tested。
+        先在「基线与门禁」选择策略与基线，再提交试算。告警级不阻断；具体结论与原因由后端返回。
       </p>
     </section>
   )
+}
+
+interface GatePolicyView {
+  id: string
+  name: string
+  version: number
+  thresholds: Record<string, [string, number, string]>
+  min_samples: number | null
+  rules_error?: string | null
+}
+
+function PolicyEditor({ applicationId, onSelected }: { applicationId: string | null | undefined; onSelected: (id: string) => void }) {
+  const client = useQueryClient()
+  const [selected, setSelected] = useState('')
+  const [dirty, setDirty] = useState(false)
+  const [rows, setRows] = useState<{ key: string; op: string; value: string; level: string }[]>([])
+  const [minimum, setMinimum] = useState('10')
+  const [name, setName] = useState('default')
+  const policies = useQuery({
+    queryKey: ['gate-policies', applicationId],
+    queryFn: ({ signal }) => request<{ items: GatePolicyView[] }>('/gate-policies', { query: { application_id: applicationId }, signal }),
+    enabled: Boolean(applicationId), retry: false,
+  })
+  function selectPolicy(id: string) {
+    setDirty(false)
+    setSelected(id)
+    onSelected(id)
+    const policy = policies.data?.items.find((item) => item.id === id)
+    setName(policy?.name ?? 'default')
+    setMinimum(String(policy?.min_samples ?? 10))
+    setRows(Object.entries(policy?.thresholds ?? {}).map(([key, [op, value, level]]) => ({ key, op, value: String(value), level })))
+  }
+  const save = useMutation({
+    mutationFn: () => request<GatePolicyView>(selected ? `/gate-policies/${encodeURIComponent(selected)}` : '/gate-policies', {
+      method: selected ? 'PUT' : 'POST',
+      body: { application_id: applicationId, name: name.trim(), rules: { min_samples: Number(minimum), thresholds: rows.map((row) => ({ metric_key: row.key.trim(), op: row.op, threshold: Number(row.value), level: row.level })) } },
+    }),
+    onSuccess: async (policy) => {
+      await client.invalidateQueries({ queryKey: ['gate-policies', applicationId] })
+      setSelected(policy.id)
+      setDirty(false)
+      onSelected(policy.id)
+    },
+  })
+  if (!applicationId) return <div className="muted small">请选择应用工作区或已完成运行，再管理门禁策略。</div>
+  const valid = name.trim() && Number.isInteger(Number(minimum)) && Number(minimum) > 0 && rows.length > 0 && rows.every((row) => row.key.trim() && row.value.trim() && Number.isFinite(Number(row.value))) && new Set(rows.map((row) => row.key.trim())).size === rows.length
+  return <>
+    {policies.isError ? <Notice tone="red" title="策略加载失败">{describeError(policies.error).message}</Notice> : null}
+    <label className="field"><span>策略版本</span><select aria-label="选择门禁策略" disabled={save.isPending} value={selected} onChange={(event) => { save.reset(); selectPolicy(event.target.value) }}><option value="">新建策略</option>{policies.data?.items.map((policy) => <option key={policy.id} value={policy.id}>{policy.name} v{policy.version}</option>)}</select></label>
+    {dirty ? <p className="small muted" role="status">规则有未保存修改，保存为新版本后才能试算；也可重新选择已保存版本。</p> : null}
+    <fieldset disabled={save.isPending} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }} onChange={() => { setDirty(true); onSelected(''); save.reset() }}>
+    <div className="form-grid mt"><label className="field"><span>策略名称</span><input value={name} onChange={(event) => setName(event.target.value)} /></label><label className="field"><span>最少样本数</span><input type="number" min="1" step="1" value={minimum} onChange={(event) => setMinimum(event.target.value)} /></label></div>
+    {rows.map((row, index) => <div className="toolbar" key={index}>
+      <label className="field"><span>指标键</span><input aria-label={`指标键 ${index + 1}`} value={row.key} onChange={(event) => setRows((items) => items.map((item, i) => i === index ? { ...item, key: event.target.value } : item))} /></label>
+      <label className="field"><span>比较方式</span><select value={row.op} onChange={(event) => setRows((items) => items.map((item, i) => i === index ? { ...item, op: event.target.value } : item))}>{Object.entries(OP_TEXT).map(([op, text]) => <option key={op} value={op}>{text}</option>)}</select></label>
+      <label className="field"><span>阈值</span><input type="number" step="any" aria-label={`阈值 ${index + 1}`} value={row.value} onChange={(event) => setRows((items) => items.map((item, i) => i === index ? { ...item, value: event.target.value } : item))} /></label>
+      <label className="field"><span>超标级别</span><select aria-label={`超标级别 ${index + 1}`} value={row.level} onChange={(event) => setRows((items) => items.map((item, i) => i === index ? { ...item, level: event.target.value } : item))}><option value="fail">阻断</option><option value="warn">告警，不阻断</option></select></label>
+      <Button size="small" onClick={() => { setDirty(true); onSelected(''); save.reset(); setRows((items) => items.filter((_, i) => i !== index)) }}>移除规则 {index + 1}</Button>
+    </div>)}
+    <div className="flex mt"><Button onClick={() => { setDirty(true); onSelected(''); save.reset(); setRows((items) => [...items, { key: '', op: 'lt', value: '', level: 'fail' }]) }}>添加阈值</Button><Button kind="primary" disabled={!valid || save.isPending || policies.isError || policies.isLoading} onClick={() => save.mutate()}>{save.isPending ? '保存中…' : '保存为新版本'}</Button></div>
+    </fieldset>
+    {save.isError ? <Notice tone="red" title="策略保存失败">{describeError(save.error).message}</Notice> : null}
+    {save.isSuccess ? <p className="small mt" role="status">已保存 {save.data.name} v{save.data.version}，后续试算使用此版本。</p> : null}
+  </>
+}
+
+interface BaselineView {
+  id: string
+  name: string
+  version: number
+  source_run_id: string | null
+  source_component_id: string | null
+  profile: string | null
+  profile_error: string | null
+  created_at: string | null
+  created?: boolean
+  metrics: { key: string; value?: number | null; median?: number | null; unit?: string | null; missing_reason?: string | null; missing_reason_text?: string | null }[]
+}
+
+export function baselineCreatePayload(run: RunRecord | undefined, name: string, requestKey: string) {
+  if (!run || run.state !== 'completed' || !(isPerformanceType(run.test_type) || run.test_type === 'joint')) {
+    throw new Error('请选择已完成的性能或联动运行')
+  }
+  if (!name.trim()) throw new Error('请填写基线名称')
+  return { request_key: requestKey, run_id: run.id, name: name.trim() }
+}
+
+function BaselineManager({ applicationId, runs, initialRunId, onSelected }: {
+  applicationId: string | null | undefined
+  runs: RunRecord[]
+  initialRunId: string | null
+  onSelected: (sourceRunId: string) => void
+}) {
+  const client = useQueryClient()
+  const eligible = runs.filter((run) => run.application.id === applicationId && run.state === 'completed' && (isPerformanceType(run.test_type) || run.test_type === 'joint'))
+  const [sourceId, setSourceId] = useState(initialRunId ?? '')
+  const [name, setName] = useState('')
+  const [requestKey, setRequestKey] = useState(newRequestKey)
+  const source = eligible.find((run) => run.id === sourceId)
+  const list = useQuery({
+    queryKey: ['baselines', applicationId],
+    queryFn: ({ signal }) => request<{ items: BaselineView[] }>('/baselines', { query: { application_id: applicationId, limit: 200 }, signal }),
+    enabled: Boolean(applicationId), retry: false,
+  })
+  const save = useMutation({
+    mutationFn: () => request<BaselineView>('/baselines', { method: 'POST', body: baselineCreatePayload(source, name, requestKey) }),
+    onSuccess: async (baseline) => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['baselines', applicationId] }),
+        client.invalidateQueries({ queryKey: ['analysis'] }),
+      ])
+      if (baseline.source_run_id) onSelected(baseline.source_run_id)
+    },
+  })
+  function edit() { save.reset(); setRequestKey(newRequestKey()) }
+  if (!applicationId) return <p className="small muted">请选择应用工作区或已完成运行，再查看基线。</p>
+  return <>
+    <div className="form-grid">
+      <label className="field"><span>来源运行</span><select aria-label="基线来源运行" value={sourceId} disabled={save.isPending} onChange={(event) => { edit(); setSourceId(event.target.value) }}><option value="">选择已完成的性能或联动运行</option>{eligible.map((run) => <option key={run.id} value={run.id}>{run.display_id} / {run.name}</option>)}</select></label>
+      <label className="field"><span>基线名称</span><input aria-label="基线名称" value={name} disabled={save.isPending} onChange={(event) => { edit(); setName(event.target.value) }} /></label>
+    </div>
+    <p className="small muted mt">保留来源组件、指标快照及设备档案；同名基线由后端复用，不覆盖既有快照。需要保留另一份来源时请填写新名称。</p>
+    <Button kind="primary" disabled={!source || !name.trim() || save.isPending} onClick={() => save.mutate()}>{save.isPending ? '保存中…' : '从运行创建基线'}</Button>
+    {save.isError ? <Notice tone="red" title="基线创建失败">{describeError(save.error).message}</Notice> : null}
+    {save.isSuccess ? <p className="small mt" role="status">{save.data.created === false ? '已复用同名基线' : '已创建基线'}：{save.data.name} v{save.data.version}，来源运行 {save.data.source_run_id ?? '未提供'}。</p> : null}
+    {list.isError ? <Notice tone="red" title="基线加载失败">{describeError(list.error).message}</Notice> : list.isLoading ? <p className="small muted mt">正在加载基线…</p> : <Table
+      rows={list.data?.items ?? []}
+      rowKey={(baseline) => baseline.id}
+      ariaLabel="已保存基线"
+      empty={<Empty icon="pulse" title="当前应用没有基线" description="选择已完成运行，保存真实指标快照作为后续比较来源。" />}
+      columns={[
+        { key: 'name', header: '基线 / 版本', render: (baseline) => <>{baseline.name}<div className="task-sub">v{baseline.version}</div></> },
+        { key: 'source', header: '来源运行 / 组件', render: (baseline) => <span className="small mono">{baseline.source_run_id ?? DASH}<div className="task-sub">{baseline.source_component_id ?? '缺少来源组件'}</div></span> },
+        { key: 'profile', header: '设备档案', render: (baseline) => baseline.profile ?? baseline.profile_error ?? '缺少档案' },
+        { key: 'metrics', header: '快照指标', render: (baseline) => <div className="small">{(baseline.metrics ?? []).map((metric) => <div key={metric.key}>{metricLabel(metric.key)}：{metric.value ?? metric.median ?? metric.missing_reason_text ?? metric.missing_reason ?? '未采集'} {metric.unit ?? ''}</div>)}</div> },
+        { key: 'created', header: '创建时间', render: (baseline) => <span className="small muted">{fmtDateTime(baseline.created_at)}</span> },
+        { key: 'select', header: '操作', render: (baseline) => <Button size="small" disabled={!baseline.source_run_id} onClick={() => onSelected(baseline.source_run_id!)}>用于试算</Button> },
+      ]}
+      footer={<span>本页最多显示最新 200 条基线；可比性与结论由后端核验。</span>}
+    />}
+  </>
 }

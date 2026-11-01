@@ -211,7 +211,7 @@ export function DevicesPage() {
                   <div className="mini-phone">
                     <div className="mini-line" />
                     <div className="mini-block">
-                      {state === 'idle' ? '可调试' : busy ? '只读预览' : '未连接'}
+                      {state === 'idle' ? '可调试' : busy ? '占用中' : '未连接'}
                     </div>
                     <div className="mini-line" />
                   </div>
@@ -235,7 +235,7 @@ export function DevicesPage() {
                           ? '等待 USB 调试授权'
                           : state === 'offline'
                             ? '检查连接与设备状态'
-                            : '无占用'}
+                            : row.busy ? '占用中' : '无占用'}
                   </dd>
                 </dl>
                 <div className="resource-actions">
@@ -252,7 +252,7 @@ export function DevicesPage() {
                     }
                     onClick={() => openDebug(row)}
                   >
-                    {busy ? '只读预览' : '打开调试'}
+                    {busy ? '占用中' : '打开调试'}
                   </Button>
                 </div>
               </section>

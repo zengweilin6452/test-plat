@@ -18,6 +18,7 @@ for (const extension of ['.ts', '.tsx']) {
 const { INITIAL_FORM, buildCreateTaskRequest, validateStep1, validateStep2, isDeviceSelectable } =
   require('../src/components/TaskWizard.tsx')
 const { createTask } = require('../src/api/endpoints.ts')
+const { canConfirmIdentity } = require('../src/components/InputRegistration.tsx')
 const applicationId = '11111111-1111-4111-8111-111111111111'
 const resourceId = '22222222-2222-4222-8222-222222222222'
 const buildId = '33333333-3333-4333-8333-333333333333'
@@ -57,6 +58,21 @@ test('性能向导映射 performance 并保留采集配置', () => {
   const body = buildCreateTaskRequest({ ...form, module: 'perf', duration: '120' })
   assert.equal(body.test_type, 'performance')
   assert.deepEqual(body.config.perf, { duration_s: 120, items: ['CPU', 'Memory', 'FPS'] })
+})
+
+test('only an unblocked matching pending identity can be explicitly confirmed', () => {
+  const check = { result: 'match', identity_state: 'pending', blocking: [] }
+  assert.equal(canConfirmIdentity(check), true)
+  assert.equal(canConfirmIdentity(null), false)
+  for (const result of ['conflict', 'unknown']) assert.equal(canConfirmIdentity({ ...check, result }), false)
+  assert.equal(canConfirmIdentity({ ...check, blocking: [{ reason: 'missing' }] }), false)
+  assert.equal(canConfirmIdentity({ ...check, identity_state: 'confirmed' }), false)
+})
+
+test('wizard carries only selected immutable image template pins', () => {
+  const pins = [{ logical: 'login', version_id: 'template-v1', sha256: 'abc' }]
+  assert.deepEqual(buildCreateTaskRequest({ ...form, imageTemplates: pins }).config.image_templates, pins)
+  assert.equal(Object.hasOwn(buildCreateTaskRequest(form).config, 'image_templates'), false)
 })
 
 test('未选择登记应用时不能继续；包名与时长校验仍生效', () => {

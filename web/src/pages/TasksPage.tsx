@@ -18,12 +18,13 @@ import { ContextBar, PrimaryAction, Toolbar } from '../components/PageBits'
 import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
 import { Table, type Column } from '../components/Table'
+import { RunDrawer } from '../components/RunDrawer'
 import { TaskDrawer } from '../components/TaskDrawer'
 import { TaskWizard } from '../components/TaskWizard'
 import { useToast } from '../components/Toast'
 import { moduleName, TARGET_CATALOG } from '../constants'
 import { displayStatus, displayTaskStatus } from '../lib/display'
-import { DASH, fmtDateTime } from '../lib/fmt'
+import { fmtDateTime } from '../lib/fmt'
 import { useTargetScope } from '../store/scope'
 import type { CreateTaskResponse, Platform, TaskRecord } from '../types'
 
@@ -47,6 +48,7 @@ export function TasksPage() {
     const search = params.toString()
     navigate({ pathname: location.pathname, search: search ? '?' + search : '', hash: location.hash })
   }
+  const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [activeTask, setActiveTask] = useState<TaskRecord | null>(null)
   const queryClient = useQueryClient()
@@ -142,7 +144,7 @@ export function TasksPage() {
       header: '操作',
       align: 'right',
       render: (task) => (
-        <LinkButton onClick={() => setActiveTask(task)}>
+        <LinkButton onClick={() => task.run ? setActiveRunId(task.run.id) : setActiveTask(task)}>
           {task.run ? '查看执行' : '查看配置'}
           <span aria-hidden="true">›</span>
         </LinkButton>
@@ -160,7 +162,7 @@ export function TasksPage() {
       <ContextBar
         scope={targetScope}
         onScopeChange={setTargetScope}
-        extra={<span className="muted small">草稿编号以 TASK- 开头，其余为 RUN-</span>}
+        extra={<span className="muted small">任务使用 TASK- 编号，每次执行使用独立 RUN- 编号</span>}
       />
 
       {error ? (
@@ -174,7 +176,7 @@ export function TasksPage() {
       <Panel>
         <PanelHead
           title="任务列表"
-          hint="每行展示最新修订与最近一次运行；点击可查看执行详情"
+          hint="每行展示最新修订与最近一次运行；点击任务查看配置，查看执行打开运行详情"
         />
         <div style={{ padding: '0 20px' }}>
           <Toolbar search={keyword} onSearch={(value) => patchParams({ q: value || null })}>
@@ -212,7 +214,7 @@ export function TasksPage() {
           <Empty
             icon="tasks"
             title="还没有测试任务"
-            description="任务创建与提交流程在 P2 提供；当前展示数据库中已有的任务。"
+            description="点击新建任务，选择固定测试输入后启动运行。"
           />
         ) : (
           <Table
@@ -227,7 +229,7 @@ export function TasksPage() {
       </Panel>
 
       <div className="mt muted small">
-        运行编号与任务编号由后端生成：草稿 {DASH} 无运行，提交后产生 RUN- 编号。
+        运行编号与任务编号由后端生成：任务保留 TASK- 编号，启动后产生独立 RUN- 编号。
       </div>
 
       <TaskWizard
@@ -236,6 +238,7 @@ export function TasksPage() {
         onCreated={handleCreated}
         initialPlatform={targetScope === 'all' ? 'android' : (targetScope as Platform)}
       />
+      <RunDrawer key={activeRunId} open={Boolean(activeRunId)} runId={activeRunId} onClose={() => setActiveRunId(null)} />
       <TaskDrawer open={Boolean(activeTask)} task={activeTask} onClose={() => setActiveTask(null)} />
     </>
   )

@@ -15,10 +15,55 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
 TEMPLATE_ASSETS_ENV = "TESTDOCK_TEMPLATE_ASSETS_DIR"
+
+
+def list_template_library(*, assets_root: Path | None = None) -> list[dict[str, Any]]:
+    """Read the shared library without opening a device or importing vendor code."""
+    root = Path(assets_root) if assets_root else template_assets_root()
+    manifest_path = root / "manifest.json"
+    if not manifest_path.exists():
+        return []
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError("模板清单格式错误")
+    entries = manifest["templates"]
+    if not isinstance(entries, dict):
+        raise ValueError("模板清单格式错误")
+    versions = []
+    # ponytail: scan local metadata; add an index only if library size warrants it.
+    for directory in sorted((root / "versions").glob("*")):
+        if not re.fullmatch(r"[0-9a-f]{32}", directory.name):
+            continue
+        if not directory.resolve().is_relative_to(root.resolve()):
+            raise ValueError("模板版本目录越界")
+        meta = json.loads((directory / "meta.json").read_text(encoding="utf-8"))
+        if not isinstance(meta, dict):
+            raise ValueError("模板版本元数据格式错误")
+        logical = meta["logical"]
+        current = entries.get(logical, {})
+        if not isinstance(current, dict):
+            raise ValueError("模板清单项格式错误")
+        if current.get("version_id") == directory.name and current.get("image_sha256") != meta["image_sha256"]:
+            raise ValueError("模板清单与当前版本摘要不一致")
+        versions.append({
+            "logical": logical,
+            "version_id": directory.name,
+            "image_sha256": meta["image_sha256"],
+            "width": meta.get("width"), "height": meta.get("height"),
+            "source_width": meta.get("source_width"),
+            "source_height": meta.get("source_height"),
+            "capture_time": meta.get("capture_time"),
+            "current": current.get("version_id") == directory.name,
+        })
+    for logical, entry in entries.items():
+        if not any(v["logical"] == logical and v["version_id"] == entry["version_id"] for v in versions):
+            raise ValueError("模板当前版本元数据缺失")
+    return versions
 
 
 def template_assets_root() -> Path:

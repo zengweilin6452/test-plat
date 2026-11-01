@@ -28,7 +28,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { describeError } from '../api/client'
+import { describeError, request } from '../api/client'
 import {
   captureSnapshot,
   closeDebugSession,
@@ -663,6 +663,18 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     },
   })
 
+  const cropKey = JSON.stringify([session?.id ?? null, snapshotId, region, matchThreshold])
+  const cropValidation = useMutation({
+    mutationFn: async (input: { key: string; sessionId: string | number; snapshotId: string; region: Region; threshold: number }) => {
+      const result = await request<{ count: number; scores: number[]; snapshot_id: string }>('/templates/validate-crop', {
+        method: 'POST', query: { session_id: String(input.sessionId) },
+        body: { snapshot_id: input.snapshotId, region: [input.region.x, input.region.y, input.region.w, input.region.h], threshold: input.threshold },
+      })
+      return { ...result, key: input.key }
+    },
+  })
+  const cropVerified = cropValidation.data?.key === cropKey && cropValidation.data.count === 1
+
   /** 图像识别：从服务端保留的快照裁剪建档（vendor 不收浏览器图片） */
   const createTemplateMutation = useMutation({
     mutationFn: () => {
@@ -670,6 +682,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
       if (id === null) throw new Error('缺少调试会话')
       if (!snapshotId) throw new Error('先「采集快照」，模板只能从快照裁剪')
       if (!region) throw new Error('先在画面上拖拽框选模板区域')
+      if (!cropVerified) throw new Error('请先验证当前框选区域，唯一匹配后才能登记')
       const logical = newLogical.trim()
       if (!logical) throw new Error('模板逻辑名不能为空')
       return createTemplate(id, {
@@ -690,6 +703,22 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
       setTemplateError(described.code + '：' + described.message)
     },
   })
+
+  function clearInspection() {
+    setSelected(null)
+    setMatches(null)
+    setScores(null)
+    setValidateNote(null)
+    setValidateError(null)
+    setLocatorSnapshotId(null)
+    setLocator('')
+    setRegion(null)
+    setDragging(null)
+    setNewLogical('')
+    setTemplateError(null)
+    cropValidation.reset()
+    validateMutation.reset()
+  }
 
   const detailError = detailQuery.isError ? describeError(detailQuery.error) : null
   /** 上游不可达（viewer 未起）与无活动会话给出更具体的提示 */
@@ -810,12 +839,26 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         <select
           aria-label="调试设备"
           value={target?.serial ?? ''}
-          onChange={(event) => {
+          disabled={createMutation.isPending || closeMutation.isPending}
+          onChange={async (event) => {
             const picked = devices.find((d) => d.resource_key === event.target.value)
-            if (picked) onTargetChange(toWorkspaceTarget(picked))
+            if (!picked || picked.resource_key === target?.serial) return
+            const id = sessionRef.current
+            if (id !== null) {
+              try {
+                await closeMutation.mutateAsync(id)
+              } catch { return }
+              sessionRef.current = null
+              teardownSocket()
+            }
+            reset()
+            createPendingRef.current = false
+            onTargetChange(toWorkspaceTarget(picked))
+            void queryClient.invalidateQueries({ queryKey: ['resources'] })
           }}
         >
-          {devices.length === 0 ? <option value="">没有可调试设备</option> : null}
+          {target && !devices.some((device) => device.resource_key === target.serial) ? <option value={target.serial}>{target.label} · 当前调试设备</option> : null}
+          {!target && devices.length === 0 ? <option value="">没有可调试设备</option> : null}
           {devices.map((device) => {
             // 原型口径：name / os；档案缺失时如实回落设备编号
             const os = device.profile?.os_name
@@ -837,8 +880,14 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
           <Button
             size="small"
             icon="play"
+            disabled={validateMutation.isPending || cropValidation.isPending || createTemplateMutation.isPending}
             onClick={() => {
               // socket 一直活着，恢复后下一帧就会覆盖 canvas
+              clearInspection()
+              setSnapshotId(null)
+              setSnapshotSize(null)
+              setNodes(null)
+              setTreeError(null)
               frozenRef.current = false
               setFrozen(false)
             }}
@@ -935,6 +984,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                     {wsStatus === 'open' ? '等待设备画面…' : '画面尚未连接（' + wsText + '）'}
                   </div>
                 ) : null}
+                <div className="phone-bottom" aria-hidden="true" />
               </div>
             </div>
             <div className="between small muted">
@@ -1191,12 +1241,17 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                   />
                 </label>
                 {templateError ? <Notice tone="red" title="模板登记失败">{templateError}</Notice> : null}
+                {cropValidation.isError ? <Notice tone="red" title="框选验证失败">{describeError(cropValidation.error).message}</Notice> : null}
+                {cropValidation.data?.key === cropKey ? <p role="status" className="small muted">{cropValidation.data.count === 1 ? '验证通过，唯一匹配' : `验证未通过，匹配到 ${cropValidation.data.count} 处`} · 最高分 {cropValidation.data.scores.length ? Math.max(...cropValidation.data.scores).toFixed(3) : '—'} · 验证快照 {cropValidation.data.snapshot_id}</p> : null}
                 <div className="flex wrap" style={{ gap: 8 }}>
+                  <Button size="small" icon="check" disabled={!sessionActive || !snapshotId || !region || region.w < 4 || region.h < 4 || !coordinateSize || region.x < 0 || region.y < 0 || region.x + region.w > coordinateSize.w || region.y + region.h > coordinateSize.h || !matchThreshold.trim() || !Number.isFinite(Number(matchThreshold)) || Number(matchThreshold) < 0.1 || Number(matchThreshold) > 1 || cropValidation.isPending} onClick={() => {
+                    if (session && snapshotId && region) cropValidation.mutate({ key: cropKey, sessionId: session.id, snapshotId, region, threshold: Number(matchThreshold) })
+                  }}>{cropValidation.isPending ? '验证中…' : '验证框选匹配'}</Button>
                   <Button
                     kind="primary"
                     size="small"
                     icon="plus"
-                    disabled={createTemplateMutation.isPending || !snapshotId || !region || !newLogical.trim()}
+                    disabled={createTemplateMutation.isPending || cropValidation.isPending || !cropVerified || !snapshotId || !region || !newLogical.trim()}
                     onClick={() => createTemplateMutation.mutate()}
                   >
                     {createTemplateMutation.isPending ? '登记中…' : '从框选登记模板'}
@@ -1212,8 +1267,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                   <Button
                     size="small"
                     icon="image"
-                    disabled={templatesQuery.isFetching}
-                    onClick={() => void templatesQuery.refetch()}
+                    disabled={templatesQuery.isFetching || validateMutation.isPending || cropValidation.isPending || createTemplateMutation.isPending}
+                    onClick={() => { clearInspection(); void templatesQuery.refetch() }}
                   >
                     {templatesQuery.isFetching ? '刷新中…' : '刷新'}
                   </Button>

@@ -37,6 +37,8 @@ import type { SuiteVersionRecord } from '../api/types'
 import { Button } from './Button'
 import { Dialog } from './Dialog'
 import { Notice } from './Notice'
+import { BuildRegistration, SuiteRegistration } from './InputRegistration'
+import { TemplatePicker, type TemplatePin } from './TemplateLibrary'
 
 /** 任务名称上限（api-design.md §2.3） */
 export const NAME_MAX = 60
@@ -74,6 +76,7 @@ export interface WizardForm {
   buildId: string
   suiteId: string
   suiteVersionId: string
+  imageTemplates?: TemplatePin[]
 }
 
 export const INITIAL_FORM: WizardForm = {
@@ -89,6 +92,7 @@ export const INITIAL_FORM: WizardForm = {
   buildId: '',
   suiteId: '',
   suiteVersionId: '',
+  imageTemplates: [],
 }
 
 /** 字段级错误：key 与表单字段同名，便于把提示渲染到对应控件下方 */
@@ -205,6 +209,7 @@ export function buildCreateTaskRequest(form: WizardForm): CreateTaskRequest {
     platform: form.platform,
     application_id: form.applicationId,
     config: {
+      ...(form.imageTemplates?.length ? { image_templates: form.imageTemplates } : {}),
       ...(form.platform === 'android'
         ? { package_name: form.identifier.trim() }
         : { identifier: form.identifier.trim() }),
@@ -237,9 +242,12 @@ interface TaskWizardProps {
   onCreated?: (created: CreateTaskResponse) => void
   /** 初始目标端（跟随页面 context 条的 scope；'all' 时用 android） */
   initialPlatform?: Platform
+  initialModule?: TestModule
+  initialApplicationId?: string
+  initialSuite?: { applicationId: string; suiteId: string; suiteVersionId: string; platform: Platform; name?: string }
 }
 
-export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWizardProps) {
+export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialModule, initialApplicationId, initialSuite }: TaskWizardProps) {
   const uid = useId()
   const [step, setStep] = useState(1)
   const [form, setForm] = useState<WizardForm>(INITIAL_FORM)
@@ -254,6 +262,11 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
   }, [step])
 
   const fieldId = (name: keyof WizardForm) => `${uid}-${name}`
+  const presetPlatform = initialSuite?.platform ?? initialPlatform ?? 'android'
+  const presetApplicationId = initialSuite?.applicationId ?? initialApplicationId ?? ''
+  const presetSuiteId = initialSuite?.suiteId ?? ''
+  const presetVersionId = initialSuite?.suiteVersionId ?? ''
+  const presetName = initialSuite?.name ?? ''
 
   // 每次打开重置为初始状态；关闭时清掉请求键
   useEffect(() => {
@@ -261,10 +274,12 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
       setStep(1)
       setErrors({})
       setTouched(false)
-      setForm({ ...INITIAL_FORM, platform: initialPlatform ?? 'android' })
+      setForm({ ...INITIAL_FORM, platform: presetPlatform, module: initialModule ?? 'ui',
+        applicationId: presetApplicationId, suiteId: presetSuiteId,
+        suiteVersionId: presetVersionId, name: presetName })
       requestKeyRef.current = ''
     }
-  }, [open, initialPlatform])
+  }, [open, presetPlatform, initialModule, presetApplicationId, presetSuiteId, presetVersionId, presetName])
 
   const applicationsQuery = useQuery({
     queryKey: ['applications', 'wizard'],
@@ -276,6 +291,10 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
     (application) => application.platform === form.platform,
   )
   const applicationsError = applicationsQuery.isError ? describeError(applicationsQuery.error) : null
+  useEffect(() => {
+    const application = applicationsQuery.data?.items.find(app => app.id === form.applicationId)
+    if (application) setForm(prev => ({ ...prev, identifier: application.identifier ?? '' }))
+  }, [applicationsQuery.data, form.applicationId])
 
   // 构建与套件版本（validate 的必要绑定）：换应用后重新拉取
   const buildsQuery = useQuery({
@@ -301,13 +320,6 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
     retry: false,
   })
   const suiteVersions: SuiteVersionRecord[] = suiteVersionsQuery.data?.items ?? []
-  // 套件版本切换时校掉已发布的旧版本选择
-  useEffect(() => {
-    if (form.suiteVersionId && !suiteVersions.some((v) => v.id === form.suiteVersionId)) {
-      setForm((prev) => ({ ...prev, suiteVersionId: '' }))
-    }
-    // 仅跟随版本清单数据变化，form/setForm 走函数式更新不需要进依赖
-  }, [suiteVersionsQuery.data])
 
   // Android 才需要选设备；其它端不请求资源列表
   const resourcesQuery = useQuery({
@@ -461,7 +473,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
                   onClick={() => {
                     update('platform', platform)
                     // 换端后设备选择与标识含义都变了，清掉旧值避免误提交
-                    setForm((prev) => ({ ...prev, platform, applicationId: '', identifier: '', resourceId: '' }))
+                    setForm((prev) => ({ ...prev, platform, applicationId: '', identifier: '', resourceId: '', buildId: '', suiteId: '', suiteVersionId: '' }))
                     setErrors({})
                   }}
                 >
@@ -486,7 +498,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
                   type="button"
                   className="choice"
                   aria-pressed={form.module === module}
-                  onClick={() => update('module', module)}
+                  onClick={() => setForm(prev => ({ ...prev, module, suiteId: '', suiteVersionId: '' }))}
                 >
                   <strong>{MODULE_NAMES[module]}</strong>
                   <small>{module === 'ui' ? '不采集性能指标' : '需要填写采集时长'}</small>
@@ -530,7 +542,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
               onChange={(event) => {
                 const application = applications.find((item) => item.id === event.target.value)
                 setForm((prev) => ({ ...prev, applicationId: application?.id ?? '',
-                  identifier: application?.identifier ?? '', resourceId: '' }))
+                  identifier: application?.identifier ?? '', resourceId: '', buildId: '', suiteId: '', suiteVersionId: '' }))
               }}
             >
               <option value="">请选择已登记应用</option>
@@ -743,6 +755,11 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform }: TaskWi
             </div>
           ) : null}
 
+          {form.platform === 'android' && form.applicationId ? <>
+            <BuildRegistration key={`${form.applicationId}-${form.buildId}-${form.resourceId}`} applicationId={form.applicationId} buildId={form.buildId} resourceId={form.resourceId} onRegistered={id => update('buildId', id)} />
+            <SuiteRegistration key={`${form.applicationId}-${form.module}-${form.suiteId}`} applicationId={form.applicationId} testType={form.module === 'perf' ? 'performance' : form.module} suiteId={form.suiteId} onRegistered={(id, versionId) => setForm(prev => ({ ...prev, suiteId: id, suiteVersionId: versionId ?? '' }))} />
+          </> : null}
+          {form.module !== 'perf' ? <TemplatePicker value={form.imageTemplates ?? []} onChange={value => update('imageTemplates', value)} /> : null}
           <div className="form-grid two">
             <div className="field">
               <label htmlFor={fieldId('duration')}>

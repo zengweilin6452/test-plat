@@ -41,8 +41,8 @@ test('报告结论文案用后端原始枚举判定性能类', () => {
   assert.equal(conclusionText('performance', 'failed'), '性能阈值未满足，查看指标与基线')
   assert.equal(conclusionText('ui', 'passed'), '用例断言通过，执行过程可追溯')
   assert.equal(conclusionText('ui', null), '后端尚未给出结论')
-  // not_tested 一律是「样本不足」，不能被性能分支改写成未通过
-  assert.equal(conclusionText('performance', 'not_tested'), '样本不足，未产生门禁结论')
+  // 缺少原因时不猜测为样本不足，也不改写成未通过。
+  assert.equal(conclusionText('performance', 'not_tested'), '未产生门禁结论，查看报告中的具体原因')
 })
 
 test('指标缺失显示原因而不是 0', () => {

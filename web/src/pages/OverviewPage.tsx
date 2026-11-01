@@ -1,3 +1,6 @@
+import { useState } from 'react'
+import { RunDrawer } from '../components/RunDrawer'
+import { TaskWizard } from '../components/TaskWizard'
 /**
  * 工作台（原型 #overview / L141–L185）。
  *
@@ -30,6 +33,8 @@ import type { RunRecord, RunState } from '../types'
 export const ACTIVE_STATES: RunState[] = ['queued', 'dispatching', 'running', 'finalizing']
 
 export function OverviewPage() {
+  const [wizardOpen, setWizardOpen] = useState(false)
+  const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const { targetScope, setTargetScope } = useTargetScope()
 
   const overviewQuery = useQuery({
@@ -59,13 +64,13 @@ export function OverviewPage() {
 
   return (
     <>
+      <RunDrawer key={activeRunId} open={Boolean(activeRunId)} runId={activeRunId} onClose={() => setActiveRunId(null)} />
+      <TaskWizard open={wizardOpen} onClose={() => setWizardOpen(false)} onCreated={() => { setWizardOpen(false); refresh() }} initialPlatform={targetScope === 'all' ? 'android' : targetScope} />
       <PageHeading
         title="工作台"
         description="统一管理 Web 与移动应用的测试、执行资源与结果证据。"
         actions={
-          <Button kind="primary" icon="play" onClick={refresh}>
-            刷新概览
-          </Button>
+          <><Button onClick={refresh}>刷新概览</Button><Button kind="primary" icon="plus" onClick={() => setWizardOpen(true)}>新建测试任务</Button></>
         }
       />
 
@@ -147,7 +152,7 @@ export function OverviewPage() {
               {activeRuns.map((run) => (
                 <li key={run.id}>
                   <div className="between">
-                    <span className="task-name">{run.name}</span>
+                    <Button size="small" onClick={() => setActiveRunId(run.id)}>{run.name}</Button>
                     <StatusBadge status={displayStatus(run.state, run.outcome)} />
                   </div>
                   <div className="task-sub">
@@ -179,7 +184,7 @@ export function OverviewPage() {
               {runs.slice(0, 6).map((run: RunRecord) => (
                 <li key={run.id}>
                   <div className="between">
-                    <span className="task-name">{run.name}</span>
+                    <Button size="small" onClick={() => setActiveRunId(run.id)}>{run.name}</Button>
                     <StatusBadge status={displayStatus(run.state, run.outcome)} />
                   </div>
                   <div className="task-sub">
@@ -201,6 +206,7 @@ export function OverviewPage() {
           <div className="muted small">
             目标端：Android / iOS / Web · 已接入：{TARGET_CATALOG.android.capability}
           </div>
+          <a className="link-btn" href="#/ui">进入 UI 自动化 ›</a>
         </Panel>
         <Panel>
           <PanelHead title="性能测试" hint="门禁判定全部由后端完成" />
@@ -210,6 +216,7 @@ export function OverviewPage() {
           <div className="muted small">
             <Icon name="pulse" size={13} /> 指标：内存 / CPU / 帧率 / GPU
           </div>
+          <a className="link-btn" href="#/perf">进入性能测试 ›</a>
         </Panel>
       </div>
 

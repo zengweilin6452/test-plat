@@ -2,7 +2,7 @@
  * 报告中心（原型 #reports / L214 一句话结论）。
  *
  * 结论文案映射表照抄原型，但它只用于**展示后端已给出的结论**，不是前端判定：
- *   not_tested → 样本不足，未产生门禁结论
+ *   not_tested → 未产生门禁结论，具体原因来自运行和原始报告
  *   ui   failed → 断言未满足，已保留失败现场
  *   ui   passed → 用例断言通过，执行过程可追溯
  *   perf failed → 性能阈值未满足，查看指标与基线
@@ -32,7 +32,8 @@ import type { RunOutcome, RunRecord } from '../types'
 /** 原型 L214 的映射表：只做文案映射，不做判定（module 用后端原始枚举） */
 export function conclusionText(module: string | null, outcome: RunOutcome | null): string {
   if (outcome === null) return '后端尚未给出结论'
-  if (outcome === 'not_tested') return '样本不足，未产生门禁结论'
+  if (outcome === 'not_tested') return '未产生门禁结论，查看报告中的具体原因'
+  if (module === 'joint') return outcome === 'passed' ? '联动测试通过，查看组件结论与证据' : '联动测试未通过，查看各组件的具体原因'
   if (isPerformanceType(module)) {
     return outcome === 'passed' ? '性能门禁通过，指标与基线可比' : '性能阈值未满足，查看指标与基线'
   }
@@ -45,7 +46,7 @@ export function ReportsPage() {
   // 服务端过滤 + 游标分页（工单 10）：q / module / 页栈变化都重新拉取；
   // 过滤条件变化时页栈清零，旧游标带新过滤条件会被服务端 422 拒掉。
   const [keyword, setKeyword] = useState('')
-  const [module, setModule] = useState<'' | 'ui' | 'performance'>('')
+  const [module, setModule] = useState<'' | 'ui' | 'performance' | 'joint'>('')
   const [pages, setPages] = useState<(string | null)[]>([])
   const cursor = pages.length > 0 ? pages[pages.length - 1] : null
 
@@ -91,7 +92,7 @@ export function ReportsPage() {
           <select
             value={module}
             onChange={(event) => {
-              setModule(event.target.value as '' | 'ui' | 'performance')
+              setModule(event.target.value as '' | 'ui' | 'performance' | 'joint')
               setPages([])
             }}
             aria-label="按模块筛选"
@@ -99,6 +100,7 @@ export function ReportsPage() {
             <option value="">全部模块</option>
             <option value="ui">UI</option>
             <option value="performance">性能</option>
+            <option value="joint">联动</option>
           </select>
           <span className="muted small">重跑创建新记录，不覆盖历史证据</span>
         </Toolbar>
@@ -133,7 +135,7 @@ export function ReportsPage() {
               <p>
                 {run.display_id} / {run.resource ?? '未分配资源'}
               </p>
-              <p className="mt">{conclusionText(run.test_type, run.outcome)}</p>
+              <p className="mt">{run.outcome === 'not_tested' && run.not_tested_reason ? run.not_tested_reason : conclusionText(run.test_type, run.outcome)}</p>
               <footer>
                 <span className="muted small">{fmtDateTime(run.ended_at)}</span>
                 <LinkButton onClick={() => setActiveRun(run)}>

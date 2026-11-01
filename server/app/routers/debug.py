@@ -27,6 +27,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import subprocess
 import contextlib
 import json
 import sys
@@ -561,6 +563,17 @@ async def _template_session(session: AsyncSession, session_id: str | None) -> st
     return str(row["id"])
 
 
+@router.get("/template-library")
+def template_library() -> dict[str, Any]:
+    """Single-workspace, read-only metadata; device operations still require a session."""
+    from ..domain.templates import list_template_library
+
+    try:
+        return {"templates": list_template_library()}
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise ApiError(503, "service_unavailable", "模板库不可读，请检查资产清单和版本文件") from exc
+
+
 @router.get("/templates")
 async def list_templates(session_id: str | None = None, session: AsyncSession = Depends(get_session)) -> Response:
     sid = await _template_session(session, session_id)
@@ -572,6 +585,58 @@ async def create_template(request: Request, session_id: str | None = None,
                           session: AsyncSession = Depends(get_session)) -> Response:
     sid = await _template_session(session, session_id)
     return await _forward(sid, "POST", "/api/v1/templates", json_body=await request.json())
+
+
+async def _match_crop(source: bytes, current: bytes, region: list[int], threshold: float) -> dict:
+    payload = json.dumps({"source": base64.b64encode(source).decode(),
+                          "current": base64.b64encode(current).decode(),
+                          "region": region, "threshold": threshold}).encode()
+    try:
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            [settings.runner_python, "-m", "testdock_runner.crop_match"],
+            input=payload, capture_output=True, timeout=60,
+            env=spawn_mod.build_env(run_id="crop-validation"), cwd=str(settings.repo_root),
+        )
+    except subprocess.TimeoutExpired:
+        raise ApiError(503, "service_unavailable", "图像验证超时")
+    except OSError:
+        raise ApiError(503, "service_unavailable", "图像匹配进程不可用")
+    if completed.returncode:
+        raise ApiError(503, "service_unavailable", "图像匹配进程不可用")
+    result = json.loads(completed.stdout)
+    if "error" in result:
+        raise validation_error([result["error"]])
+    return result
+
+
+@router.post("/templates/validate-crop")
+async def validate_crop(request: Request, session_id: str | None = None,
+                        session: AsyncSession = Depends(get_session)) -> Response:
+    sid = await _template_session(session, session_id)
+    body = await request.json()
+    region = body.get("region")
+    threshold = body.get("threshold")
+    snapshot_id = body.get("snapshot_id")
+    if (not isinstance(region, list) or len(region) != 4
+            or any(type(v) is not int for v in region)
+            or not isinstance(snapshot_id, str) or not snapshot_id
+            or type(threshold) not in (int, float) or not 0.1 <= threshold <= 1):
+        raise validation_error(["需要有效 snapshot_id、四整数 region 和 0.10-1.00 threshold"])
+    source = await _forward(sid, "GET", f"/api/v1/snapshots/{snapshot_id}/image")
+    if source.status_code >= 300:
+        return source
+    capture = await _forward(sid, "POST", "/api/v1/snapshots", json_body={})
+    if capture.status_code >= 300:
+        return capture
+    new_id = json.loads(capture.body)["snapshot_id"]
+    current = await _forward(sid, "GET", f"/api/v1/snapshots/{new_id}/image")
+    if current.status_code >= 300:
+        return current
+    result = await _match_crop(source.body, current.body, region, threshold)
+    return Response(json.dumps({**result, "snapshot_id": new_id,
+                               "source_snapshot_id": snapshot_id}),
+                    media_type="application/json")
 
 
 @router.post("/templates/validate")

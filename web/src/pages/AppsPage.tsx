@@ -7,9 +7,10 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { describeError } from '../api/client'
-import { fetchApplications } from '../api/endpoints'
+import { fetchApplications, fetchProjects } from '../api/endpoints'
 import { PageHeading, Panel, PanelHead } from '../components/Card'
-import { ContextBar, PrimaryAction } from '../components/PageBits'
+import { ContextBar } from '../components/PageBits'
+import { TargetCardGrid } from '../components/TargetCard'
 import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
 import { Table, type Column } from '../components/Table'
@@ -20,6 +21,7 @@ import type { ApplicationRecord } from '../types'
 
 export function AppsPage() {
   const { targetScope, setTargetScope } = useTargetScope()
+  const projects = useQuery({ queryKey: ['projects'], queryFn: ({ signal }) => fetchProjects(signal), retry: false })
 
   const appsQuery = useQuery({
     queryKey: ['applications'],
@@ -84,9 +86,9 @@ export function AppsPage() {
       <PageHeading
         title="项目与应用"
         description="一个产品项目下分别登记 Web、Android 与 iOS 应用，作为创建与报告的入口。"
-        actions={<PrimaryAction label="登记应用" />}
       />
       <ContextBar scope={targetScope} onScopeChange={setTargetScope} />
+      <div className="mb"><TargetCardGrid scope={targetScope} onSelect={setTargetScope} /></div>
 
       {error ? (
         <div className="mb">
@@ -110,9 +112,11 @@ export function AppsPage() {
             description="应用登记接口（POST /api/v1/applications）在 P2 提供；当前展示数据库中已登记的应用。"
           />
         ) : (
+          <>{[...new Set(rows.map((row) => row.project_id))].map((projectId) => <div key={projectId}>
+          <h3 className="panel-pad">{projects.data?.items.find((project) => project.id === projectId)?.name ?? '项目 ' + projectId}</h3>
           <Table
             columns={columns}
-            rows={rows}
+            rows={rows.filter((row) => row.project_id === projectId)}
             rowKey={(row) => row.id}
             ariaLabel="应用清单"
             footer={
@@ -121,7 +125,7 @@ export function AppsPage() {
                 {appsQuery.data ? ` · 全库 ${appsQuery.data.total} 个` : ''}
               </span>
             }
-          />
+          /></div>)}</>
         )}
       </Panel>
     </>
