@@ -44,6 +44,18 @@ def _report(client, run_id: str) -> dict:
 
 def _add_artifact(engine, project: dict, run_id: str, availability: str) -> str:
     artifact_id = str(uuid.uuid4())
+    storage_key = "host-only-" + availability
+    if availability == "available":
+        # 工单 05 起 availability 按磁盘复核：available 行必须有真实文件，
+        # 否则读的时候降级为 missing（这里写进受管产物目录）。
+        from pathlib import Path
+
+        from app.config import settings
+
+        storage_key = f"{run_id}/evidence/available.log"
+        path = Path(settings.artifacts_dir) / storage_key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("available evidence", encoding="utf-8")
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -57,7 +69,7 @@ def _add_artifact(engine, project: dict, run_id: str, availability: str) -> str:
                 "pid": project["project_id"],
                 "rid": run_id,
                 "key": "evidence/" + availability + ".log",
-                "storage": "host-only-" + availability,
+                "storage": storage_key,
                 "avail": availability,
             },
         )
@@ -161,7 +173,13 @@ def test_policy_change_after_run_does_not_rewrite_original_verdict(
 # --------------------------------------------------------------------------- #
 
 
-def test_evidence_availability_gates_download_entry(client, project, make_run, sync_engine):
+def test_evidence_availability_gates_download_entry(
+    client, project, make_run, sync_engine, tmp_path, monkeypatch
+):
+    from app.config import settings
+
+    # 证据可用性按 settings.artifacts_dir 复核，产物写进 tmp，不落到仓库 data/
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
     run_id = make_run(state="completed", request_key=str(uuid.uuid4()))
     available_id = _add_artifact(sync_engine, project, run_id, "available")
     _add_artifact(sync_engine, project, run_id, "missing")
@@ -181,7 +199,12 @@ def test_evidence_availability_gates_download_entry(client, project, make_run, s
     assert "host-only-" not in json.dumps(body, ensure_ascii=False)
 
 
-def test_export_matches_report_snapshot(client, project, make_run, sync_engine):
+def test_export_matches_report_snapshot(
+    client, project, make_run, sync_engine, tmp_path, monkeypatch
+):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
     run_id = make_run(state="completed", request_key=str(uuid.uuid4()))
     _add_artifact(sync_engine, project, run_id, "available")
     _report(client, run_id)

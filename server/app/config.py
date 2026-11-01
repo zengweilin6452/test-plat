@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     run_timeout_s: int = 3600
     stale_run_seconds: int = 60
 
+    #: 产物保留天数（<=0 表示未配置保留策略，登记时不写 expires_at）。
+    #: 配置后证据的 expired 状态按 expires_at 真实可达（工单 05）。
+    artifact_retention_days: int = 0
+
     @property
     def artifacts_dir(self) -> Path:
         return self.data_dir / "artifacts"

@@ -7,7 +7,7 @@
  * - junit 未产出（present=false）时显示破折号，不把「没跑」写成 0 个失败；
  * - 证据下载地址由后端 download_url 给出，前端不自己拼路径。
  */
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { describeError } from '../api/client'
@@ -76,6 +76,114 @@ export function junitCounts(report: RunReport | undefined): {
     (asNumber(junit.failures) ?? 0) + (asNumber(junit.errors) ?? 0)
   )
   return { tests, failed, skipped: asNumber(junit.skipped) }
+}
+
+/** 摘要短值：前 12 位，没有就 null（不写 0 或空串） */
+function shortHex(value: unknown): string | null {
+  const text = asText(value)
+  return text ? text.slice(0, 12) : null
+}
+
+export interface TraceRow {
+  label: string
+  value: string
+}
+
+/**
+ * 报告追溯行（工单 05）：套件版本、固定代码副本摘要、构建、任务修订、资源档案。
+ * 缺失一律如实说明，不拿设备 serial / 当前版本冒充（AC-REP-01、AC-REP-02）。
+ */
+export function traceRows(report: RunReport | undefined): TraceRow[] {
+  const revision = report?.revision ?? null
+  const build = report?.build ?? null
+  const suite = report?.suite ?? null
+  const profile = report?.resourceProfile ?? null
+  const codeCopy = suite?.code_copy ?? null
+
+  let suiteValue = '未绑定套件版本'
+  if (suite) {
+    const parts: string[] = []
+    const version = asNumber(suite.version)
+    parts.push(version === null ? '版本号未记录' : `v${version}`)
+    const ref = asText(suite.source_ref)
+    if (ref) parts.push(ref)
+    const commit = shortHex(suite.source_commit)
+    if (commit) parts.push(commit)
+    suiteValue = parts.join(' · ')
+  }
+
+  let copyValue = '未记录固定代码副本'
+  if (codeCopy) {
+    const tree = shortHex(codeCopy.tree_sha256)
+    if (!tree) {
+      copyValue = '副本摘要缺失'
+    } else {
+      const count = asNumber(codeCopy.file_count)
+      copyValue = count === null ? tree : `${tree} · ${count} 个文件`
+    }
+  }
+
+  let buildValue = '未绑定构建'
+  if (build) {
+    const parts: string[] = []
+    const version = asText(build.version)
+    if (version) parts.push(`v${version}`)
+    const key = asText(build.build_key)
+    if (key) parts.push(key)
+    const commit = shortHex(build.source_commit)
+    if (commit) parts.push(commit)
+    buildValue = parts.length ? parts.join(' · ') : '构建信息未记录'
+  }
+
+  const revisionValue = revision
+    ? [asText(revision.readiness) ?? '就绪态未记录', asText(revision.test_type) ?? '未指定类型'].join(' · ')
+    : '未绑定任务修订'
+
+  const profileValue = profile
+    ? [asText(profile.name) ?? asText(profile.id) ?? '档案名未记录', shortHex(profile.fingerprint)]
+        .filter((part): part is string => Boolean(part))
+        .join(' · ')
+    : '未绑定资源档案'
+
+  return [
+    { label: '套件版本', value: suiteValue },
+    { label: '固定副本', value: copyValue },
+    { label: '构建', value: buildValue },
+    { label: '任务修订', value: revisionValue },
+    { label: '资源档案', value: profileValue },
+  ]
+}
+
+const AVAILABILITY_LABELS: Record<string, string> = {
+  available: '可用',
+  missing: '缺失',
+  expired: '已过期',
+}
+
+const UNAVAILABLE_REASON_LABELS: Record<string, string> = {
+  file_missing: '文件已不在产物目录',
+  retention_expired: '已超过保留期',
+  storage_unresolvable: '存储路径无效',
+}
+
+export interface EvidenceState {
+  label: string
+  reason: string | null
+  downloadable: boolean
+}
+
+/**
+ * 证据三态（AC-REP-03）：只有 available 且后端给了 download_url 才算可下载；
+ * missing/expired 给出原因，前端不自己拼路径。
+ */
+export function evidenceState(item: RunArtifact | undefined): EvidenceState {
+  const availability = asText(item?.availability) ?? ''
+  const reasonCode = asText(item?.unavailable_reason)
+  return {
+    label: AVAILABILITY_LABELS[availability] ?? (availability || DASH),
+    reason: reasonCode ? (UNAVAILABLE_REASON_LABELS[reasonCode] ?? reasonCode) : null,
+    downloadable: availability === 'available' && Boolean(asText(item?.download_url)),
+  }
 }
 
 interface ReportDrawerProps {
@@ -207,6 +315,18 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
               </div>
 
               <div className="drawer-section">
+                <h3>追溯</h3>
+                <dl className="summary-dl">
+                  {traceRows(report).map((row) => (
+                    <Fragment key={row.label}>
+                      <dt>{row.label}</dt>
+                      <dd className="mono">{row.value}</dd>
+                    </Fragment>
+                  ))}
+                </dl>
+              </div>
+
+              <div className="drawer-section">
                 <h3>指标汇总</h3>
                 {metrics.length === 0 ? (
                   <Empty
@@ -261,24 +381,29 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
                           <th>产物</th>
                           <th>类型</th>
                           <th>可用性</th>
+                          <th>说明</th>
                           <th>大小</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {artifacts.map((item: RunArtifact) => (
-                          <tr key={item.id}>
-                            <td className="mono">
-                              {item.download_url && item.availability !== 'missing' ? (
-                                <a href={item.download_url}>{item.logical_key}</a>
-                              ) : (
-                                item.logical_key
-                              )}
-                            </td>
-                            <td className="muted small">{item.kind ?? DASH}</td>
-                            <td className="muted small">{item.availability ?? DASH}</td>
-                            <td className="mono">{formatBytes(item.byte_size)}</td>
-                          </tr>
-                        ))}
+                        {artifacts.map((item: RunArtifact) => {
+                          const state = evidenceState(item)
+                          return (
+                            <tr key={item.id}>
+                              <td className="mono">
+                                {state.downloadable && item.download_url ? (
+                                  <a href={item.download_url}>{item.logical_key}</a>
+                                ) : (
+                                  item.logical_key
+                                )}
+                              </td>
+                              <td className="muted small">{item.kind ?? DASH}</td>
+                              <td className="muted small">{state.label}</td>
+                              <td className="muted small">{state.reason ?? DASH}</td>
+                              <td className="mono">{formatBytes(item.byte_size)}</td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
