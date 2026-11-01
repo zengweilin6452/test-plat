@@ -1,6 +1,6 @@
 # 04: 运行生命周期、资源独占与取消
 
-**What to build:** 核对从已验证修订发起运行后的排队/占用/派发/取消/终态/释放；事件可恢复；设备忙时排队或明确拒绝；取消后设备及时释放且最终状态可见。
+**What to build:** 核对任务修订的创建与验证（草稿 → 已验证、同名冲突、幂等），以及从已验证修订发起运行后的排队/占用/派发/取消/终态/释放；事件可恢复；设备忙时排队或明确拒绝；取消后设备及时释放且最终状态可见。
 
 **Blocked by:** 01, 03
 
@@ -16,6 +16,7 @@
 
 ## 实现要点
 
+0. 核实任务修订：编辑产生不可变修订；同名但不同配置返回冲突；同一幂等键不同内容拒绝、同内容复用；`readiness=validated` 必须由显式验证产生。
 1. 核实必须绑定 `revision_id`（或先解析并固定）；草稿修订不能发起运行。
 2. 核实 queued → dispatching → running → completed/failed/errored/cancelled 的合法边；非 completed 的 outcome 必须 NULL。
 3. 核实设备忙：指定设备被占 → 保留 queued 或按 `resource_busy` 呈现；不可重试原因 `requested_device_not_found` / `requested_device_platform_mismatch` / `device_unavailable` 分别收敛。
@@ -25,6 +26,7 @@
 
 ## 验收标准
 
+- [ ] 任务修订不可变；同名不同配置冲突；幂等键语义正确；验证后 readiness=validated。
 - [ ] 未验证修订发起运行被拒；已验证修订正常入队。
 - [ ] 设备被占时不会并发执行；抢占失败按原因区分且不误判为掉线。
 - [ ] 取消后最终状态、事件与设备释放均可观察；无残留活动租约。
