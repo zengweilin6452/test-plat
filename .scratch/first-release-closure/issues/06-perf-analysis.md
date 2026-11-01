@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## 现状指针
 
@@ -53,3 +53,10 @@ D:\python312\python.exe -m pytest tests/test_issue12_analysis_selection.py tests
 - 真机性能采集若不可用，记录为未执行，不伪造指标。
 
 ## Comments
+
+- 2026-11-01 修复：`dispatcher._prepare_suite_copy` 按 `test_type` 区分——performance 返回 None（声明式场景无代码副本），不再误判 `errored(execution_copy_missing)`；ui/joint 缺副本照旧阻断。
+- 场景口径统一：`domain.suite.scenario_problems` 公开并被套件发布、修订 readiness（`domain/task.check_readiness`）复用；runner 侧 `testdock_runner/perf_config.py` 是同口径镜像，`test_runner_window_matches_platform_rule` 双向锁死边界（10–3600 整数秒、items 非空），runner 不再默默夹紧或回落 60s 默认值。
+- 两份声明合订：新增 `domain.suite.resolve_scenario`，提交时在 `runs._resolve_execution_scenario` 合订 `suite_versions.manifest.scenario/performance` 与修订 `config.perf`，一致用版本快照、仅一份用它、不一致 400 `validation_error`、写入 `config_snapshot.perf/perf_source` 冻结；派发不再二次解析。
+- 提交：`d744aab`、`bb87079`（合并集成）、`aeb96a7`，合入 `a8733db`。
+- 测试（`testdock_frc06`）：`test_issue06_perf_dispatch.py`、`test_issue06_perf_scenario.py` 等定向 64 passed；后端全量 `tests/` 退出码 0。
+- 未执行：真机性能采集（留给 10 记录），不伪造指标。
