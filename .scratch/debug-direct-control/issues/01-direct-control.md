@@ -14,3 +14,4 @@
 ## Comments
 - 2026-11-01 交付：`feat/debug-direct-control`（`5aad752`）。后端全量 574 项（573 passed / 1 skipped / 0 failed）、新增 10 项控制测试、前端 52 项、`tsc`/build 通过；真机验收记录见 `acceptance.md §11`。
 - 边界：浏览器后台标签页心跳被节流，超过 vendor 5s TTL 会如实失效并要求重新启用；H.264 预览按计划留作 Phase 2。
+- 2026-11-01 延迟修复：UI 先设 `pointerStartRef` 再 `openGesture()`，后者经 `closeGestureSocket` 清空指针，导致 `end` 不发、vendor 2s 超时补 UP。已改为先 `openGesture()` 再记指针，并加源码顺序回归测试；真机 journal 由 `up seq:1 / 0.5–2s` 变为 `up seq:2 / 2ms`，点「我的」即时切页。

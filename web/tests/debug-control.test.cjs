@@ -81,3 +81,18 @@ test('move 按 20Hz 节流', () => {
   assert.equal(shouldSendGestureMove(1000, 1050), true)
   assert.equal(shouldSendGestureMove(1000, 1080), true)
 })
+
+test('pointerStart 必须在 openGesture 之后设置（closeGestureSocket 会清空它）', () => {
+  const source = fs.readFileSync('src/components/DebugDrawer.tsx', 'utf8')
+  const start = source.indexOf('const handleControlPointerDown')
+  const end = source.indexOf('const handleControlPointerMove')
+  assert.ok(start >= 0 && end > start)
+  const body = source.slice(start, end)
+  const openAt = body.indexOf('openGesture()')
+  const pointerAt = body.indexOf('pointerStartRef.current = {')
+  assert.ok(openAt >= 0 && pointerAt >= 0)
+  assert.ok(
+    openAt < pointerAt,
+    'openGesture() 会调用 closeGestureSocket() 并把 pointerStartRef 清空；先设指针会导致 finishControlPointer 直接 return，end 永远不发',
+  )
+})
