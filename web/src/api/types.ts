@@ -123,13 +123,34 @@ export interface RunReport {
   runId: string
   hostRunId?: string | null
   /** 运行引用的修订与构建（工单 11：报告可追溯原输入） */
-  revision?: { id: string; readiness?: string | null; test_type?: string | null } | null
+  revision?: {
+    id: string
+    readiness?: string | null
+    test_type?: string | null
+    /** 工单 05：修订绑定的套件版本 id；旧修订可能为 null */
+    suite_version_id?: string | null
+  } | null
   build?: {
     id: string
     version?: string | null
     build_key?: string | null
     source_commit?: string | null
     sha256?: string | null
+  } | null
+  /**
+   * 工单 05：套件版本与其固定代码副本摘要（只读 suite_versions 行）。
+   * 未绑定套件 / 旧版本没有 code_copy 时明确为 null，不拿当前版本冒充。
+   */
+  suite?: {
+    id: string
+    version?: number | null
+    source_ref?: string | null
+    source_commit?: string | null
+    code_copy?: {
+      tree_sha256?: string | null
+      file_count?: number | null
+      root_rel?: string | null
+    } | null
   } | null
   /** 运行时资源档案（不可变行内容）；缺失为 null，不用设备 serial 冒充 */
   resourceProfile?: { id: string; name?: string | null; fingerprint?: string | null } | null
@@ -141,6 +162,8 @@ export interface RunReport {
     byte_size?: number | null
     sha256?: string | null
     availability: string
+    /** 工单 05：不可用原因（file_missing / retention_expired / storage_unresolvable） */
+    unavailable_reason?: string | null
     download_url?: string | null
   }> | null
   gateEvaluations?: Array<{
@@ -184,8 +207,12 @@ export interface RunArtifact {
   byte_size?: number | null
   sha256?: string | null
   availability?: string | null
+  /** 工单 05：不可用原因（后端按磁盘与保留期复核后给出） */
+  unavailable_reason?: string | null
+  /** 保留期到期时间；null 表示未配置保留策略 */
+  expires_at?: string | null
   created_at?: string | null
-  /** 由后端拼接，前端不自己拼路径 */
+  /** 由后端拼接，前端不自己拼路径；仅 available 才有 */
   download_url?: string | null
   [key: string]: unknown
 }

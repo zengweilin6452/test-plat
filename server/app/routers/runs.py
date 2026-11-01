@@ -21,7 +21,7 @@ import uuid
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, Query, Response
 from fastapi.encoders import jsonable_encoder
@@ -882,9 +882,11 @@ async def list_run_artifacts(
         session, project_id=project_id, run_id=str(run_id)
     )
     for item in items:
-        item["download_url"] = "/api/v1/runs/%s/artifacts/%s/download" % (
-            run_id,
-            item["id"],
+        # 复核后的三态：available 才给下载入口；missing/expired 给原因不给假链接
+        item["download_url"] = (
+            "/api/v1/runs/%s/artifacts/%s/download" % (run_id, item["id"])
+            if item["availability"] == "available"
+            else None
         )
     return {"items": items, "total": len(items)}
 
@@ -907,6 +909,23 @@ async def download_run_artifact(
         media_type=str(artifact.get("mime_type") or "application/octet-stream"),
         filename=Path(str(artifact["logical_key"])).name,
     )
+
+
+def _code_copy_summary(manifest: Any) -> dict | None:
+    """从 suite_versions.manifest 里挑固定代码副本摘要（只读，不现算来源目录）。
+
+    manifest 或 code_copy 缺失 -> None（旧版本没有副本摘要时报告明说 null）。
+    """
+    if not isinstance(manifest, dict):
+        return None
+    code_copy = manifest.get("code_copy")
+    if not isinstance(code_copy, dict):
+        return None
+    return {
+        "tree_sha256": code_copy.get("tree_sha256"),
+        "file_count": code_copy.get("file_count"),
+        "root_rel": code_copy.get("root_rel"),
+    }
 
 
 async def _report_view(session: AsyncSession, run_id: str) -> dict:
@@ -941,17 +960,37 @@ async def _report_view(session: AsyncSession, run_id: str) -> dict:
                 await session.execute(
                     text(
                         "SELECT tr.id, tr.readiness, tr.test_type, tr.environment_id,"
+                        "       tr.suite_version_id,"
                         "       ab.id AS build_id, ab.version AS build_version,"
                         "       ab.build_key AS build_key, ab.source_commit AS build_commit,"
-                        "       ab.sha256 AS build_sha256"
+                        "       ab.sha256 AS build_sha256,"
+                        "       sv.id AS suite_version_row_id, sv.version AS suite_version,"
+                        "       sv.source_ref AS suite_source_ref,"
+                        "       sv.source_commit AS suite_source_commit,"
+                        "       sv.manifest AS suite_manifest"
                         "  FROM task_revisions tr"
                         "  LEFT JOIN app_builds ab ON ab.id = tr.build_id"
+                        "  LEFT JOIN suite_versions sv ON sv.id = tr.suite_version_id"
                         " WHERE tr.id = CAST(:rid AS uuid)"
                     ),
                     {"rid": str(view["revision_id"])},
                 )
             ).mappings().one()
         )
+
+    # 套件块只读不可变行：修订绑定的 suite_version 行 + 其 manifest.code_copy。
+    # 缺失（旧修订没绑套件、或旧版本 manifest 没有副本摘要）一律 null，绝不拿
+    # "当前版本"或来源目录现算的值冒充（工单 05 纪律）。
+    suite = None
+    if revision and revision["suite_version_row_id"]:
+        code_copy = _code_copy_summary(revision["suite_manifest"])
+        suite = {
+            "id": str(revision["suite_version_row_id"]),
+            "version": revision["suite_version"],
+            "source_ref": revision["suite_source_ref"],
+            "source_commit": revision["suite_source_commit"],
+            "code_copy": code_copy,
+        }
 
     profile = (
         await session.execute(
@@ -989,6 +1028,9 @@ async def _report_view(session: AsyncSession, run_id: str) -> dict:
                 "byte_size": item.get("byte_size"),
                 "sha256": item.get("sha256"),
                 "availability": item["availability"],
+                # 不可用原因（file_missing / retention_expired / storage_unresolvable），
+                # 缺失或过期时报告与抽屉都能说明"为什么看不到"（AC-REP-03）
+                "unavailable_reason": item.get("unavailable_reason"),
                 "created_at": item.get("created_at"),
                 # 只有 available 给下载入口；missing/expired 不提供假链接（AC-REP-03）
                 "download_url": f"/api/v1/runs/{run_id}/artifacts/{item['id']}/download"
@@ -1021,9 +1063,14 @@ async def _report_view(session: AsyncSession, run_id: str) -> dict:
             "id": str(revision["id"]),
             "readiness": revision["readiness"],
             "test_type": revision["test_type"],
+            "suite_version_id": str(revision["suite_version_id"])
+            if revision["suite_version_id"]
+            else None,
         }
         if revision
         else None,
+        # 套件版本与其固定代码副本摘要（工单 05）：缺失为 null，不冒充
+        "suite": suite,
         "build": {
             "id": str(revision["build_id"]),
             "version": revision["build_version"],

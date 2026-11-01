@@ -17,7 +17,13 @@ for (const extension of ['.ts', '.tsx']) {
 
 const { moduleName, isPerformanceType, MODULE_NAMES } = require('../src/constants.ts')
 const { conclusionText } = require('../src/pages/ReportsPage.tsx')
-const { metricCell, metricMissingReason, junitCounts } = require('../src/components/ReportDrawer.tsx')
+const {
+  metricCell,
+  metricMissingReason,
+  junitCounts,
+  traceRows,
+  evidenceState,
+} = require('../src/components/ReportDrawer.tsx')
 const { buildTreeIndex, nodeLabel, hasNodeIdentity } = require('../src/components/DebugDrawer.tsx')
 
 test('后端 test_type（ui/performance/joint）都有展示名，不会被当成未指定', () => {
@@ -111,4 +117,69 @@ test('层级树按 children 下标还原父子关系', () => {
   assert.equal(hasNodeIdentity({ index: 3, text: '登录' }), true)
   assert.equal(hasNodeIdentity({ index: 4, resource_id: 'com.example:id/ok' }), true)
   assert.equal(hasNodeIdentity({ index: 5, content_desc: '确认' }), true)
+})
+
+test('报告追溯行展示套件版本、副本摘要、构建、修订与档案，缺失如实', () => {
+  const full = traceRows({
+    revision: {
+      id: 'rev-1234567890',
+      readiness: 'validated',
+      test_type: 'ui',
+      suite_version_id: 'sv-1',
+    },
+    build: {
+      id: 'build-1',
+      version: '1.0.0',
+      build_key: 'com.example/1.0.0',
+      source_commit: 'abcdef1234567890',
+    },
+    resourceProfile: { id: 'prof-1', name: 'pixel-7', fingerprint: 'f'.repeat(64) },
+    suite: {
+      id: 'sv-1',
+      version: 3,
+      source_ref: 'main',
+      source_commit: 'deadbeef',
+      code_copy: { tree_sha256: 'a'.repeat(64), file_count: 12, root_rel: 'copy-1' },
+    },
+  })
+  const byLabel = Object.fromEntries(full.map((row) => [row.label, row.value]))
+  assert.match(byLabel['套件版本'], /v3/)
+  assert.match(byLabel['套件版本'], /main/)
+  assert.match(byLabel['固定副本'], /a{12}/)
+  assert.match(byLabel['固定副本'], /12 个文件/)
+  assert.match(byLabel['构建'], /1\.0\.0/)
+  assert.match(byLabel['任务修订'], /ui/)
+  assert.match(byLabel['资源档案'], /pixel-7/)
+
+  const empty = Object.fromEntries(traceRows({ revision: null, build: null, suite: null }).map((row) => [row.label, row.value]))
+  assert.equal(empty['套件版本'], '未绑定套件版本')
+  assert.equal(empty['固定副本'], '未记录固定代码副本')
+  assert.equal(empty['构建'], '未绑定构建')
+  assert.equal(empty['资源档案'], '未绑定资源档案')
+
+  // 旧版本没有 code_copy：明说缺失，不拿别的摘要顶替
+  const legacy = Object.fromEntries(
+    traceRows({ suite: { id: 'sv-2', version: 2, code_copy: null } }).map((row) => [row.label, row.value]),
+  )
+  assert.equal(legacy['固定副本'], '未记录固定代码副本')
+})
+
+test('证据三态：仅 available 可下载，缺失/过期说明原因', () => {
+  assert.deepEqual(evidenceState({ id: 'a', logical_key: 'x.log', availability: 'available', download_url: '/d' }), {
+    label: '可用',
+    reason: null,
+    downloadable: true,
+  })
+  assert.deepEqual(evidenceState({ id: 'b', logical_key: 'x.log', availability: 'missing', unavailable_reason: 'file_missing' }), {
+    label: '缺失',
+    reason: '文件已不在产物目录',
+    downloadable: false,
+  })
+  assert.deepEqual(evidenceState({ id: 'c', logical_key: 'x.log', availability: 'expired', unavailable_reason: 'retention_expired' }), {
+    label: '已过期',
+    reason: '已超过保留期',
+    downloadable: false,
+  })
+  // 后端说 available 但没给 download_url：不自己拼路径，也不当可下载
+  assert.equal(evidenceState({ id: 'd', logical_key: 'x.log', availability: 'available' }).downloadable, false)
 })

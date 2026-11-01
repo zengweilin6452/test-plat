@@ -27,6 +27,7 @@ import os
 import re
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -197,10 +198,10 @@ _INSERT_SQL = text(
     """
     INSERT INTO artifacts (
         id, project_id, run_id, component_id, logical_key, kind, storage_key,
-        mime_type, byte_size, sha256, schema_version, availability
+        mime_type, byte_size, sha256, schema_version, availability, expires_at
     ) VALUES (
         :id, :project_id, :run_id, :component_id, :logical_key, :kind, :storage_key,
-        :mime_type, :byte_size, :sha256, :schema_version, :availability
+        :mime_type, :byte_size, :sha256, :schema_version, :availability, :expires_at
     )
     ON CONFLICT (project_id, storage_key) DO UPDATE
        SET run_id = EXCLUDED.run_id,
@@ -211,9 +212,21 @@ _INSERT_SQL = text(
            byte_size = EXCLUDED.byte_size,
            sha256 = EXCLUDED.sha256,
            availability = EXCLUDED.availability
-    RETURNING id, logical_key, kind, storage_key, sha256, byte_size, availability
+    RETURNING id, logical_key, kind, storage_key, sha256, byte_size, availability,
+              expires_at, created_at
     """
 )
+
+
+def retention_days_from_settings() -> int:
+    """产物保留天数（<=0 表示未配置保留策略，不写 expires_at）。"""
+    from ..config import settings
+
+    try:
+        value = int(getattr(settings, "artifact_retention_days", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return value if value > 0 else 0
 
 
 async def register_files(
@@ -225,12 +238,20 @@ async def register_files(
     artifacts_root: Path | str,
     component_id: str | uuid.UUID | None = None,
     schema_version: str = "1",
+    retention_days: int | None = None,
 ) -> list[dict[str, Any]]:
     """把扫描结果写成 artifacts 行（幂等）。返回落库后的行。
 
     必须在调用方事务内执行：finalize 要求"产物行 + state=completed"原子可见，
     否则前端会看到"已完成但没有产物"。
+
+    配置了保留期（retention_days 或 TESTDOCK_ARTIFACT_RETENTION_DAYS）时同时写
+    expires_at：证据的 expired 状态由此真实可达，而不是只有 DB 手工行才能出现。
     """
+    days = retention_days if retention_days is not None else retention_days_from_settings()
+    expires_at = (
+        datetime.now(UTC) + timedelta(days=days) if days and days > 0 else None
+    )
     rows: list[dict[str, Any]] = []
     for item in files:
         storage_key = storage_key_for(item.absolute_path, artifacts_root)
@@ -250,6 +271,7 @@ async def register_files(
                     "sha256": item.sha256,
                     "schema_version": schema_version,
                     "availability": "available",
+                    "expires_at": expires_at,
                 },
             )
         ).mappings().first()
@@ -287,20 +309,79 @@ async def finalize_artifacts(
     }
 
 
+def effective_availability(
+    row: dict[str, Any],
+    *,
+    artifacts_root: Path | str | None = None,
+    now: datetime | None = None,
+) -> tuple[str, str | None]:
+    """计算证据的**当前**可用性（三态）与不可用原因。
+
+    数据库里的 availability 是登记时的声明；文件被清理、保留期到期都不改行，
+    所以读的时候要按磁盘与 expires_at 复核，否则报告永远显示 available、
+    下载门控形同虚设（工单 05）：
+
+    - 已声明 missing/expired 的行保持声明值（清扫/人工标记的可信来源）；
+    - expires_at 已过 -> expired（retention_expired）；
+    - storage_key 解析不到（含目录穿越）-> missing（storage_unresolvable）；
+    - 磁盘上没有文件 -> missing（file_missing）；
+    - 其余 -> available。
+
+    返回 (availability, unavailable_reason)。只读判定，不回写数据库。
+    """
+    stored = str(row.get("availability") or "available")
+    if stored == "expired":
+        return "expired", "retention_expired"
+    if stored == "missing":
+        return "missing", "file_missing"
+
+    expires_at = row.get("expires_at")
+    if isinstance(expires_at, datetime):
+        moment = now or datetime.now(UTC)
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if moment >= expires_at:
+            return "expired", "retention_expired"
+
+    storage_key = str(row.get("storage_key") or "")
+    if not storage_key:
+        return "missing", "storage_unresolvable"
+    path = resolve_storage_path(storage_key, artifacts_root)
+    if path is None:
+        return "missing", "storage_unresolvable"
+    if not path.is_file():
+        return "missing", "file_missing"
+    return "available", None
+
+
+def with_effective_availability(
+    row: dict[str, Any], *, artifacts_root: Path | str | None = None
+) -> dict[str, Any]:
+    """在产物行上追加派生字段（availability / unavailable_reason），不改原行。"""
+    availability, reason = effective_availability(row, artifacts_root=artifacts_root)
+    decorated = dict(row)
+    decorated["availability"] = availability
+    decorated["unavailable_reason"] = reason
+    return decorated
+
+
 async def list_artifacts(
     session: AsyncSession,
     run_id: str | uuid.UUID,
     *,
     project_id: str | uuid.UUID | None = None,
 ) -> list[dict[str, Any]]:
-    """GET /runs/{id}/artifacts 的数据源（按 logical_key 排序，结果稳定）。"""
+    """GET /runs/{id}/artifacts 的数据源（按 logical_key 排序，结果稳定）。
+
+    availability / unavailable_reason 是按磁盘与 expires_at 复核后的**当前**状态。
+    """
     rows = (
         await session.execute(
             text(
                 """
                 SELECT id, project_id, run_id, component_id, logical_key, kind,
                        storage_key, mime_type, byte_size, sha256, schema_version,
-                       availability, created_at
+                       availability, expires_at, created_at
                   FROM artifacts
                  WHERE run_id = :run_id
                    AND (CAST(:project_id AS uuid) IS NULL
@@ -311,7 +392,7 @@ async def list_artifacts(
             {"run_id": str(run_id), "project_id": str(project_id) if project_id else None},
         )
     ).mappings().all()
-    return [dict(r) for r in rows]
+    return [with_effective_availability(dict(r)) for r in rows]
 
 
 async def get_artifact(
@@ -327,7 +408,7 @@ async def get_artifact(
                 """
                 SELECT id, project_id, run_id, component_id, logical_key, kind,
                        storage_key, mime_type, byte_size, sha256, schema_version,
-                       availability, created_at
+                       availability, expires_at, created_at
                   FROM artifacts
                  WHERE run_id = :run_id AND id = :artifact_id
                    AND (CAST(:project_id AS uuid) IS NULL
@@ -341,7 +422,7 @@ async def get_artifact(
             },
         )
     ).mappings().first()
-    return dict(row) if row else None
+    return with_effective_availability(dict(row)) if row else None
 
 
 async def find_by_suffix(
@@ -364,6 +445,7 @@ __all__ = [
     "MAX_HASH_BYTES",
     "ScannedFile",
     "classify",
+    "effective_availability",
     "finalize_artifacts",
     "find_by_suffix",
     "get_artifact",
@@ -372,7 +454,9 @@ __all__ = [
     "mime_for",
     "register_files",
     "resolve_storage_path",
+    "retention_days_from_settings",
     "scan_artifacts",
     "sha256_file",
     "storage_key_for",
+    "with_effective_availability",
 ]
