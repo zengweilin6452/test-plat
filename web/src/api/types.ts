@@ -272,8 +272,8 @@ export interface SuiteManifest {
   schema_version?: number
   case_count?: number
   cases?: SuiteCaseRecord[] | null
-  /** discover 时写入的套件根目录（`extra` 合并进 manifest） */
-  suite_root?: string | null
+  /** 固定代码副本摘要（相对文件清单 + 树摘要）；旧版本可能没有，用 has_code_copy 判断 */
+  code_copy?: Record<string, unknown> | null
   [key: string]: unknown
 }
 

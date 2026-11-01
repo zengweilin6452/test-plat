@@ -12,6 +12,15 @@ interface IdentityCheck {
 }
 interface Suite { id: string; created_version?: { id: string } | null }
 interface Source { id: string; name: string; test_types: string[] }
+interface SourceList { items: Source[]; total?: number; hint?: string | null }
+
+/** 来源为空时的提示：来源只能由宿主预配置，页面不提供任意路径输入。 */
+export function suiteSourceEmptyHint(payload: SourceList | undefined): string | null {
+  if (!payload || payload.items.length > 0) return null
+  const hint = (payload.hint ?? '').trim()
+  if (hint) return hint
+  return '未配置可信套件来源：需要宿主预配置来源后才能登记或发现套件；浏览器不能指定宿主路径。'
+}
 
 function Failure({ error }: { error: unknown }) {
   if (!error) return null
@@ -73,9 +82,11 @@ export function SuiteRegistration({ applicationId, testType, suiteId = '', onReg
   const [source, setSource] = useState('')
   const [createdId, setCreatedId] = useState('')
   const [duration, setDuration] = useState('300')
-  const sources = useQuery({ queryKey: ['suite-sources'], queryFn: () => api.get<{ items: Source[] }>('/suite-sources'), retry: false })
+  const sources = useQuery({ queryKey: ['suite-sources'], queryFn: () => api.get<SourceList>('/suite-sources'), retry: false })
   const allowed = (sources.data?.items ?? []).filter(s => s.test_types.includes(testType))
   const validSource = allowed.some(s => s.id === source)
+  // 空来源 / 无适用来源：只说"需要宿主配置"，不给出可填任意路径的入口
+  const noSourceHint = sources.isPending || sources.error ? null : (allowed.length ? null : (suiteSourceEmptyHint(sources.data) ?? '未配置适用于该套件类型的来源，请联系管理员配置可信来源。'))
   const refresh = async () => { await cache.invalidateQueries({ queryKey: ['suites'] }); await cache.invalidateQueries({ queryKey: ['suite-versions'] }) }
   const save = useMutation({ mutationFn: async (discover: boolean) => {
     let id = discover ? suiteId : createdId
@@ -94,7 +105,7 @@ export function SuiteRegistration({ applicationId, testType, suiteId = '', onReg
   return <details><summary>登记套件 / 发布固定版本</summary><div className="form-grid">
     <label>新套件名称<input maxLength={200} disabled={Boolean(createdId)} value={name} onChange={e => setName(e.target.value)} /></label>
     {testType !== 'performance' ? <label>预配置代码来源<select value={source} onChange={e => setSource(e.target.value)}><option value="">请选择来源</option>{allowed.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label> : null}
-    {testType !== 'performance' && !sources.isPending && !sources.error && !allowed.length ? <p>未配置适用来源，请联系管理员配置可信来源。</p> : null}
+    {testType !== 'performance' && noSourceHint ? <p role="status">{noSourceHint}</p> : null}
     {testType !== 'ui' ? <label>固定采集时长（秒，10 至 3600）<input type="number" min={10} max={3600} value={duration} onChange={e => setDuration(e.target.value)} />CPU / Memory / FPS</label> : null}
     <Button disabled={save.isPending || !applicationId || !name.trim() || !valid} onClick={() => save.mutate(false)}>{createdId ? '重试发布已登记套件的版本' : '登记套件并发布版本'}</Button>
     <Button disabled={save.isPending || !suiteId || !valid} onClick={() => save.mutate(true)}>{testType === 'ui' ? '为所选套件重新发现并发布版本' : '为所选套件发布版本'}</Button>
