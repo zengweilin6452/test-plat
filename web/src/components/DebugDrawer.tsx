@@ -14,11 +14,16 @@
  *    GET .../snapshots/{nid}/tree，vendor 返回 `{nodes: [{index, children: [下标]}]}`。
  *  - 定位验证：POST .../locators/validate，体是 `{target: {by, value}}`，
  *    返回 matches[]（x/y/width/height/confidence）。唯一匹配才算通过。
- *  - 图像识别（vendor imaging + TemplateStore）：
+ *  - 图像识别（vendor imaging + TemplateStore，存储是跨会话共享的 server/assets）：
  *      GET  /templates?session_id=            模板清单（逻辑名 / 版本 / 摘要）
- *      POST /templates {snapshot_id, region, logical}
- *                                             从**服务端保留的快照**裁剪建档，
- *                                             vendor 不接受浏览器上传图片
+ *      POST /templates/validate-crop {snapshot_id, region, threshold}
+ *                                             **新捕获画面**真实匹配；唯一命中才返回
+ *                                             verification 凭证 + 新快照 + 命中框
+ *      POST /templates {snapshot_id, region, threshold, logical, verification}
+ *                                             凭证是登记的必要条件：服务端独立校验
+ *                                             （会话/快照/框选/阈值任一变化即失效，
+ *                                             一次性、有有效期），前端 disabled 只是体验；
+ *                                             登记从验证时的新快照 + 命中框裁剪
  *    匹配本身仍走 locators/validate（by='image'，value=逻辑名），命中框叠在画面上。
  *    框选区域直接在预览画面上拖拽得到（设备像素坐标 = 快照像素坐标）。
  * 硬约束：
@@ -105,6 +110,71 @@ interface Region {
 interface FrameSize {
   w: number
   h: number
+}
+
+/** 框选验证凭证：validate-crop 用**新捕获的画面**唯一命中后，服务端发放的
+ *  一次性证明。登记必须带它，并且快照/命中框/阈值必须与验证时完全一致——
+ *  所以这里把「新快照 + 新画面里的命中框」也一起存下来作为登记依据，
+ *  不再拿冻结时的旧快照去登记（旧快照前端只展示，不能当依据）。 */
+export interface CropVerification {
+  /** 与 cropVerificationKey 对齐：会话/快照/框选/阈值任一改变即失效 */
+  key: string
+  /** 服务端一次性凭证（POST /templates 的 verification） */
+  token: string
+  /** 验证时真实匹配用的新快照（登记就从它裁剪） */
+  snapshotId: string
+  /** 新画面里的唯一命中框（设备像素） */
+  region: Region
+}
+
+/** 框选验证的失效口令：会话、来源快照、框选区域、阈值任一变化都会换 key。 */
+export function cropVerificationKey(
+  sessionId: string | number | null,
+  snapshotId: string | null,
+  region: Region | null,
+  threshold: string,
+): string {
+  return JSON.stringify([sessionId ?? null, snapshotId, region, threshold])
+}
+
+/** validate-crop 响应 → 登记依据。只有唯一匹配且服务端给了凭证才成立；
+ *  零匹配/多匹配/缺凭证一律 null（UI 只能显示失败，不能允许登记）。 */
+export function resolveCropVerification(
+  result:
+    | {
+        count?: number | null
+        snapshot_id?: string | null
+        region?: number[] | null
+        verification?: string | null
+      }
+    | null
+    | undefined,
+  key: string,
+): CropVerification | null {
+  if (!result || result.count !== 1) return null
+  const snapshotId = typeof result.snapshot_id === 'string' ? result.snapshot_id : ''
+  const token = typeof result.verification === 'string' ? result.verification : ''
+  const box = Array.isArray(result.region) ? result.region : null
+  if (!snapshotId || !token || !box || box.length !== 4) return null
+  if (!box.every((value) => typeof value === 'number' && Number.isInteger(value) && value >= 0)) return null
+  if (box[2] <= 0 || box[3] <= 0) return null
+  return {
+    key,
+    token,
+    snapshotId,
+    region: { x: box[0], y: box[1], w: box[2], h: box[3] },
+  }
+}
+
+/** 节点拾取：resource-id 优先（文案会变，id 更稳），其次 text；都没有如实为空。 */
+export function preferredLocator(node: SnapshotTreeNode): { by: LocatorBy; value: string } | null {
+  if (typeof node.resource_id === 'string' && node.resource_id.trim()) {
+    return { by: 'resource_id', value: node.resource_id }
+  }
+  if (typeof node.text === 'string' && node.text.trim()) {
+    return { by: 'text', value: node.text }
+  }
+  return null
 }
 
 /** 层级树节点：vendor 用 children 存下标，渲染前先按 index 建表 */
@@ -298,6 +368,9 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   const [dragging, setDragging] = useState<Region | null>(null)
   const [newLogical, setNewLogical] = useState('')
   const [templateError, setTemplateError] = useState<string | null>(null)
+  /** 最近一次框选验证的登记依据（新快照 + 命中框 + 凭证）；框选/阈值/快照/
+   *  会话任一变化后 key 不匹配即视为未验证，必须重新验证。 */
+  const [cropVerification, setCropVerification] = useState<CropVerification | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
@@ -333,6 +406,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     setDragging(null)
     setNewLogical('')
     setTemplateError(null)
+    setCropVerification(null)
   }, [])
 
   /** open 的 ref 镜像：mutation 回调里读 props 会拿到过期闭包 */
@@ -663,32 +737,54 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     },
   })
 
-  const cropKey = JSON.stringify([session?.id ?? null, snapshotId, region, matchThreshold])
+  const cropKey = cropVerificationKey(session?.id ?? null, snapshotId, region, matchThreshold)
   const cropValidation = useMutation({
     mutationFn: async (input: { key: string; sessionId: string | number; snapshotId: string; region: Region; threshold: number }) => {
-      const result = await request<{ count: number; scores: number[]; snapshot_id: string }>('/templates/validate-crop', {
+      const result = await request<{
+        count: number
+        scores: number[]
+        snapshot_id: string
+        source_snapshot_id?: string
+        region?: number[] | null
+        verification?: string | null
+      }>('/templates/validate-crop', {
         method: 'POST', query: { session_id: String(input.sessionId) },
         body: { snapshot_id: input.snapshotId, region: [input.region.x, input.region.y, input.region.w, input.region.h], threshold: input.threshold },
       })
       return { ...result, key: input.key }
     },
+    onSuccess: (result) => {
+      // 服务端发的一次性凭证 + 新快照/命中框就是登记依据；没有凭证（零匹配/
+      // 多匹配）就只能是「未验证」，按钮也不能放行。
+      setCropVerification(resolveCropVerification(result, result.key))
+      setTemplateError(null)
+    },
+    onError: () => setCropVerification(null),
   })
-  const cropVerified = cropValidation.data?.key === cropKey && cropValidation.data.count === 1
+  /** 只有「验证通过的 key」等于「当前会话/快照/框选/阈值」才算已验证 */
+  const cropVerified = cropVerification !== null && cropVerification.key === cropKey
 
-  /** 图像识别：从服务端保留的快照裁剪建档（vendor 不收浏览器图片） */
+  /** 图像识别：从**验证时的新快照**裁剪建档（vendor 不收浏览器图片） */
   const createTemplateMutation = useMutation({
     mutationFn: () => {
       const id = sessionRef.current
       if (id === null) throw new Error('缺少调试会话')
       if (!snapshotId) throw new Error('先「采集快照」，模板只能从快照裁剪')
       if (!region) throw new Error('先在画面上拖拽框选模板区域')
-      if (!cropVerified) throw new Error('请先验证当前框选区域，唯一匹配后才能登记')
+      if (!cropVerified || !cropVerification) throw new Error('请先验证当前框选区域，唯一匹配后才能登记')
       const logical = newLogical.trim()
       if (!logical) throw new Error('模板逻辑名不能为空')
       return createTemplate(id, {
-        snapshot_id: snapshotId,
-        region: [region.x, region.y, region.w, region.h],
+        snapshot_id: cropVerification.snapshotId,
+        region: [
+          cropVerification.region.x,
+          cropVerification.region.y,
+          cropVerification.region.w,
+          cropVerification.region.h,
+        ],
         logical,
+        threshold: Number(matchThreshold),
+        verification: cropVerification.token,
       })
     },
     onSuccess: (record) => {
@@ -696,6 +792,9 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
       toast.show('模板已登记：' + record.logical + '（v' + String(record.version_id ?? '').slice(0, 8) + '）')
       setNewLogical('')
       setRegion(null)
+      // 凭证一次性：用过即失效，再登记必须重新验证
+      setCropVerification(null)
+      cropValidation.reset()
       void templatesQuery.refetch()
     },
     onError: (error) => {
@@ -716,6 +815,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     setDragging(null)
     setNewLogical('')
     setTemplateError(null)
+    setCropVerification(null)
     cropValidation.reset()
     validateMutation.reset()
   }
@@ -872,7 +972,11 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
           })}
         </select>
         <Badge tone={target ? 'green' : 'gray'} dot>{target ? '可用' : '无设备'}</Badge>
-        <span className="small muted">{wsText}</span>
+        {/* 会话身份如实显示：实际 adb serial + 会话状态 + WS 连接状态 */}
+        <span className="small muted mono" title="设备 serial">{target ? target.serial : '—'}</span>
+        <span className="small muted">
+          会话 {detailQuery.data?.state ?? (session ? 'opening' : '未建立')} · {wsText}
+        </span>
         {target?.leaseHint ? <span className="small muted">· {target.leaseHint}</span> : null}
         <span className="spacer" />
         <Button size="small" onClick={handleClose}>返回设备池</Button>
@@ -1031,13 +1135,12 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                         frozen={frozen}
                         onPick={(picked) => {
                           setSelected(picked)
-                          // 选中节点时把它的标识直接填进定位值，减少手输
-                          if (picked.text) {
-                            setLocatorBy('text')
-                            setLocator(String(picked.text))
-                          } else if (picked.resource_id) {
-                            setLocatorBy('resource_id')
-                            setLocator(String(picked.resource_id))
+                          // 选中节点时把它的标识直接填进定位值，减少手输；
+                          // resource-id 优先于 text（文案会变，id 更稳）
+                          const preferred = preferredLocator(picked)
+                          if (preferred) {
+                            setLocatorBy(preferred.by)
+                            setLocator(preferred.value)
                           }
                         }}
                       />
@@ -1098,6 +1201,11 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                           <div className="between"><b>text</b><span className="small text-amber">文案变动会失效</span></div>
                           <code>{String(selected.text)}</code>
                         </button>
+                      ) : null}
+                      {!selected.resource_id && !selected.text ? (
+                        <p className="small muted">
+                          该节点没有 resource-id / text，无法自动生成定位候选；请手动填写定位值或改选其他节点。
+                        </p>
                       ) : null}
                     </>
                   ) : null}
@@ -1243,6 +1351,11 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                 {templateError ? <Notice tone="red" title="模板登记失败">{templateError}</Notice> : null}
                 {cropValidation.isError ? <Notice tone="red" title="框选验证失败">{describeError(cropValidation.error).message}</Notice> : null}
                 {cropValidation.data?.key === cropKey ? <p role="status" className="small muted">{cropValidation.data.count === 1 ? '验证通过，唯一匹配' : `验证未通过，匹配到 ${cropValidation.data.count} 处`} · 最高分 {cropValidation.data.scores.length ? Math.max(...cropValidation.data.scores).toFixed(3) : '—'} · 验证快照 {cropValidation.data.snapshot_id}</p> : null}
+                {cropVerified && cropVerification ? (
+                  <p role="status" className="small muted">
+                    登记依据：验证快照 {cropVerification.snapshotId} · 命中框 [{cropVerification.region.x}, {cropVerification.region.y}, {cropVerification.region.w}, {cropVerification.region.h}]（凭证一次性，改动框选/阈值/快照后需重新验证）
+                  </p>
+                ) : null}
                 <div className="flex wrap" style={{ gap: 8 }}>
                   <Button size="small" icon="check" disabled={!sessionActive || !snapshotId || !region || region.w < 4 || region.h < 4 || !coordinateSize || region.x < 0 || region.y < 0 || region.x + region.w > coordinateSize.w || region.y + region.h > coordinateSize.h || !matchThreshold.trim() || !Number.isFinite(Number(matchThreshold)) || Number(matchThreshold) < 0.1 || Number(matchThreshold) > 1 || cropValidation.isPending} onClick={() => {
                     if (session && snapshotId && region) cropValidation.mutate({ key: cropKey, sessionId: session.id, snapshotId, region, threshold: Number(matchThreshold) })

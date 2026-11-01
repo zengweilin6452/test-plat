@@ -1,9 +1,17 @@
-"""模板库与执行锁定（工单 25）。
+"""模板库与执行锁定（工单 25 / 08）。
 
-存储事实：所有调试会话的 vendor TemplateStore 都落在同一个资产根
-（runner 的 cwd 是 server/，MobileConfig 不覆盖 assets_dir → 默认 "assets"
-相对 cwd，即 server/assets）。所以"跨会话共享"由共享根保证——新会话
-list_templates 读到的就是其他会话登记过的模板。
+存储事实（工单 08 核实）：所有调试会话的 vendor TemplateStore 都落在同一个资产根。
+debug runner 的 cwd 固定为 `server/`（`app/runner/spawn.build_spec`），而
+`testdock_runner.debug_job._start_viewer` 不覆盖 `MobileConfig.assets_dir`，它的
+默认值是相对路径 "assets" → 解析成 `server/assets`，也就是这里的
+`template_assets_root()`。所以「模板跨会话可查、不随会话关闭/刷新消失」由共享根
+保证，不是按会话隔离的目录；`/templates?session_id=` 的 session_id 只决定把请求
+转发到哪个 viewer。登记本身还要求先过一次框选验证（routers/debug.py 的一次性
+凭证），模板库读取不需要设备会话。
+
+环境变量 TESTDOCK_TEMPLATE_ASSETS_DIR 只影响平台侧的读取/锁定核对（测试与
+排障用）；vendor viewer 不读它，生产环境不要单独设置，否则会出现「界面读 A 根、
+调试会话写 B 根」的错位。
 
 执行锁定：任务修订的 config.image_templates 声明
     [{"logical": "...", "version_id": "...", "sha256": "..."}]
