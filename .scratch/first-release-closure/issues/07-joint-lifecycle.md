@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 04, 06
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## 现状指针
 
@@ -56,3 +56,15 @@ D:\python312\python.exe -m pytest tests/test_issue16_joint_lifecycle.py -q
 - 真机 749622c9 同一时刻只允许一个占用；跑完必须释放。
 
 ## Comments
+
+- 2026-11-01 修复四项已核实缺陷：
+  1. `ui_timeout_s` 成为真实 pytest deadline：新增 `UiJobOptions.ui_timeout_s` 与 `ui_job.resolve_execution_deadline`，joint 在执行前固定该值，UI 与窗口描述读同一个数。
+  2. UI 超时也先停采并写 `report.json`：`_stop_collection` + `_write_joint_report` 统一正常/超时两条路径，超时返回 `ui errored(ui_timeout)` / `performance cancelled`，outcome 均为 NULL。
+  3. 派发合并 `suite_versions.manifest.ui_timeout_s`（`dispatcher._suite_ui_timeout`），版本快照优先，非 joint/旧清单仍走 spawn 夹紧兜底。
+  4. `collectWindow` 不再被 `runtime._report_json_payload` 丢弃，`/report` 直接透出采集起止与 UI 窗口。
+- 失败路径也登记产物：runner `fail_report` 携带 `artifacts_dir`，`/internal/runs/{id}/fail` 交给 `finalize_run` 登记，超时前的 report.json 与窗口证据可通过 `/report` 查到。
+- fake 链路补齐 `outcome`，断言失败在组件行显示为 completed/failed 而非 not_tested。
+- 提交：`c9bfc8e`，合入 `631d41d`。
+- 测试（`testdock_frc07`）：`test_issue16_joint_lifecycle.py` 等定向 71 passed；实现代理跑后端全量 543 passed + 1 skipped。
+- 未执行：真机联动运行（不占用 749622c9），证据留 10 记录。
+- 遗留：`ui_timeout_s` 以套件清单为准，修订里的冲突值被覆盖（版本不可变优先）；前端只补了 `collectWindow` 类型，展示留 09/10。
