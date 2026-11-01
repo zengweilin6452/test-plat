@@ -1,0 +1,38 @@
+{
+  "generatedAt": "2026-11-01T20:05:00+08:00",
+  "page": "http://127.0.0.1:5174/#/tasks",
+  "backend": "http://127.0.0.1:8010",
+  "betaAcademyPerformanceWizard": {
+    "application": "Beta Academy（客户套件） · com.sinosoft.trainapp",
+    "stepLabel": "场景与设备",
+    "suiteFieldLabel": "性能场景版本",
+    "emptyState": "还没有性能场景版本",
+    "emptyStateAction": "去登记",
+    "registrationOpened": true,
+    "registrationSummary": "登记性能场景 / 发布固定版本",
+    "registrationScenarioBeforeSelection": "300 秒 · CPU / Memory / FPS",
+    "itemOptions": ["CPU", "Memory", "FPS", "Network", "Battery"],
+    "allItemsSelectedScenario": "300 秒 · CPU / Memory / FPS / Network / Battery",
+    "zeroItemsValidation": "至少选择一个采集项。"
+  },
+  "calculatorScenarioSync": {
+    "suite": "计算器真机性能",
+    "version": "v1 · 10s · CPU / Memory",
+    "durationAfterSelectingVersion": "10",
+    "itemsAfterSelectingVersion": ["CPU", "Memory"]
+  },
+  "tests": {
+    "frontend": {
+      "command": "npm test && npm run typecheck && npm run build",
+      "passed": 66,
+      "failed": 0,
+      "typecheck": "passed",
+      "build": "passed"
+    }
+  },
+  "writes": {
+    "createdSuiteOrTask": false,
+    "debugSession": false,
+    "note": "仅做 DOM 交互核对，未提交登记或创建任务，避免污染共享测试库"
+  }
+}

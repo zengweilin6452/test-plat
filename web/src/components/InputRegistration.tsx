@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, describeError } from '../api/client'
 import { Button } from './Button'
 import { Notice } from './Notice'
+import { DEFAULT_PERF_ITEMS, normalizePerfItems, perfItemsLabel } from '../lib/perfItems'
 
 type TestType = 'ui' | 'performance' | 'joint'
 interface Build { id: string; version: string; build_key: string; identity_state: 'pending' | 'confirmed'; verification_note: string }
@@ -125,14 +126,35 @@ export function BuildRegistration({ applicationId, buildId, resourceId, onRegist
   </details>
 }
 
-export function SuiteRegistration({ applicationId, testType, suiteId = '', onRegistered }: {
-  applicationId: string; testType: TestType; suiteId?: string; onRegistered: (id: string, versionId?: string) => void
+export function SuiteRegistration({ applicationId, testType, suiteId = '', duration, items, expandSignal = 0, onRegistered }: {
+  applicationId: string
+  testType: TestType
+  suiteId?: string
+  /** 向导已有采集时长/采集项时传入，避免登记的场景与修订配置不一致 */
+  duration?: string
+  items?: readonly string[]
+  /** 父级空态「去登记」：值变化时展开并滚动到登记区 */
+  expandSignal?: number
+  onRegistered: (id: string, versionId?: string) => void
 }) {
   const cache = useQueryClient()
+  const detailsRef = useRef<HTMLDetailsElement>(null)
   const [name, setName] = useState('')
   const [source, setSource] = useState('')
   const [createdId, setCreatedId] = useState('')
-  const [duration, setDuration] = useState('300')
+  const [ownDuration, setOwnDuration] = useState('300')
+  const effectiveDuration = duration ?? ownDuration
+  const effectiveItems = normalizePerfItems(items ?? DEFAULT_PERF_ITEMS)
+  const scenarioLabel = testType === 'performance' ? '性能场景' : '套件'
+
+  useEffect(() => {
+    if (!expandSignal) return
+    if (detailsRef.current) {
+      detailsRef.current.open = true
+      detailsRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [expandSignal])
+
   const sources = useQuery({ queryKey: ['suite-sources'], queryFn: () => api.get<SourceList>('/suite-sources'), retry: false })
   const allowed = (sources.data?.items ?? []).filter(s => s.test_types.includes(testType))
   const validSource = allowed.some(s => s.id === source)
@@ -149,17 +171,24 @@ export function SuiteRegistration({ applicationId, testType, suiteId = '', onReg
     }
     const version = await api.post<{ id: string }>(`/suites/${id}/${testType === 'ui' ? 'discover' : 'versions'}`, testType === 'ui'
       ? { source_id: source }
-      : { scenario: { duration_s: Number(duration), items: ['CPU', 'Memory', 'FPS'] }, ...(testType === 'joint' ? { source_id: source } : {}) })
+      : { scenario: { duration_s: Number(effectiveDuration), items: effectiveItems }, ...(testType === 'joint' ? { source_id: source } : {}) })
     return { id, versionId: version.id }
   }, onSuccess: result => { onRegistered(result.id, result.versionId); setCreatedId(''); void refresh() } })
-  const valid = (testType === 'performance' || validSource) && (testType === 'ui' || (/^\d+$/.test(duration) && Number(duration) >= 10 && Number(duration) <= 3600))
-  return <details><summary>登记套件 / 发布固定版本</summary><div className="form-grid">
-    <label>新套件名称<input maxLength={200} disabled={Boolean(createdId)} value={name} onChange={e => setName(e.target.value)} /></label>
+  const valid = (testType === 'performance' || validSource)
+    && (testType === 'ui' || (/^\d+$/.test(effectiveDuration) && Number(effectiveDuration) >= 10 && Number(effectiveDuration) <= 3600 && effectiveItems.length > 0))
+  return <details ref={detailsRef}><summary>登记{scenarioLabel} / 发布固定版本</summary><div className="form-grid">
+    <label>新{scenarioLabel}名称<input maxLength={200} disabled={Boolean(createdId)} value={name} onChange={e => setName(e.target.value)} /></label>
     {testType !== 'performance' ? <label>预配置代码来源<select value={source} onChange={e => setSource(e.target.value)}><option value="">请选择来源</option>{allowed.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label> : null}
     {testType !== 'performance' && noSourceHint ? <p role="status">{noSourceHint}</p> : null}
-    {testType !== 'ui' ? <label>固定采集时长（秒，10 至 3600）<input type="number" min={10} max={3600} value={duration} onChange={e => setDuration(e.target.value)} />CPU / Memory / FPS</label> : null}
-    <Button disabled={save.isPending || !applicationId || !name.trim() || !valid} onClick={() => save.mutate(false)}>{createdId ? '重试发布已登记套件的版本' : '登记套件并发布版本'}</Button>
-    <Button disabled={save.isPending || !suiteId || !valid} onClick={() => save.mutate(true)}>{testType === 'ui' ? '为所选套件重新发现并发布版本' : '为所选套件发布版本'}</Button>
+    {testType !== 'ui' ? (
+      duration === undefined ? (
+        <label>固定采集时长（秒，10 至 3600）<input type="number" min={10} max={3600} value={ownDuration} onChange={e => setOwnDuration(e.target.value)} />采集项：{perfItemsLabel(effectiveItems) || '未选择'}</label>
+      ) : (
+        <p className="muted small">将发布场景：{effectiveDuration} 秒 · {perfItemsLabel(effectiveItems) || '未选择采集项'}（与上方采集配置一致）</p>
+      )
+    ) : null}
+    <Button disabled={save.isPending || !applicationId || !name.trim() || !valid} onClick={() => save.mutate(false)}>{createdId ? '重试发布已登记套件的版本' : `登记${scenarioLabel}并发布版本`}</Button>
+    <Button disabled={save.isPending || !suiteId || !valid} onClick={() => save.mutate(true)}>{testType === 'ui' ? '为所选套件重新发现并发布版本' : `为所选${scenarioLabel}发布版本`}</Button>
     {save.isSuccess ? <p role="status">版本已发布，可在清单中选择。</p> : null}
     <Failure error={sources.error || save.error} />
   </div></details>

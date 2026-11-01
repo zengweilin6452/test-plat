@@ -60,6 +60,41 @@ test('性能向导映射 performance 并保留采集配置', () => {
   assert.deepEqual(body.config.perf, { duration_s: 120, items: ['CPU', 'Memory', 'FPS'] })
 })
 
+test('性能采集项按 mobile-perf 能力可选，网络与电池不再写死', () => {
+  const { PERF_ITEM_OPTIONS, perfItemsLabel } = require('../src/lib/perfItems.ts')
+  assert.deepEqual(
+    PERF_ITEM_OPTIONS.map((option) => option.value),
+    ['CPU', 'Memory', 'FPS', 'Network', 'Battery'],
+  )
+  assert.equal(perfItemsLabel(['CPU', 'Network', 'Battery']), 'CPU / Network / Battery')
+  const body = buildCreateTaskRequest({
+    ...form,
+    module: 'perf',
+    duration: '120',
+    perfItems: ['CPU', 'Network', 'Battery'],
+  })
+  assert.deepEqual(body.config.perf.items, ['CPU', 'Network', 'Battery'])
+})
+
+test('至少选择一个采集项才能继续；性能场景不应包含固定三件套假设', () => {
+  assert.ok(validateStep2({ ...form, module: 'perf', perfItems: [] }).perfItems)
+  assert.deepEqual(
+    validateStep2({ ...form, module: 'perf', perfItems: ['Network'] }),
+    {},
+  )
+})
+
+test('性能模式使用性能场景文案，空清单给出登记入口', () => {
+  const source = fs.readFileSync('src/components/TaskWizard.tsx', 'utf8')
+  assert.match(source, /性能场景版本/)
+  assert.match(source, /不执行 UI 用例/)
+  assert.match(source, /还没有性能场景版本/)
+  assert.match(source, /去登记/)
+  const registration = fs.readFileSync('src/components/InputRegistration.tsx', 'utf8')
+  assert.doesNotMatch(registration, /items: \['CPU', 'Memory', 'FPS'\]/)
+  assert.match(registration, /items: effectiveItems/)
+})
+
 test('only an unblocked matching pending identity can be explicitly confirmed', () => {
   const check = { result: 'match', identity_state: 'pending', blocking: [] }
   assert.equal(canConfirmIdentity(check), true)

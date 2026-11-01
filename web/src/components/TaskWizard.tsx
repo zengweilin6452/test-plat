@@ -5,7 +5,8 @@
  * 校验规则照 api-design.md §2.3 与 prototype-ui-spec §2.6：
  * - name 必填、maxlength 60（trim 后 1–60）；
  * - Android 包名 ^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$，≤120；Web 端用 URL（http/https）；
- * - 采集时长（module != ui）整数 10–3600。
+ * - 采集时长（module != ui）整数 10–3600；
+ * - 采集项（module != ui）至少一项，选项来自 mobile-perf 的 SoloPi 采集项。
  * 每步未通过校验不得进入下一步；错误提示渲染在字段下方，容器 role="alert"。
  *
  * 提交纪律：
@@ -26,6 +27,12 @@ import {
 } from '../api/endpoints'
 import { MODULE_NAMES, TARGET_CATALOG } from '../constants'
 import { DASH } from '../lib/fmt'
+import {
+  DEFAULT_PERF_ITEMS,
+  PERF_ITEM_OPTIONS,
+  normalizePerfItems,
+  perfItemsLabel,
+} from '../lib/perfItems'
 import type {
   CreateTaskRequest,
   CreateTaskResponse,
@@ -73,6 +80,8 @@ export interface WizardForm {
   scenario: string
   resourceId: string
   duration: string
+  /** module 为 perf/joint 时提交的 mobile-perf 采集项（CPU/Memory/FPS/Network/Battery） */
+  perfItems: string[]
   buildId: string
   suiteId: string
   suiteVersionId: string
@@ -89,6 +98,7 @@ export const INITIAL_FORM: WizardForm = {
   scenario: '',
   resourceId: '',
   duration: '300',
+  perfItems: [...DEFAULT_PERF_ITEMS],
   buildId: '',
   suiteId: '',
   suiteVersionId: '',
@@ -142,7 +152,7 @@ export function validateStep1(form: WizardForm): WizardErrors {
   return errors
 }
 
-/** 第 2 步校验：设备（Android 必选）与采集时长（module != ui 必填，整数 10–3600） */
+/** 第 2 步校验：设备（Android 必选）、采集时长与采集项（module != ui 必填） */
 export function validateStep2(form: WizardForm): WizardErrors {
   const errors: WizardErrors = {}
   if (form.platform === 'android' && !form.resourceId) {
@@ -165,6 +175,9 @@ export function validateStep2(form: WizardForm): WizardErrors {
       if (value < DURATION_MIN || value > DURATION_MAX) {
         errors.duration = '采集时长需要是 10–3600 之间的整数秒。'
       }
+    }
+    if (normalizePerfItems(form.perfItems).length === 0) {
+      errors.perfItems = '至少选择一个采集项。'
     }
   }
   return errors
@@ -218,7 +231,10 @@ export function buildCreateTaskRequest(form: WizardForm): CreateTaskRequest {
       device: form.platform === 'android' && form.resourceId
         ? { resource_id: form.resourceId, allow_busy_queue: true } : null,
       ...(form.module === 'ui' ? {} : {
-        perf: { duration_s: Number(form.duration.trim()), items: ['CPU', 'Memory', 'FPS'] },
+        perf: {
+          duration_s: Number(form.duration.trim()),
+          items: normalizePerfItems(form.perfItems ?? DEFAULT_PERF_ITEMS),
+        },
       }),
     },
   }
@@ -233,6 +249,37 @@ export function buildCreateTaskRequest(form: WizardForm): CreateTaskRequest {
 /** 设备可选性：offline / unauthorized 不可选（原型 §2.6 第 2 步） */
 export function isDeviceSelectable(resource: ResourceRecord): boolean {
   return resource.status === 'ready'
+}
+
+/** 性能/联动版本的场景（performance 在 manifest.scenario，joint 在 manifest.performance）。 */
+function scenarioOfVersion(version: SuiteVersionRecord): {
+  duration_s: number | null
+  items: string[]
+} | null {
+  const manifest = version.manifest
+  const raw = (manifest?.scenario ?? manifest?.performance) as unknown
+  if (!raw || typeof raw !== 'object') return null
+  const scenario = raw as { duration_s?: unknown; items?: unknown }
+  const duration_s =
+    typeof scenario.duration_s === 'number' && Number.isInteger(scenario.duration_s)
+      ? scenario.duration_s
+      : null
+  const items = Array.isArray(scenario.items)
+    ? normalizePerfItems(scenario.items.map((item) => String(item)))
+    : []
+  if (duration_s === null && items.length === 0) return null
+  return { duration_s, items }
+}
+
+/** 版本清单里展示性能场景摘要；旧版本没有 manifest 时返回空串。 */
+function scenarioSummary(version: SuiteVersionRecord): string {
+  const scenario = scenarioOfVersion(version)
+  if (!scenario) return ''
+  const parts: string[] = []
+  if (scenario.duration_s !== null) parts.push(`${scenario.duration_s}s`)
+  const items = perfItemsLabel(scenario.items)
+  if (items) parts.push(items)
+  return parts.length > 0 ? ' · ' + parts.join(' · ') : ''
 }
 
 interface TaskWizardProps {
@@ -253,6 +300,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
   const [form, setForm] = useState<WizardForm>(INITIAL_FORM)
   const [errors, setErrors] = useState<WizardErrors>({})
   const [touched, setTouched] = useState(false)
+  const [suiteRegistrationSignal, setSuiteRegistrationSignal] = useState(0)
   const requestKeyRef = useRef<string>('')
   const stepsRef = useRef<HTMLDivElement>(null)
 
@@ -274,6 +322,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
       setStep(1)
       setErrors({})
       setTouched(false)
+      setSuiteRegistrationSignal(0)
       setForm({ ...INITIAL_FORM, platform: presetPlatform, module: initialModule ?? 'ui',
         applicationId: presetApplicationId, suiteId: presetSuiteId,
         suiteVersionId: presetVersionId, name: presetName })
@@ -320,6 +369,43 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
     retry: false,
   })
   const suiteVersions: SuiteVersionRecord[] = suiteVersionsQuery.data?.items ?? []
+  const selectedSuiteVersion =
+    suiteVersions.find((version) => version.id === form.suiteVersionId) ?? null
+
+  // 已有性能/联动版本自带场景：选定后把时长与采集项回填到表单，
+  // 避免提交时 revision.config.perf 与版本清单冲突。
+  useEffect(() => {
+    if (form.module === 'ui' || !selectedSuiteVersion) return
+    const scenario = scenarioOfVersion(selectedSuiteVersion)
+    if (!scenario) return
+    const duration =
+      scenario.duration_s !== null ? String(scenario.duration_s) : null
+    const items = scenario.items
+    setForm((prev) => {
+      if (prev.suiteVersionId !== selectedSuiteVersion.id) return prev
+      const nextDuration = duration ?? prev.duration
+      const nextItems = items.length > 0 ? items : prev.perfItems
+      if (
+        prev.duration === nextDuration &&
+        prev.perfItems.length === nextItems.length &&
+        prev.perfItems.every((item, index) => item === nextItems[index])
+      ) {
+        return prev
+      }
+      return { ...prev, duration: nextDuration, perfItems: nextItems }
+    })
+  }, [form.module, selectedSuiteVersion?.id, selectedSuiteVersion?.manifest])
+
+  const selectedScenario = selectedSuiteVersion
+    ? scenarioOfVersion(selectedSuiteVersion)
+    : null
+  const scenarioMismatch = Boolean(
+    form.module !== 'ui' &&
+    selectedScenario &&
+    (normalizePerfItems(form.perfItems).join('\u0000') !== selectedScenario.items.join('\u0000') ||
+      (selectedScenario.duration_s !== null &&
+        Number(form.duration) !== selectedScenario.duration_s)),
+  )
 
   // Android 才需要选设备；其它端不请求资源列表
   const resourcesQuery = useQuery({
@@ -427,12 +513,16 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
     </>
   )
 
+  const stepLabels = form.module === 'perf'
+    ? (['基本信息', '场景与设备', '确认任务'] as const)
+    : STEP_LABELS
+
   return (
     <Dialog
       open={open}
       onClose={handleClose}
       title="新建测试任务"
-      description={`第 ${step} / 3 步 · ${STEP_LABELS[step - 1]}`}
+      description={`第 ${step} / 3 步 · ${stepLabels[step - 1]}`}
       footer={footer}
       footHint={
         step === 3
@@ -441,7 +531,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
       }
     >
       <div ref={stepsRef} className="wizard-steps" role="list" aria-label="向导步骤">
-        {STEP_LABELS.map((label, index) => {
+        {stepLabels.map((label, index) => {
           const value = index + 1
           return (
             <div key={label} className="flex" role="listitem">
@@ -449,7 +539,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
                 <b>{value}</b>
                 {label}
               </span>
-              {value < STEP_LABELS.length ? (
+              {value < stepLabels.length ? (
                 <span className="wizard-arrow" aria-hidden="true">
                   ›
                 </span>
@@ -703,7 +793,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
               </div>
               <div className="field">
                 <label htmlFor={fieldId('suiteVersionId')}>
-                  套件版本 <span className="text-red">*</span>
+                  {form.module === 'perf' ? '性能场景版本' : '套件版本'} <span className="text-red">*</span>
                 </label>
                 <div style={{ display: 'grid', gap: 6 }}>
                   <select
@@ -712,9 +802,11 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
                     onChange={(event) => {
                       setForm((prev) => ({ ...prev, suiteId: event.target.value, suiteVersionId: '' }))
                     }}
-                    aria-label="选择套件"
+                    aria-label={form.module === 'perf' ? '选择性能场景' : '选择套件'}
                   >
-                    <option value="">请选择套件…</option>
+                    <option value="">
+                      {form.module === 'perf' ? '请选择性能场景…' : '请选择套件…'}
+                    </option>
                     {suites.map((suite) => (
                       <option key={suite.id} value={suite.id}>
                         {suite.name}
@@ -737,8 +829,22 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
                     {suiteVersions.map((version) => (
                       <option key={version.id} value={version.id}>
                         v{version.version}
-                        {typeof version.case_count === 'number' ? ` · ${version.case_count} 用例` : ''}
-                        {version.has_code_copy === false ? ' · 无固定代码副本（不可验证）' : ''}
+                        {form.module === 'ui' ? (
+                          <>
+                            {typeof version.case_count === 'number' ? ` · ${version.case_count} 用例` : ''}
+                            {version.has_code_copy === false ? ' · 无固定代码副本（不可验证）' : ''}
+                          </>
+                        ) : (
+                          <>
+                            {form.module === 'joint' && typeof version.case_count === 'number'
+                              ? ` · ${version.case_count} 用例`
+                              : ''}
+                            {form.module === 'joint' && version.has_code_copy === false
+                              ? ' · 无固定代码副本（不可验证）'
+                              : ''}
+                            {scenarioSummary(version)}
+                          </>
+                        )}
                       </option>
                     ))}
                   </select>
@@ -746,8 +852,29 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
                 <div className="field-hint">
                   {suitesQuery.isError || suiteVersionsQuery.isError
                     ? '套件清单获取失败：请先在套件来源登记套件版本。'
-                    : '验证要求套件版本带用例与固定代码副本。'}
+                    : form.module === 'perf'
+                      ? '性能场景版本锁定采集时长与采集项，不执行 UI 用例，也不需要固定代码副本。'
+                      : form.module === 'joint'
+                        ? '联动版本包含 UI 用例、固定代码副本和性能采集项。'
+                        : '验证要求套件版本带用例与固定代码副本。'}
                 </div>
+                {form.module === 'perf'
+                && form.applicationId
+                && !suitesQuery.isPending
+                && !suitesQuery.isError
+                && suites.length === 0 ? (
+                  <Notice tone="amber" title="还没有性能场景版本">
+                    当前应用没有性能套件。请先
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={() => setSuiteRegistrationSignal((value) => value + 1)}
+                    >
+                      去登记
+                    </button>
+                    ，登记后会回填场景与版本。
+                  </Notice>
+                ) : null}
                 <FieldError
                   id={`${fieldId('suiteVersionId')}-error`}
                   message={fieldErrors.suiteVersionId}
@@ -758,7 +885,16 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
 
           {form.platform === 'android' && form.applicationId ? <>
             <BuildRegistration key={`${form.applicationId}-${form.buildId}-${form.resourceId}`} applicationId={form.applicationId} buildId={form.buildId} resourceId={form.resourceId} onRegistered={id => update('buildId', id)} />
-            <SuiteRegistration key={`${form.applicationId}-${form.module}-${form.suiteId}`} applicationId={form.applicationId} testType={form.module === 'perf' ? 'performance' : form.module} suiteId={form.suiteId} onRegistered={(id, versionId) => setForm(prev => ({ ...prev, suiteId: id, suiteVersionId: versionId ?? '' }))} />
+            <SuiteRegistration
+              key={`${form.applicationId}-${form.module}-${form.suiteId}`}
+              applicationId={form.applicationId}
+              testType={form.module === 'perf' ? 'performance' : form.module}
+              suiteId={form.suiteId}
+              duration={form.duration}
+              items={form.perfItems}
+              expandSignal={suiteRegistrationSignal}
+              onRegistered={(id, versionId) => setForm(prev => ({ ...prev, suiteId: id, suiteVersionId: versionId ?? '' }))}
+            />
           </> : null}
           {form.module !== 'perf' ? <TemplatePicker value={form.imageTemplates ?? []} onChange={value => update('imageTemplates', value)} /> : null}
           <div className="form-grid two">
@@ -782,10 +918,54 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
               <FieldError id={`${fieldId('duration')}-error`} message={fieldErrors.duration} />
             </div>
             <div className="field">
-              <span className="field-label">采集指标</span>
-              <div className="muted small">
-                {form.module === 'ui' ? '不采集性能指标' : 'CPU / Memory / FPS（必选）'}
-              </div>
+              <span className="field-label">
+                采集指标{form.module !== 'ui' ? <span className="text-red"> *</span> : null}
+              </span>
+              {form.module === 'ui' ? (
+                <div className="muted small">不采集性能指标</div>
+              ) : (
+                <>
+                  <div role="group" aria-label="采集指标" style={{ display: 'grid', gap: 6 }}>
+                    {PERF_ITEM_OPTIONS.map((option) => (
+                      <label
+                        key={option.value}
+                        className="small"
+                        style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={form.perfItems.includes(option.value)}
+                          onChange={(event) => {
+                            setForm((prev) => {
+                              const current = normalizePerfItems(prev.perfItems)
+                              const next = event.target.checked
+                                ? [...current, option.value]
+                                : current.filter((item) => item !== option.value)
+                              return { ...prev, perfItems: normalizePerfItems(next) }
+                            })
+                          }}
+                        />
+                        <span>
+                          {option.label}
+                          <span className="muted"> · {option.description}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="field-hint">
+                    至少选一项。FPS 首次采集可能弹系统告知框；Temperature / GPU 由补采旁路自动采集。
+                  </div>
+                  {scenarioMismatch && selectedScenario ? (
+                    <div className="field-error" role="alert">
+                      当前采集配置与所选版本场景不一致（
+                      {selectedScenario.duration_s !== null ? `${selectedScenario.duration_s}s · ` : ''}
+                      {perfItemsLabel(selectedScenario.items) || '未记录采集项'}）。提交会被拒绝，
+                      请改回版本场景或发布新版本。
+                    </div>
+                  ) : null}
+                  <FieldError id={`${fieldId('perfItems')}-error`} message={fieldErrors.perfItems} />
+                </>
+              )}
               <div className="field-hint">门禁阈值由后端基线策略给出，页面不自行判定</div>
             </div>
           </div>
@@ -819,7 +999,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
             <dt>采集时长</dt>
             <dd>{form.module === 'ui' ? '不采集性能' : `${form.duration.trim()} 秒`}</dd>
             <dt>采集指标</dt>
-            <dd>{form.module === 'ui' ? DASH : 'CPU / Memory / FPS'}</dd>
+            <dd>{form.module === 'ui' ? DASH : perfItemsLabel(form.perfItems) || DASH}</dd>
           </dl>
 
           {submitError ? (
