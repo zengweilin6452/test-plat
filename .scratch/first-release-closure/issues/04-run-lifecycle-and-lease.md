@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## 现状指针
 
@@ -54,3 +54,6 @@ D:\python312\python.exe -m pytest tests/test_issue08_run_lifecycle.py tests/test
 - 不修改 `vendor/`、不安装依赖、不 push。
 
 ## Comments
+
+- 2026-11-01 实现完成（`b464319`，合并 `efd8683`）。取消 `dispatching/running/finalizing` 时先单独事务受理取消事实，再 `spawn.terminate_run_process` 终止进程树（Windows `taskkill /T /F`），随后 `finalize_run(cancelled, outcome=None)` 释放租约；已终态返回 409 `state_conflict`；`_finalize_after_exit` 识别 `cancel_requested_at`，把被取消的退出映射为 cancelled 而非 errored，真实 completed 仍胜出。
+- 证据：新增 `test_issue04_run_lifecycle.py` 9 例（修订不可变/幂等/草稿拒绝、设备忙保留 queued、不可用原因区分、取消端到端含子进程树双 pid 死亡与设备再领取、事件重放去重）；定向回归 64 passed；代理全量 465 passed / 1 skipped。真机 adb 进程随 taskkill 终止的时延与 vendor 锁释放观测记入工单 10。
