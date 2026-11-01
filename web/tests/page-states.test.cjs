@@ -32,6 +32,7 @@ const { reportsEmptyCopy } = require(path.join(SRC, 'pages', 'ReportsPage.tsx'))
 const { uiRunsEmptyCopy } = require(path.join(SRC, 'pages', 'UiPage.tsx'))
 const { perfAnalysisEmptyCopy, perfRunsEmptyCopy } = require(path.join(SRC, 'pages', 'PerfPage.tsx'))
 const { identityCheckNote } = require(path.join(SRC, 'components', 'InputRegistration.tsx'))
+const { copyExpression } = require(path.join(SRC, 'components', 'DebugDrawer.tsx'))
 
 function render(element) {
   return renderToStaticMarkup(element)
@@ -132,6 +133,38 @@ test('配置就绪与设备就绪在任务详情里分开说明', () => {
   const source = fs.readFileSync(path.join(SRC, 'components', 'TaskDrawer.tsx'), 'utf8')
   assert.match(source, /配置就绪/)
   assert.match(source, /设备就绪/)
+})
+
+test('复制表达式只在剪贴板真正写入后提示成功，避免假成功 toast', async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  const messages = []
+  const show = (message) => messages.push(message)
+  const setNavigator = (value) =>
+    Object.defineProperty(globalThis, 'navigator', { value, configurable: true })
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+  try {
+    // 非安全上下文 / 老浏览器：没有 clipboard，不能提示成功
+    setNavigator({})
+    copyExpression('xpath=//a', show)
+    assert.match(messages.at(-1), /复制失败/)
+    assert.ok(!messages.includes('表达式已复制'), '没有剪贴板时不能提示复制成功')
+
+    messages.length = 0
+    setNavigator({ clipboard: { writeText: () => Promise.resolve() } })
+    copyExpression('xpath=//a', show)
+    await flush()
+    assert.deepEqual(messages, ['表达式已复制'])
+
+    messages.length = 0
+    setNavigator({ clipboard: { writeText: () => Promise.reject(new Error('denied')) } })
+    copyExpression('xpath=//a', show)
+    await flush()
+    assert.match(messages.at(-1), /复制失败/)
+    assert.ok(!messages.includes('表达式已复制'), '剪贴板拒绝时不能提示复制成功')
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'navigator', original)
+    else delete globalThis.navigator
+  }
 })
 
 test('九个页面都按 isLoading 分支，不允许再出现「加载即空态」的回归', () => {
