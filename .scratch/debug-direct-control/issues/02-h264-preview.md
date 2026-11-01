@@ -13,3 +13,4 @@
 ## Comments
 - 2026-11-01 交付：`feat/debug-h264-preview`。后端视频代理 3 项 + 控制/契约 27 项通过；前端 57 项、`tsc`/build 通过。真机：H.264 · ~25fps（码流 486×1080），后端全量 577 项（576 passed / 1 skipped / 0 failed），冻结/恢复后继续，隐藏 `VideoDecoder` 时显示「浏览器不支持 WebCodecs，已回退 JPEG」。记录见 `acceptance.md §12`。
 - 边界：不回退时并行；回退后本会话保持 JPEG；码流分辨率低于快照，精确拾取用快照。
+- 2026-11-01 呈现延迟量化：Home ack → H.264 canvas 首次变化 128.6 / 150.8 / 177.9 ms（中位 150.8ms，均值 152.4ms）；输入侧 DOWN 156ms + UP ack 2ms。之前 2s 点击延迟是 end 未发送（§13），不是 H.264。证据 `evidence/h264-presentation-latency.json`。

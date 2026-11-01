@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-01",
+  "device": "749622c9",
+  "session": "7e60fd5d-410b-4ecc-9f68-a579cfbda3c7",
+  "transport": "H.264 (vendor /api/v1/preview/video -> platform /ws/debug/{id}/video -> WebCodecs)",
+  "canvas": "486x1080",
+  "method": "Home key applied via vendor control; t_ack = HTTP response after press_key; t_change = first canvas draw whose 48x106 downscaled frame differs from previous by mean abs diff > 3; latency = t_change - t_ack",
+  "samples_ms": [177.9, 128.6, 150.8],
+  "median_ms": 150.8,
+  "mean_ms": 152.4,
+  "min_ms": 128.6,
+  "max_ms": 177.9,
+  "input_side_after_end_fix": "gesture down injection 156ms + up ack 2ms (same-day journal 439a5196)",
+  "caveat": "Includes launcher transition onset and canvas draw; excludes compositor paint (~1 frame) and input-side 156ms. Not a pure codec benchmark.",
+  "note": "Prior 2s click delay was missing gesture end (vendor 2s idle timeout), fixed in 4159576; H.264 presentation is not the cause."
+}
