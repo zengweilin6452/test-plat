@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 import threading
@@ -277,19 +278,37 @@ def shared_assets_dir() -> Path:
     return (Path(__file__).resolve().parents[2] / "assets").resolve()
 
 
-def write_mobile_config(artifacts_dir: Path) -> Path:
-    """为 pytest 子进程生成 mobile-auto 配置：assets/artifacts 都用绝对路径。
+def write_mobile_config(
+    artifacts_dir: Path,
+    *,
+    serial: str = "",
+    app_package: str = "",
+    app_activity: str = "",
+) -> Path:
+    """为 pytest 子进程生成 mobile-auto 配置：身份与资产目录都用固定输入。
 
     vendor 插件的 `load_config(None)` 会按 cwd 解析相对目录；不显式给配置时，
     sessionstart 的 `artifacts/runs` 会写进固定副本。配置放在本次运行的
     artifacts 根下，随产物一起归档。
+
+    自带 `mobile_session` 的套件（如 Beta Academy）同样读这份配置，所以设备
+    serial 与应用身份必须写进来；只给 assets/artifacts 会让套件丢掉固定输入。
     """
     path = Path(artifacts_dir).resolve() / "mobile-config.toml"
-    path.write_text(
-        f'assets_dir = "{shared_assets_dir().as_posix()}"\n'
-        f'artifacts_dir = "{Path(artifacts_dir).resolve().as_posix()}"\n',
-        encoding="utf-8",
-    )
+
+    def quoted(value: str) -> str:
+        return json.dumps(value, ensure_ascii=False)
+
+    lines = []
+    if serial:
+        lines.append(f"device_serial = {quoted(str(serial))}")
+    if app_package:
+        lines.append(f"app_package = {quoted(str(app_package))}")
+    if app_activity:
+        lines.append(f"app_activity = {quoted(str(app_activity))}")
+    lines.append(f'assets_dir = "{shared_assets_dir().as_posix()}"')
+    lines.append(f'artifacts_dir = "{Path(artifacts_dir).resolve().as_posix()}"')
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
 
@@ -480,7 +499,16 @@ def _run_pytest(
         artifacts_dir=artifacts_dir,
         test_paths=targets,
         revision_id=options.revision_id,
-        mobile_config=write_mobile_config(artifacts_dir) if suite_root else None,
+        mobile_config=(
+            write_mobile_config(
+                artifacts_dir,
+                serial=options.serial,
+                app_package=options.app_package,
+                app_activity=options.app_activity,
+            )
+            if suite_root
+            else None
+        ),
     )
     # 追溯：本次执行实际用的套件版本、树摘要与相对目标。
     emit_text(

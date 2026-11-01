@@ -361,3 +361,24 @@ def test_platform_session_resolves_assets_outside_copy(tmp_path, monkeypatch):
     assert Path(config.assets_dir).is_absolute()
     assert Path(config.assets_dir) == ui_job.shared_assets_dir()
     assert Path(config.artifacts_dir) == artifacts.resolve()
+
+
+def test_mobile_config_carries_fixed_device_and_app_identity(tmp_path):
+    """客户套件自带 mobile_session 时也读这份配置，身份必须由平台固定。
+
+    Beta Academy 真机套件的 conftest 用 `load_config(--mobile-config)` 建会话；
+    配置若只有 assets/artifacts，设备与应用身份就丢了，套件无法冷启动被测应用。
+    """
+    from testdock_runner.ui_job import write_mobile_config
+
+    path = write_mobile_config(
+        tmp_path,
+        serial="749622c9",
+        app_package="com.sinosoft.trainapp",
+        app_activity=".MainActivity",
+    )
+    text = path.read_text(encoding="utf-8")
+    assert 'device_serial = "749622c9"' in text
+    assert 'app_package = "com.sinosoft.trainapp"' in text
+    assert 'app_activity = ".MainActivity"' in text
+    assert "assets_dir" in text and "artifacts_dir" in text
