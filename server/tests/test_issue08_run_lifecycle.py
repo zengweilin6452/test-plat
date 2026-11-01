@@ -6,8 +6,9 @@
   并固定，响应回传实际 revision_id；
 - 跨应用/跨项目的任务、修订、父运行一律拒绝；非 validated 修订不能发起运行；
 - overrides / source_dir / test_paths / fake_outcome / source 不能改写固定输入；
-- 取消先受理（202）后收敛：queued 直接落 cancelled，执行中只记事实、不改状态，
-  与完成竞争时不伪造 cancelled；
+- 取消先受理（202）后收敛：queued 直接落 cancelled；dispatching/running/finalizing
+  由工单 04 起主动终止 runner 进程树并当场收敛（终态/事件/租约释放可见），
+  与 runner 真实完成竞争时不伪造 cancelled；
 - 取消事实持久化在列上（0006），不因事件分页/断线补拉而丢失；
 - 事件分页给出 next_after / has_more，超过 500 条仍能补拉；
 - 列表、详情、WS 快照共用同一进度投影；WS 断线重连能重放终态。
@@ -243,37 +244,60 @@ def test_cancel_queued_run_converges_to_cancelled(client, project, sync_engine):
     assert again.json()["code"] == "state_conflict"
 
 
-def test_cancel_running_run_records_fact_without_faking_terminal(
+def test_cancel_running_run_converges_to_cancelled_without_faking_outcome(
     client, project, make_run, sync_engine
 ):
+    """运行中取消必须真的收敛，但绝不把取消写成测试结论。
+
+    工单 04 起升级：取消 running 会主动终止 runner 进程树并立即收敛，
+    不再只写 `cancel_requested_at` 等心跳/60s 陈旧判定（否则 vendor 卡死时
+    设备会被长期占用）。进程树终止与设备再领取的端到端证据见
+    `test_issue04_run_lifecycle.py`。
+    """
     run_id = make_run(state="running", request_key=str(uuid.uuid4()))
 
     first = client.post(f"/api/v1/runs/{run_id}/cancel", headers=CLIENT_HEADERS)
     assert first.status_code == 202, first.text
-    assert first.json()["state"] == "running", "执行中只受理，不改状态"
+    assert first.json()["state"] == "cancelled", "取消必须收敛，不能只留下事实"
+    assert first.json()["outcome"] is None, "取消不是测试结论"
+    assert first.json()["cancel_requested"] is True
     first_at = first.json()["cancel_requested_at"]
     assert first_at
 
-    # 重复受理保留首次时间（COALESCE），不因重复点击改变事实
-    second = client.post(f"/api/v1/runs/{run_id}/cancel", headers=CLIENT_HEADERS)
-    assert second.status_code == 202, second.text
-    assert second.json()["cancel_requested_at"] == first_at
+    row = _row(sync_engine, run_id)
+    assert row["state"] == "cancelled"
+    assert row["outcome"] is None
+    assert row["cancel_requested_at"] is not None
 
-    # runner 恰好完成：终态是真实完成态，取消事实仍在，不伪造 cancelled
+    # 重复取消是 409 conflict（幂等语义），不是 500，也不再写第二条事实
+    second = client.post(f"/api/v1/runs/{run_id}/cancel", headers=CLIENT_HEADERS)
+    assert second.status_code == 409, second.text
+    assert second.json()["code"] == "state_conflict"
+    assert _row(sync_engine, run_id)["cancel_requested_at"] == row["cancel_requested_at"]
+
+    # 取消事实已受理后 runner 恰好上报完成：终态保持真实完成态，不伪造 cancelled
+    raced = make_run(state="running", request_key=str(uuid.uuid4()))
     with sync_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE test_runs SET cancel_requested_at = now()"
+                " WHERE id = CAST(:id AS uuid)"
+            ),
+            {"id": raced},
+        )
         conn.execute(
             text(
                 "UPDATE test_runs SET state = 'completed', outcome = 'passed',"
                 " ended_at = now() WHERE id = CAST(:id AS uuid)"
             ),
-            {"id": run_id},
+            {"id": raced},
         )
-    detail = client.get(f"/api/v1/runs/{run_id}").json()
+    detail = client.get(f"/api/v1/runs/{raced}").json()
     assert detail["state"] == "completed"
     assert detail["outcome"] == "passed"
     assert detail["cancel_requested"] is True
 
-    after_terminal = client.post(f"/api/v1/runs/{run_id}/cancel", headers=CLIENT_HEADERS)
+    after_terminal = client.post(f"/api/v1/runs/{raced}/cancel", headers=CLIENT_HEADERS)
     assert after_terminal.status_code == 409, after_terminal.text
 
 

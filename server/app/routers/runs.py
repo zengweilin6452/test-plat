@@ -751,14 +751,21 @@ async def list_run_events(
 
 @router.post("/runs/{run_id}/cancel", status_code=202)
 async def cancel_run(run_id: str, session: AsyncSession = Depends(get_session)) -> dict:
-    """取消 run：先受理（202），再由执行侧收敛（spec §6.2、§9.1）。
+    """取消 run：受理取消事实，并让执行中的运行真的停下来（spec §6.2、§9.1）。
 
     - 取消事实写进 `test_runs.cancel_requested_at`（重复受理保留首次时间），
       不依赖事件流是否完整，也不因为重复点击多出一条事实；
     - queued 的运行直接迁移到 cancelled（还没占设备）；
-    - 执行中的只受理、不改状态：runner 在 heartbeat 里看到 cancel 后停设备、
-      放 vendor 锁，再由 complete/fail 或 reconciler 收敛；如果它恰好完成，
-      终态就是真实完成态，**不会**被改写成 cancelled。
+    - dispatching / running / finalizing 的运行**主动终止 runner 进程树**
+      （Windows `taskkill /T /F`，runner 拉起的 pytest/adb 一起收掉），再按
+      cancelled 收敛：终态、事件、租约释放都在同一个 finalize 事务里可见。
+      为什么不能只写事实等 heartbeat：runner 可能卡在 vendor 里不再心跳，
+      设备就会一直被占到 reconciler 的 60s 陈旧判定 —— 取消按钮等于没生效。
+      终止失败（进程表丢失且无 ack pid）仍按 cancelled 收敛，交给下次派发的
+      本机兜底锁挡住残留进程（与 reconciler 的"尽力 kill + 释放"同一策略）。
+    - runner 恰好已经上报完成的，finalize 看到终态就返回真实完成态，
+      **不会**把真实结论改写成 cancelled；
+    - 已终态的 run 不再受理取消（409 state_conflict，不是 500）。
     """
     project_id = await _project_of(session, run_id)
     terminal = sorted(runs_mod.TERMINAL_STATES)
@@ -766,55 +773,78 @@ async def cancel_run(run_id: str, session: AsyncSession = Depends(get_session)) 
     params: dict[str, object] = {"id": str(run_id), "actor": "web"}
     params.update({f"t{i}": state for i, state in enumerate(terminal)})
 
-    # 条件 UPDATE：终态不受理（并发下由 WHERE 兜底，避免"读到 running 再被改成
-    # completed"的窗口里伪造一次 cancelled 事实）。
-    row = (
-        await session.execute(
-            text(
-                "UPDATE test_runs"
-                "   SET cancel_requested_at = COALESCE(cancel_requested_at, now()),"
-                "       cancel_requested_by = COALESCE(cancel_requested_by, :actor)"
-                f" WHERE id::text = :id AND state NOT IN ({placeholders})"
-                " RETURNING state, cancel_requested_at"
-            ),
-            params,
-        )
-    ).mappings().first()
-    if row is None:
-        current = str(
-            (
-                await session.execute(
-                    text("SELECT state FROM test_runs WHERE id::text = :id"),
-                    {"id": str(run_id)},
-                )
-            ).scalar_one()
-        )
-        raise state_conflict(run_id, current, "non_terminal")
+    # 事实与本请求的后续步骤分开事务：终止进程和 finalize 都要先让"取消已受理"
+    # 落库（finalize 在另一个会话里对同一行加 FOR UPDATE，不能和本请求的长事务
+    # 互相等锁）。条件 UPDATE 同时是终态闸门：并发的 completed 不会被伪造
+    # 出一次 cancelled 事实。
+    from ..db import get_sessionmaker
 
-    state = str(row["state"])
-    await events_mod.append_event(
-        session,
-        project_id=project_id,
-        run_id=str(run_id),
-        source_key=events_mod.SOURCE_CONTROL,
-        source_event_id="cancel",
-        event_type="cancel_requested",
-        payload={"requested_by": "web", "from_state": state},
-    )
-    if state == runs_mod.STATE_QUEUED:
-        try:
-            await runs_mod.transition(
-                session,
-                str(run_id),
-                runs_mod.STATE_QUEUED,
-                runs_mod.STATE_CANCELLED,
-                reason="cancel_requested",
-                actor="web",
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as tx:
+        async with tx.begin():
+            row = (
+                await tx.execute(
+                    text(
+                        "UPDATE test_runs"
+                        "   SET cancel_requested_at = COALESCE(cancel_requested_at, now()),"
+                        "       cancel_requested_by = COALESCE(cancel_requested_by, :actor)"
+                        f" WHERE id::text = :id AND state NOT IN ({placeholders})"
+                        " RETURNING state, cancel_requested_at"
+                    ),
+                    params,
+                )
+            ).mappings().first()
+            if row is None:
+                current = str(
+                    (
+                        await tx.execute(
+                            text("SELECT state FROM test_runs WHERE id::text = :id"),
+                            {"id": str(run_id)},
+                        )
+                    ).scalar_one()
+                )
+                raise state_conflict(run_id, current, "non_terminal")
+
+            state = str(row["state"])
+            await events_mod.append_event(
+                tx,
+                project_id=project_id,
+                run_id=str(run_id),
+                source_key=events_mod.SOURCE_CONTROL,
+                source_event_id="cancel",
+                event_type="cancel_requested",
+                payload={"requested_by": "web", "from_state": state},
             )
-        except Exception:  # noqa: BLE001 - 与 dispatcher 抢同一行时交给 reconciler
-            # 取消事实已经受理，dispatcher 抢先把它领走不算失败：
-            # reconciler 会看到 cancel_requested_at 并收敛，这里按当前状态回 202。
-            pass
+            if state == runs_mod.STATE_QUEUED:
+                # 行锁已在手：queued->cancelled 不会和 dispatcher 抢，直接收敛。
+                await runs_mod.transition(
+                    tx,
+                    str(run_id),
+                    runs_mod.STATE_QUEUED,
+                    runs_mod.STATE_CANCELLED,
+                    reason="cancel_requested",
+                    actor="web",
+                )
+
+    killed = False
+    if state in (runs_mod.STATE_DISPATCHING, runs_mod.STATE_RUNNING, runs_mod.STATE_FINALIZING):
+        from .. import runtime as runtime_mod
+        from ..runner import spawn as spawn_mod
+
+        # 先切断进程树，再释放租约：顺序反了会出现"设备已可派发、旧 runner 还在
+        # 操作设备"的窗口（reconciler 的注释里写过同一条纪律）。
+        killed = await spawn_mod.terminate_run_process(str(run_id))
+        await runtime_mod.finalize_run(
+            run_id=str(run_id),
+            state=runs_mod.STATE_CANCELLED,
+            outcome=None,
+            reason="cancel_requested",
+            project_id=project_id,
+            release_lease_reason="cancel_requested",
+            extra_event={"cancel_requested_by": "web", "runner_terminated": killed},
+            actor="web",
+        )
+
     final = (
         await session.execute(
             text("SELECT state, outcome FROM test_runs WHERE id::text = :id"),
@@ -835,8 +865,10 @@ async def cancel_run(run_id: str, session: AsyncSession = Depends(get_session)) 
     return {
         "id": str(run_id),
         "state": current,
+        "outcome": final["outcome"],
         "cancel_requested": True,
         "cancel_requested_at": row["cancel_requested_at"],
+        "runner_terminated": killed,
     }
 
 
