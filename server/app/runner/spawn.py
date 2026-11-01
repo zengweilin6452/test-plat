@@ -419,14 +419,21 @@ async def _finalize_after_exit(run_id: str, code: int | None) -> None:
     if row["state"] in runs_mod.TERMINAL_STATES:
         return
     mapped = map_exit_code(code)
+    state, outcome, reason = mapped.state, mapped.outcome, mapped.reason_code
+    if state != runs_mod.STATE_COMPLETED and row["cancel_requested_at"] is not None:
+        # 用户已受理取消、进程是被我们 taskkill 掉的：这是取消收敛，不是设备/
+        # 基础设施掉线。映射成 errored 会把"用户取消"写成"运行出错"。
+        state, outcome, reason = runs_mod.STATE_CANCELLED, None, "cancel_requested"
     await runtime_mod.finalize_run(
         run_id=run_id,
-        state=mapped.state,
-        outcome=mapped.outcome,
-        reason=mapped.reason_code,
+        state=state,
+        outcome=outcome,
+        reason=reason,
         project_id=str(row["project_id"]),
-        artifacts_dir=None if mapped.failed else artifacts_dir_for(run_id),
-        release_lease_reason="runner_exit",
+        artifacts_dir=None if state == runs_mod.STATE_ERRORED else artifacts_dir_for(run_id),
+        release_lease_reason=(
+            "cancel_requested" if state == runs_mod.STATE_CANCELLED else "runner_exit"
+        ),
         extra_event={"exit_code": code},
     )
 
@@ -434,7 +441,9 @@ async def _finalize_after_exit(run_id: str, code: int | None) -> None:
 def text_project_state_sql():
     from sqlalchemy import text
 
-    return text("SELECT project_id, state FROM test_runs WHERE id = :id")
+    return text(
+        "SELECT project_id, state, cancel_requested_at FROM test_runs WHERE id = :id"
+    )
 
 
 async def _pid_from_events(run_id: str) -> int | None:
