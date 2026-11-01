@@ -492,3 +492,5 @@
 3. **不并行**：同一会话只开一条预览流（video 或 JPEG），避免 vendor 客户端上限与双重解码开销。
 4. **依赖**：需 WebCodecs 与 vendor `stream_backend=upstream`（默认）；否则如实回退并显示原因。
 5. **不改变控制**：Phase 1 的控制权/手势 WS 与坐标归一化不受预览传输影响。
+
+全量回归（`testdock_frc10`，迁移 `0008`）：**577 项，576 passed / 1 skipped / 0 failed，退出码 0**（新增 3 项视频代理测试；计数方式同 §3 #1）。分支 `feat/debug-h264-preview`，提交 `b48a9e6`；按计划合并回集成分支。
