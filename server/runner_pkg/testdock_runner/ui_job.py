@@ -38,6 +38,22 @@ from .protocol import emit_stage, emit_text
 from .vendor_lock import DeviceBusy, LocalDeviceLock
 
 DEFAULT_TEST_PATHS = ("tests",)
+#: 有固定副本时 pytest 的默认目标就是副本根（不是 server/tests）
+COPY_ROOT_TARGET = "."
+
+#: 固定副本缺失/不是目录：立即阻断，绝不回退 server/ 或可变来源
+SUITE_ROOT_UNAVAILABLE = "execution_copy_unavailable"
+#: 显式目标越出副本边界（绝对路径 / 盘符 / `..` 穿越 / 符号链接逃逸）
+SUITE_PATH_OUT_OF_BOUNDS = "suite_path_out_of_bounds"
+
+
+class SuiteCopyError(RuntimeError):
+    """固定副本不可信：携带原因码，供 UiJobResult.reason 与事件追溯。"""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
 
 
 @dataclass
@@ -54,6 +70,11 @@ class UiJobOptions:
     app_package: str = ""
     app_activity: str = ""
     perf: dict[str, Any] = field(default_factory=dict)
+    #: 固定代码副本根（派发时由 dispatcher 复验后写进 spawn 配置）
+    suite_root: Path | None = None
+    suite_version_id: str | None = None
+    #: 该版本 code_copy 的树摘要（只用于追溯与对账，复验在派发侧完成）
+    suite_sha256: str | None = None
 
 
 @dataclass
@@ -71,8 +92,73 @@ class UiJobResult:
     components: list[dict[str, Any]] = field(default_factory=list)
 
 
+def resolve_suite_root(options: UiJobOptions) -> Path:
+    """解析并校验固定副本根；缺失/不是目录抛 SuiteCopyError。
+
+    真实执行（非 fake）必须先拿到一个可用的副本目录：调用方不得在失败时退回
+    `server/` 或来源目录，否则等于悄悄运行了另一份代码。
+    """
+    if options.suite_root is None or not str(options.suite_root).strip():
+        raise SuiteCopyError(
+            SUITE_ROOT_UNAVAILABLE, "运行未提供固定代码副本（suite_root）"
+        )
+    raw = Path(options.suite_root)
+    try:
+        resolved = raw.resolve(strict=True)
+    except OSError as exc:
+        raise SuiteCopyError(
+            SUITE_ROOT_UNAVAILABLE, f"固定代码副本不可用：{raw}"
+        ) from exc
+    if not resolved.is_dir():
+        raise SuiteCopyError(
+            SUITE_ROOT_UNAVAILABLE, f"固定代码副本不是目录：{raw}"
+        )
+    return resolved
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    """path 是否在 root 之下（Windows 大小写不敏感，纯词法）。"""
+    child = os.path.normcase(os.path.abspath(str(path)))
+    parent = os.path.normcase(os.path.abspath(str(root)))
+    if child == parent:
+        return True
+    try:
+        return os.path.commonpath([child, parent]) == parent
+    except ValueError:  # 不同盘符
+        return False
+
+
+def _suite_targets(root: Path, test_paths: list[str]) -> list[str]:
+    """副本内的 pytest 目标：默认副本根；显式目标必须相对且在副本边界内。
+
+    拒绝绝对路径、盘符与 `..` 穿越（resolve 后再做包含性检查，符号链接逃逸同样
+    落在这里）。返回相对副本根的 posix 路径，供 argv / junit 与事件追溯。
+    """
+    wanted = [str(item).strip() for item in (test_paths or []) if str(item or "").strip()]
+    if not wanted:
+        return [COPY_ROOT_TARGET]
+    targets: list[str] = []
+    for text in wanted:
+        candidate = Path(text)
+        if candidate.is_absolute() or os.path.splitdrive(text)[0] or ".." in candidate.parts:
+            raise SuiteCopyError(
+                SUITE_PATH_OUT_OF_BOUNDS, f"测试目标越出固定代码副本：{text}"
+            )
+        resolved = (root / candidate).resolve()
+        if not _is_within(resolved, root):
+            raise SuiteCopyError(
+                SUITE_PATH_OUT_OF_BOUNDS, f"测试目标越出固定代码副本：{text}"
+            )
+        relative = resolved.relative_to(root)
+        targets.append(relative.as_posix() if relative.as_posix() else COPY_ROOT_TARGET)
+    return targets or [COPY_ROOT_TARGET]
+
+
 def resolve_test_paths(options: UiJobOptions) -> list[str]:
-    """pytest 目标：显式 --test-path > 指定 test_paths > tests。"""
+    """pytest 目标：有固定副本时只在副本内解析；无副本时保留 fake/vendor 兜底。"""
+    root = resolve_suite_root(options) if options.suite_root is not None else None
+    if root is not None:
+        return _suite_targets(root, list(options.test_paths))
     if options.test_paths:
         return list(options.test_paths)
     if fake_enabled(options.fake):
@@ -80,6 +166,16 @@ def resolve_test_paths(options: UiJobOptions) -> list[str]:
         if vendor_tests is not None:
             return [str(vendor_tests)]
     return list(DEFAULT_TEST_PATHS)
+
+
+def require_suite_copy_targets(options: UiJobOptions) -> tuple[Path, list[str]]:
+    """真实执行的前置校验：副本可用 + 目标在副本边界内（UI 与 joint 共用）。
+
+    返回 (副本绝对路径, 相对目标)；任一不满足抛 SuiteCopyError，调用方据此阻断，
+    绝不回退 server/ 或可变来源目录。
+    """
+    root = resolve_suite_root(options)
+    return root, _suite_targets(root, list(options.test_paths))
 
 
 def _vendor_unit_tests(vendor_dir: Path | None) -> Path | None:
@@ -228,6 +324,15 @@ def run_ui_job(options: UiJobOptions, context: RunnerContext) -> UiJobResult:
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     serial = options.serial or "fake-serial"
 
+    # 0) 真实执行先确认固定副本可用（fake 模式不跑 pytest，保留其兜底路径）。
+    #    放在抢设备锁之前：副本不可用是平台侧事实，不该先占设备再失败。
+    if not fake_enabled(options.fake):
+        try:
+            require_suite_copy_targets(options)
+        except SuiteCopyError as exc:
+            emit_text(exc.code, detail=exc.message)
+            return UiJobResult(exit_code=3, reason=exc.code, message=exc.message)
+
     # 1) 本地锁（在碰设备之前）
     context.set_stage("lease", 10, stage=1)
     emit_stage("lease", 10)
@@ -306,13 +411,35 @@ def _run_pytest(
     artifacts_dir: Path,
     serial: str,
 ) -> UiJobResult:
+    # 产物、junit、env 全部用绝对路径：pytest 的 cwd 是固定副本，相对路径会
+    # 落进副本里（污染摘要，也让报告找不到产物）。
+    artifacts_dir = Path(artifacts_dir).resolve()
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    if options.suite_root is not None:
+        try:
+            suite_root, targets = require_suite_copy_targets(options)
+        except SuiteCopyError as exc:
+            emit_text(exc.code, detail=exc.message)
+            return UiJobResult(exit_code=3, reason=exc.code, message=exc.message)
+    else:  # 直接调用（测试替身/fake 兜底）：真实派发已在 run_ui_job 阻断
+        suite_root, targets = None, resolve_test_paths(options)
     argv = build_pytest_command(
         serial=serial,
         artifacts_dir=artifacts_dir,
-        test_paths=resolve_test_paths(options),
+        test_paths=targets,
         revision_id=options.revision_id,
     )
-    emit_stage("pytest", 40, argv=argv)
+    # 追溯：本次执行实际用的套件版本、树摘要与相对目标。
+    emit_text(
+        "suite_copy",
+        suite_version_id=options.suite_version_id or "",
+        tree_sha256=options.suite_sha256 or "",
+        suite_root=str(suite_root) if suite_root else "",
+        targets=list(targets),
+    )
+    emit_stage(
+        "pytest", 40, argv=argv, cwd=str(suite_root) if suite_root else ""
+    )
     problems = _plugin_problems()
     if problems:
         emit_text("plugin_unavailable", detail=problems)
@@ -325,9 +452,13 @@ def _run_pytest(
         "serial": serial, "artifacts_dir": str(artifacts_dir),
         "app_package": options.app_package, "app_activity": options.app_activity,
         "revision_id": options.revision_id,
+        "suite_root": str(suite_root) if suite_root else "",
+        "suite_version_id": options.suite_version_id or "",
+        "suite_tree_sha256": options.suite_sha256 or "",
     })
     process = subprocess.Popen(
         argv,
+        cwd=str(suite_root) if suite_root else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         env=env,
@@ -425,13 +556,19 @@ def _plugin_problems() -> str:
 
 
 __all__ = [
+    "COPY_ROOT_TARGET",
     "DEFAULT_TEST_PATHS",
     "EVIDENCE_DIR",
     "RUN_MANIFEST",
+    "SUITE_PATH_OUT_OF_BOUNDS",
+    "SUITE_ROOT_UNAVAILABLE",
+    "SuiteCopyError",
     "UiJobOptions",
     "UiJobResult",
     "build_pytest_command",
     "build_pytest_env",
+    "require_suite_copy_targets",
+    "resolve_suite_root",
     "resolve_test_paths",
     "run_ui_job",
 ]

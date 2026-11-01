@@ -61,6 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
         job.add_argument("--timeout", type=float, default=1800.0)
         job.add_argument("--ui-timeout", type=float, default=0.0)
         job.add_argument("--test-path", action="append", default=[])
+        # 固定代码副本（dispatcher 复验后写入 spawn 配置）：pytest 的 cwd 与
+        # 目标解析边界都来自它；缺失即阻断，不退回 server/ 或来源目录。
+        job.add_argument("--suite-root", default="")
+        job.add_argument("--suite-version", default="")
+        job.add_argument("--suite-sha256", default="")
         job.add_argument("--app-package", default="")
         job.add_argument("--app-activity", default="")
         job.add_argument("--perf-config", type=_json_object, default={})
@@ -96,6 +101,9 @@ def _job_options(args: argparse.Namespace):
         app_package=args.app_package,
         app_activity=args.app_activity,
         perf=args.perf_config,
+        suite_root=Path(args.suite_root) if args.suite_root else None,
+        suite_version_id=args.suite_version or None,
+        suite_sha256=args.suite_sha256 or None,
     )
 
 

@@ -34,8 +34,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
@@ -47,6 +46,9 @@ from ..domain import runs as runs_mod
 from ..domain.templates import pinned_templates, verify_template_pins
 from ..integrations import leases as local_leases
 from ..runner import dispatch_runner
+
+if TYPE_CHECKING:  # 只为注解；运行时保持 services 的懒导入
+    from ..services.suites import ExecutionCopy
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +107,12 @@ async def _resolve_config(session, run: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-async def _prepare_suite_copy(session, revision_id: str) -> Path:
-    """解析修订引用的套件版本并复验固定代码副本，返回副本根目录。"""
+async def _prepare_suite_copy(session, revision_id: str) -> ExecutionCopy:
+    """解析修订引用的套件版本并复验固定代码副本，返回 ExecutionCopy。
+
+    返回结构里带 suite_version_id 与 tree_sha256，避免调用方二次查询或自己
+    重算摘要（摘要真源只有 discover 一处）。
+    """
     if not revision_id:
         raise ValueError("修订缺失，无法定位套件版本")
     row = (
@@ -282,9 +288,11 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
             config = await _resolve_config(session, run)
             # 工单 24：派发前把执行目录固定到套件版本的代码副本——缺失/损坏
             # 阻断派发（errored），绝不回退到可变来源目录（工单 05 的接线缺口）。
+            # 工单 01：同时把套件版本 id 与树摘要交给 runner，供事件/报告追溯
+            # 本次实际执行的版本，并让 runner 以副本为 pytest 工作目录。
             try:
-                config["suite_root"] = str(
-                    await _prepare_suite_copy(session, str(run.get("revision_id") or ""))
+                execution_copy = await _prepare_suite_copy(
+                    session, str(run.get("revision_id") or "")
                 )
             except Exception as exc:  # noqa: BLE001 - ApiError 与意外失败都阻断
                 await leases_mod.release_lease(session, run_id=rid, reason="execution_copy_missing")
@@ -297,6 +305,9 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
                 )
                 logger.warning("run %s 固定副本不可用 -> errored(execution_copy_missing)", rid)
                 return DispatchOutcome(run_id=rid, ok=False, reason="execution_copy_missing")
+            config["suite_root"] = str(execution_copy.root)
+            config["suite_version_id"] = execution_copy.suite_version_id
+            config["suite_sha256"] = execution_copy.tree_sha256
             lease_details = lease.as_details()
             # acquire_lease 已在同一事务内绑定资源，随后迁移状态。
             await runs_mod.transition(

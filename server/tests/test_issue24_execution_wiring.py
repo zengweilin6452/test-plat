@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from pathlib import Path
 
 import pytest
 from app.main import app  # noqa: F401
@@ -31,9 +32,17 @@ from tests._p3_common import sync_engine as sync_engine
 pytestmark = requires_db
 
 
+@pytest.fixture(autouse=True)
+def isolated_code_copies(tmp_path, monkeypatch):
+    """把固定副本根收敛到用例临时目录：不往共享 data/ 里堆副本。"""
+    root = tmp_path / "code-copies"
+    root.mkdir()
+    monkeypatch.setenv("TESTDOCK_CODE_COPIES_DIR", str(root))
+    yield root
+
+
 @pytest.fixture
 def spawns(monkeypatch):
-    from app.config import settings as app_settings
 
     reset_db_engine(TEST_DB)
     calls = []
@@ -227,5 +236,78 @@ def test_identity_pending_does_not_block_dispatch(client, project, make_run, syn
     run_id = make_run(state="queued", request_key=str(uuid.uuid4()))
     outcome = asyncio.run(dispatch_one(run_id=run_id))
     assert outcome.ok is True, outcome.reason
+
+
+# --------------------------------------------------------------------------- #
+# 工单 01：派发把固定副本根 + 套件版本身份交给执行器
+# --------------------------------------------------------------------------- #
+def _suite_code_copy(conn, suite_version_id: str) -> dict:
+    row = conn.execute(
+        text(
+            "SELECT manifest->'code_copy' FROM suite_versions WHERE id = CAST(:sid AS uuid)"
+        ),
+        {"sid": suite_version_id},
+    ).scalar_one()
+    return row if isinstance(row, dict) else json.loads(row)
+
+
+def test_spawn_config_carries_suite_version_and_tree_digest(
+    client, project, make_run, spawns, sync_engine
+):
+    """派发路径提供 suite_root + suite_version_id + code_copy.tree_sha256。"""
+    import asyncio
+
+    from app.integrations import discover
+
+    from app.scheduler.dispatcher import dispatch_one
+
+    with sync_engine.connect() as conn:
+        code_copy = _suite_code_copy(conn, project["suite_version_id"])
+    run_id = make_run(state="queued", request_key=str(uuid.uuid4()))
+    outcome = asyncio.run(dispatch_one(run_id=run_id))
+    assert outcome.ok is True, outcome.reason
+    config = spawns[0]["config"]
+    assert config["suite_root"], "执行配置必须指向固定副本"
+    assert Path(config["suite_root"]) == discover.verify_code_copy(code_copy)
+    assert config["suite_version_id"] == project["suite_version_id"]
+    assert config["suite_sha256"] == code_copy["tree_sha256"]
+
+
+def test_dispatch_blocked_when_copy_content_tampered(
+    client, project, make_run, spawns, sync_engine
+):
+    """副本内容与树摘要不符：派发前阻断 (errored)，不 spawn、不回退来源目录。"""
+    import asyncio
+
+    from app.integrations import discover
+
+    from app.scheduler.dispatcher import dispatch_one
+
+    with sync_engine.connect() as conn:
+        code_copy = _suite_code_copy(conn, project["suite_version_id"])
+    copy_root = discover.verify_code_copy(code_copy)
+    (copy_root / "tests" / "test_smoke.py").write_text(
+        "# tampered after publish\n", encoding="utf-8"
+    )
+
+    run_id = make_run(state="queued", request_key=str(uuid.uuid4()))
+    outcome = asyncio.run(dispatch_one(run_id=run_id))
+    assert outcome.ok is False
+    assert outcome.reason == "execution_copy_missing"
+    assert spawns == [], "副本摘要不符不得派发"
+    with sync_engine.connect() as conn:
+        state = conn.execute(
+            text("SELECT state FROM test_runs WHERE id = CAST(:id AS uuid)"),
+            {"id": run_id},
+        ).scalar_one()
+        live = conn.execute(
+            text(
+                "SELECT count(*) FROM resource_leases"
+                " WHERE released_at IS NULL AND project_id = CAST(:pid AS uuid)"
+            ),
+            {"pid": project["project_id"]},
+        ).scalar_one()
+    assert state == "errored"
+    assert live == 0
 
 

@@ -80,7 +80,9 @@ def _prepare(version_id: str) -> Path:
 
     async def _inner() -> Path:
         async with async_session() as session:
-            return await prepare_execution_copy(session, version_id)
+            execution = await prepare_execution_copy(session, version_id)
+            # 工单 01 起返回结构化结果（副本根 + 版本身份），这里只关心副本根
+            return execution.root
 
     return asyncio.run(_inner())
 

@@ -27,7 +27,12 @@ from .artifacts import collect_layout, write_report_json
 from .env import RunnerContext, ensure_vendor_on_path, fake_enabled
 from .protocol import emit_stage, emit_text
 from . import EXIT_INFRA_ERROR
-from .ui_job import UiJobOptions, run_ui_job
+from .ui_job import (
+    SuiteCopyError,
+    UiJobOptions,
+    require_suite_copy_targets,
+    run_ui_job,
+)
 
 #: D11：UI 执行上限默认 600 秒，允许 10–3600 秒，由任务修订固定
 DEFAULT_UI_TIMEOUT_S = 600
@@ -95,6 +100,26 @@ def _start_perf_collect(options: UiJobOptions):
 def run_joint_job(options: UiJobOptions, context: RunnerContext) -> JointJobResult:
     """采集包围 UI：先开采集，再跑一次 UI，UI 一返回立刻停采并归档。"""
     fake = fake_enabled(options.fake)
+    # 固定副本与目标边界先于采集校验：副本不可用/目标越界时不该先占设备与采集。
+    # 与 UI 作业共用同一套解析（require_suite_copy_targets），不出现第二套口径。
+    if not fake:
+        try:
+            require_suite_copy_targets(options)
+        except SuiteCopyError as exc:
+            emit_text(exc.code, detail=exc.message)
+            return JointJobResult(
+                exit_code=EXIT_INFRA_ERROR,
+                reason=exc.code,
+                message=exc.message,
+                components=[
+                    {"kind": "ui", "state": "errored", "reason_code": exc.code},
+                    {
+                        "kind": "performance",
+                        "state": "cancelled",
+                        "reason_code": "ui_not_started",
+                    },
+                ],
+            )
     emit_stage("perf_collect_start", 10, stage=1)
     collect_started_at = _now()
 
