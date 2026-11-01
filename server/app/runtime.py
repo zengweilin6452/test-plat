@@ -660,7 +660,7 @@ def _report_json_payload(run_id: str) -> dict[str, Any]:
             with engine.connect() as conn:
                 rows = conn.execute(
                     text(
-                        "SELECT kind, storage_key FROM artifacts "
+                        "SELECT kind, storage_key, logical_key FROM artifacts "
                         " WHERE run_id = :run_id "
                         "   AND (kind = :report_kind OR logical_key LIKE :pattern) "
                         " ORDER BY logical_key"
@@ -676,14 +676,24 @@ def _report_json_payload(run_id: str) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 - 报告是只读视图，取不到就降级为空
         return {}
 
-    report_path = None
+    report_candidates: list[tuple[str, Any]] = []
     junit_path = None
     for row in rows:
         key = str(row["storage_key"])
+        logical = str(row["logical_key"] or "")
         if junit_path is None and key.endswith("junit.xml"):
             junit_path = artifacts_mod.resolve_storage_path(key, settings.artifacts_dir)
-        elif report_path is None and key.endswith("report.json"):
-            report_path = artifacts_mod.resolve_storage_path(key, settings.artifacts_dir)
+        elif key.endswith("report.json"):
+            report_candidates.append(
+                (logical, artifacts_mod.resolve_storage_path(key, settings.artifacts_dir))
+            )
+
+    # joint 真机执行会同时登记 run 级 report.json 与 perf-runs/<run>/report.json
+    # （vendor 报告）。按 logical_key 排序取第一个会选到嵌套报告，把 run 级报告
+    # 里的 collectWindow 挤掉。run 级（logical_key == "report.json"）必须优先，
+    # 其余按路径长短回退——短路径更接近 run 级。
+    report_candidates.sort(key=lambda item: (item[0] != "report.json", len(item[0]), item[0]))
+    report_path = report_candidates[0][1] if report_candidates else None
 
     payload: dict[str, Any] = {}
     if report_path is not None and report_path.is_file():

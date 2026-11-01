@@ -715,6 +715,61 @@ def test_report_exposes_collect_window(client, project, sync_engine, tmp_path, m
     )
 
 
+def test_report_prefers_run_level_report_over_nested_perf_report(
+    client, project, sync_engine, tmp_path, monkeypatch
+):
+    """真机缺陷回归：性能采集真正启动后会多出 perf-runs/<run>/report.json。
+
+    平台按 logical_key 排序取"第一个 report.json"，嵌套的 vendor 报告会抢先，
+    把 run 级 report.json 里的 collectWindow 挤掉。run 级报告必须优先。
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    run_id = _joint_run(sync_engine, project)
+    artifacts_dir = settings.artifacts_dir / run_id
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    window = {
+        "collect_started_at": "2026-01-01T00:00:00+00:00",
+        "collect_stopped_at": "2026-01-01T00:02:10+00:00",
+        "ui": {
+            "started_at": "2026-01-01T00:00:05+00:00",
+            "ended_at": "2026-01-01T00:02:00+00:00",
+            "timeout_s": 120,
+        },
+    }
+    (artifacts_dir / "report.json").write_text(
+        json.dumps(
+            {
+                "runId": run_id,
+                "metricsSummary": {"cpu_process_pct": {"median": 1.5}},
+                "collectWindow": window,
+            }
+        ),
+        encoding="utf-8",
+    )
+    nested = artifacts_dir / "perf-runs" / run_id
+    nested.mkdir(parents=True, exist_ok=True)
+    (nested / "report.json").write_text(
+        json.dumps({"runId": run_id, "metricsSummary": {"cpu_process_pct": {"median": 9.9}}}),
+        encoding="utf-8",
+    )
+    _complete(
+        client,
+        run_id,
+        components=[
+            {"kind": "ui", "state": "completed", "outcome": "passed"},
+            {"kind": "performance", "state": "completed"},
+        ],
+        junit={"tests": 3, "failures": 0, "errors": 0, "skipped": 0},
+        artifacts_dir=artifacts_dir,
+    )
+
+    report = client.get(f"/api/v1/runs/{run_id}/report").json()
+    assert report["collectWindow"] == window, "run 级报告里的采集窗口不能被嵌套报告挤掉"
+    assert report["metricsSummary"]["cpu_process_pct"]["median"] == 1.5
+
+
 def test_report_collect_window_is_null_when_absent(client, project, sync_engine):
     run_id = _joint_run(sync_engine, project)
     _complete(
