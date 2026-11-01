@@ -40,6 +40,7 @@ import {
   createDebugSession,
   createTemplate,
   debugGestureWsPath,
+  debugVideoWsPath,
   fetchDebugSession,
   fetchSnapshotTree,
   fetchTemplates,
@@ -58,6 +59,7 @@ import { Notice } from './Notice'
 import { useToast } from './Toast'
 import { DASH } from '../lib/fmt'
 import { Dialog } from './Dialog'
+import { choosePreviewTransport, createH264Preview, type H264PreviewHandle } from '../lib/h264Preview'
 
 export interface DebugTarget {
   /** 执行资源 serial（adb serial 或浏览器标识） */
@@ -394,6 +396,11 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
    *  会话任一变化后 key 不匹配即视为未验证，必须重新验证。 */
   const [cropVerification, setCropVerification] = useState<CropVerification | null>(null)
 
+  /** H.264 预览优先；WebCodecs 缺失/视频信道失败时回退 JPEG。 */
+  const [previewMode, setPreviewMode] = useState<'h264' | 'jpeg'>('h264')
+  const [previewNote, setPreviewNote] = useState<string | null>(null)
+  const [previewFps, setPreviewFps] = useState<number | null>(null)
+
   /** 直接操控：控制权在服务端，前端只反映 enabled；手势 WS 每次手势一条。 */
   const [controlEnabled, setControlEnabled] = useState(false)
   const [controlPending, setControlPending] = useState(false)
@@ -411,6 +418,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   const wsRetriesRef = useRef(0)
   /** frozen 的 ref 镜像：WS onmessage 闭包不随 frozen 重建（重建会断流重连） */
   const frozenRef = useRef(false)
+  const h264PlayerRef = useRef<H264PreviewHandle | null>(null)
+  const previewFrameCountRef = useRef(0)
   const gestureWsRef = useRef<WebSocket | null>(null)
   const gestureQueueRef = useRef<string[]>([])
   const gestureSeqRef = useRef(0)
@@ -474,6 +483,12 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     setNewLogical('')
     setTemplateError(null)
     setCropVerification(null)
+    h264PlayerRef.current?.close()
+    h264PlayerRef.current = null
+    setPreviewMode('h264')
+    setPreviewNote(null)
+    setPreviewFps(null)
+    previewFrameCountRef.current = 0
     closeGestureSocket()
     setControlEnabled(false)
     setControlPending(false)
@@ -591,7 +606,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
 
   /** WS 建立：vendor 下发 JSON 帧（jpeg_base64），解析后画到 canvas */
   useEffect(() => {
-    if (!open || !session) return
+    if (!open || !session || previewMode !== 'jpeg') return
     // 只依赖 ws_path 字符串：detailQuery.data 每次轮询都是新对象，直接依赖它
     // 会在 refetch 时 cleanup 掉已连好的 socket。
     const path = detailQuery.data?.ws_path ?? null
@@ -625,6 +640,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         drawFrame(canvasRef.current, message.jpeg_base64, (size) => {
           setFrameSize((prev) => (prev && prev.w === size.w && prev.h === size.h ? prev : size))
         })
+        previewFrameCountRef.current += 1
         return
       }
       if (kind === 'status') {
@@ -678,7 +694,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         // 忽略
       }
     }
-  }, [open, session, detailQuery.data?.ws_path, wsAttempt])
+  }, [open, session, detailQuery.data?.ws_path, wsAttempt, previewMode])
 
   /** 卸载兜底：组件销毁（页面切换）也要关会话 */
   useEffect(() => {
@@ -751,6 +767,66 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   /** 会话必须 active 才能碰 vendor：opening 期间 /templates 一律
    * `debug_session_not_active`，提前请求只会在界面上挂一条红字。 */
   const sessionActive = detailQuery.data?.state === 'active'
+
+  // ------------------------------------------------------------ 预览传输（H.264 → JPEG 回退）
+  useEffect(() => {
+    if (!open || !session) return
+    const choice = choosePreviewTransport(typeof VideoDecoder !== 'undefined')
+    if (choice.mode === 'jpeg' && previewMode !== 'jpeg') {
+      setPreviewMode('jpeg')
+      setPreviewNote(choice.reason)
+    }
+  }, [open, session, previewMode])
+
+  useEffect(() => {
+    if (!open || !session || previewMode !== 'h264' || !sessionActive) return
+    const id = sessionRef.current
+    if (id === null) return
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const player = createH264Preview({
+      canvas: canvasRef.current,
+      wsUrl: proto + '//' + window.location.host + debugVideoWsPath(id),
+      isPaused: () => frozenRef.current,
+      onState: (state) => {
+        if (state === 'open') {
+          setWsStatus('open')
+          setWsNotice(null)
+        } else if (state === 'connecting') {
+          setWsStatus('connecting')
+        } else {
+          setWsStatus('closed')
+        }
+      },
+      onSession: (size) => {
+        setFrameSize((prev) => (prev && prev.w === size.w && prev.h === size.h ? prev : size))
+      },
+      onFrame: (size) => {
+        previewFrameCountRef.current += 1
+        setFrameSize((prev) => (prev && prev.w === size.w && prev.h === size.h ? prev : size))
+      },
+      onError: (code, message) => {
+        setPreviewNote('H.264 不可用，已回退 JPEG（' + code + '：' + message + '）')
+        setPreviewMode('jpeg')
+        setPreviewFps(null)
+        setWsStatus('closed')
+      },
+    })
+    h264PlayerRef.current = player
+    player.open()
+    return () => {
+      player.close()
+      if (h264PlayerRef.current === player) h264PlayerRef.current = null
+    }
+  }, [open, session, previewMode, sessionActive])
+
+  useEffect(() => {
+    if (!open || previewMode !== 'h264') return
+    const timer = window.setInterval(() => {
+      setPreviewFps(previewFrameCountRef.current)
+      previewFrameCountRef.current = 0
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [open, previewMode])
 
   // ------------------------------------------------------------ 直接操控
   const controlState = useMemo(
@@ -1303,6 +1379,11 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
             <Notice tone="amber" title="直接操控">{controlError}</Notice>
           </div>
         ) : null}
+        {previewMode === 'jpeg' && previewNote ? (
+          <div className="mb">
+            <Notice tone="amber" title="预览已回退 JPEG">{previewNote}</Notice>
+          </div>
+        ) : null}
         {!target && !createMutation.isPending ? (
           <div className="mb">
             <Notice tone="amber" title="没有可调试设备">
@@ -1322,7 +1403,15 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
           <section className="phone-panel">
             <div className="between">
               <Badge tone={frozen ? 'amber' : 'blue'} dot>{frozen ? '冻结快照' : '实时画面'}</Badge>
-              <span className="small muted">{wsText}</span>
+              <span className="small muted">
+                {previewMode === 'h264'
+                  ? wsStatus === 'open'
+                    ? 'H.264 · ' + (previewFps ?? 0) + 'fps'
+                    : 'H.264 连接中'
+                  : previewNote
+                    ? 'JPEG 回退'
+                    : wsText}
+              </span>
             </div>
             <div
               className={'debug-stage phone-stage' + (controlEnabled ? ' control-mode' : '')}
