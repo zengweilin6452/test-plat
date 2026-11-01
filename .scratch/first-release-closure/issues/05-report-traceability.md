@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## 现状指针
 
@@ -60,3 +60,7 @@ npx tsc -p tsconfig.json --noEmit
 - 报告字段只追加，不破坏既有前端消费。
 
 ## Comments
+
+- 2026-11-01 实现完成（`974bc2b`，合并 `5d42a3d`）。①报告新增 `suite {id, version, source_ref, source_commit, code_copy{tree_sha256,file_count,root_rel}}` 与 `revision.suite_version_id`，只读 `suite_versions` 不可变行，缺失为 null；导出与页面同源。②证据三态改为读取时复核：`expires_at` 过期→expired，磁盘缺文件/storage_key 不可解析→missing，否则 available；仅 available 给 `download_url`，并附 `unavailable_reason`。③新增 `TESTDOCK_ARTIFACT_RETENTION_DAYS`（默认 0 = 未启用保留期；启用后登记写 `expires_at`，expired 真实可达）。④失败运行报告可定位截图/日志/断言（junit.xml 可下载），产物被清理时说明原因。⑤前端 ReportDrawer 展示构建/修订/套件/副本摘要与证据三态；缺失态如实。
+- 证据：新增 `test_issue05_report_traceability.py` 11 例 + 既有报告检索/证据/导入收敛，后端定向 84 passed；前端 30 passed；tsc 无错；契约测试通过（`/report` 未建模，无需刷新 openapi）。
+- 遗留：默认未配置保留期时 expired 不会自然出现（需宿主配置天数或产物被清理）；保留期默认值是否开启待工单 10 按部署口径记录。
