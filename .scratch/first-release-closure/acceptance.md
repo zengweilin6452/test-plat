@@ -407,3 +407,43 @@
 - 客户真实套件经 TestDock 真机执行全绿（9 passed / 3 skipped / 0 failed），平台 vendor 已同步并逐字节校验；平台全量 564 项通过。
 - 原 §5/§8.5/§9.3 的“客户套件全绿、像素核对、页面↔HEAD 数据”三项均已关闭；其余边界（多用户/跨机器/对象存储、保留期 `expired` 态、多 worker 凭证共享、客户仓库自身代码未改）仍按 spec 或约束保留。
 - 收尾：验收用 `:8010` 已停止（本轮复跑后），`8000/5173` 未动；租约 0；设备在线；未 push。
+
+## 11. Phase 1 直接操控交付记录（2026-11-01 晚）
+
+在调试工作区增加真机直接操控：点击/拖动/长按画面与 Back/Home，复用 mobile-auto 的单操作者控制权与连续手势 WS。工作分支 `feat/debug-direct-control`，未 push。
+
+### 11.1 实现
+
+| 层 | 内容 |
+| --- | --- |
+| 平台 API | `POST /debug-sessions/{id}/control`（领取/释放）、`POST .../control/heartbeat`、`POST .../input/key`；token 只存服务端 `_CONTROL_TOKENS`，响应剔除；409 `control-busy` / `control_not_enabled` / `control_expired` |
+| 手势代理 | `WS /api/v1/ws/debug/{id}/gesture`：平台向 vendor 发 `{token}` hello，带严格 `Origin: http://127.0.0.1:<viewer_port>`，双向透传 `start/move/end`；每会话最多一条 |
+| 前端 | 工具栏「直接操控」+ 确认 Dialog + 「操控中」Badge；pointer 捕获、归一化坐标、20Hz MOVE 节流、触点提示、返回/Home；冻结/图像模式/会话失效自动退出；心跳 2s |
+| 关闭 | `_close_session` 尽力释放 vendor 控制权并清 token/手势计数 |
+| 文档/契约 | api-design §2.7 新端点与语义；OpenAPI 基线重生成；错误码登记 |
+
+### 11.2 自动化验证
+
+- 后端：`test_debug_control.py` **10 passed**（领取/剥离 token、他人持有 409、续期、TTL 失效映射、按键门控、关闭释放、手势 WS 的 Origin/hello/透传、无控制权 4403）。
+- 定向：控制 + P5 调试 + 模板/框选 + 契约 **66 passed**；契约与错误码基线重新生成后 24 passed。
+- 前端：`tsc --noEmit` 通过；`npm test` **52 passed**（新增坐标归一化、可用性原因、手势帧形状、20Hz 节流）；`npm run build` 成功。
+- 新增错误码：`control_not_enabled`、`control_expired`、`viewer_bad_response`。
+
+### 11.3 真机验证（749622c9）
+
+| 项 | 结果 |
+| --- | --- |
+| 控制权 | 平台领取 → 响应无 token；第二个客户端直接向 vendor 领取 → 409 control-busy |
+| 手势 | 平台 WS 透传 start/end → vendor `ack down` / `ack end` / `ended`；UI 点在「我的」标签后设备树出现「学员/学习统计/学习时长」 |
+| 按键 | UI Home → `topResumedActivity` 变为 `com.miui.home/.launcher.Launcher` |
+| 收尾 | 退出操控 + 关闭会话 → active leases 0、active debug sessions 0、无 runner 进程 |
+
+证据：`.scratch/first-release-closure/real-verify/evidence/direct-control-2026-11-01.json`。
+
+### 11.4 边界
+
+1. **后台标签页心跳节流**：浏览器切后台时 2s 心跳可能被节流，vendor 5s TTL 到期即撤权；UI 会显示 `control_expired` 并要求重新启用（不静默续权）。当前不引入服务端自动续权：那会让“单操作者/5s 失联释放”的 vendor 语义失效。
+2. **多 worker**：`_CONTROL_TOKENS`/手势计数在进程内，与 `_READY_PORTS`、框选凭证同边界；多 worker 部署需共享存储。
+3. **H.264 预览**：按已批准计划作为 Phase 2，不在本节范围；不改变控制语义。
+4. 未做文字输入、多指/捏合、录制回放（vendor 当前未提供对等端点）。
+5. 最终全量回归结果见 §11.5（跑完后补）。

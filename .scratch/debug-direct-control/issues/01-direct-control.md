@@ -1,0 +1,16 @@
+# 01: 调试页直接操控（Phase 1）
+
+**Status:** resolved
+
+## What to build
+在 UI 自动化 → 设备调试工作区增加直接操控：点击、拖动、长按真机画面，并支持 Back/Home。复用 mobile-auto 的单操作者控制权（5s TTL）与 `/api/v1/input/gesture`；平台代持 token，浏览器不可见。默认关闭，启用前确认；冻结/图像模板模式/会话非 active 时不可用。
+
+## 验收
+- 控制权：领取/心跳/释放；他人持有 409 control-busy；TTL 后 control_expired；token 不离开服务端。
+- 手势：平台 WS 代理 vendor，严格 Origin + token hello；每会话一条；坐标归一化。
+- UI：按钮/确认/状态；pointer 映射；Back/Home；错误有原因；关闭/冻结释放。
+- 真机：749622c9 点击「我的」切页、Home 回桌面、单操作者 409、关闭后租约 0。
+
+## Comments
+- 2026-11-01 交付：`feat/debug-direct-control`。后端 10 项控制测试、前端 52 项、`tsc`/build 通过；真机验收记录见 `acceptance.md §11`。
+- 边界：浏览器后台标签页心跳被节流，超过 vendor 5s TTL 会如实失效并要求重新启用；H.264 预览按计划留作 Phase 2。

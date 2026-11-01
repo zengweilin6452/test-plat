@@ -275,6 +275,10 @@ POST   /api/v1/debug-sessions { "serial": "7f3a", "purpose": "定位排查" }
 GET    /api/v1/debug-sessions/{id}     # 含 base_url 与 ws_path
 DELETE /api/v1/debug-sessions/{id}
 WS     /api/v1/ws/debug/{id}           # 代理 vendor /api/v1/preview
+POST   /api/v1/debug-sessions/{id}/control            # { enabled } 领取/释放真机控制权
+POST   /api/v1/debug-sessions/{id}/control/heartbeat  # 2s 续期；失效 -> 409 control_expired
+POST   /api/v1/debug-sessions/{id}/input/key          # { name: back|home|... } 直接操控按键
+WS     /api/v1/ws/debug/{id}/gesture                  # 代理 vendor /api/v1/input/gesture
 POST   /api/v1/debug-sessions/{id}/snapshots
 GET    /api/v1/debug-sessions/{id}/snapshots/{nid}/image
 POST   /api/v1/locators/validate       # { snapshot_id, locator } -> matches[]
@@ -287,6 +291,8 @@ POST   /api/v1/templates/validate      # IMAGE 目标验证 -> { matches[], scor
 ```
 
 **登记模板必须带验证凭证**：`POST /templates` 与 `PUT /templates/{logical}` 除 `snapshot_id/region/logical` 外，**必须**同时传 `threshold`（0.10–1.00）与 `validate-crop` 刚发放的 `verification`。凭证绑定「会话 + 验证时新捕获的快照 + 新画面里的命中框 + 阈值」，一次性、TTL 120s：缺凭证、复用、过期，或会话/快照/框选/阈值任一变化都返回 409 `crop_not_verified` 且**不触达 vendor**（前端的按钮 disabled 只是体验，服务端独立拒绝未验证登记）。凭证只证明「发凭证那一刻画面上唯一命中」，所以登记必须用验证返回的新快照与命中框，不能用框选时的旧快照。调试会话关闭（客户端 DELETE 或 spawn 失败）时该会话的凭证立即作废；无关闭事件的会话由 TTL 120s 兜底。
+
+**直接操控（Phase 1）**：控制权由平台代浏览器向 vendor 领取，`token` 只在服务端内存（与 `_READY_PORTS` 同口径），响应永不包含 token；浏览器只看到 `enabled/ttl_seconds/note`。vendor 是单操作者：他人持有时平台透传 409 `control-busy`，不抢占；TTL 5s 无心跳自动撤权，前端 2s 心跳续期，失效时平台清 token 并回 409 `control_expired`。手势必须走 `WS /ws/debug/{id}/gesture`（每会话一条）：平台先向 vendor 发送 `{token}` hello（upstream 带严格 `Origin: http://127.0.0.1:<viewer_port>`），再双向透传 `start/move/end`；浏览器坐标统一归一化到 `[0,1]`，不依赖帧尺寸。`input/key` 仅放行 back/home/enter/search/delete/recent。浏览器切到后台时心跳可能被节流，超过 vendor TTL 会如实失效并提示重新启用，不静默续权。
 
 `snapshot_id` 只接受 vendor 真实 id 空间（`uuid4().hex[:16]`，16 位小写十六进制）：它会被拼进上游 `/api/v1/snapshots/{id}/image|tree`，路径穿越、查询串或任意文本一律 400 `validation_error`，不触达 vendor。
 

@@ -1,0 +1,24 @@
+{
+  "date": "2026-11-01",
+  "backend": "http://127.0.0.1:8010",
+  "database": "testdock_real",
+  "preview": "http://127.0.0.1:5174",
+  "device": "749622c9",
+  "sessions": {
+    "api_acceptance": "ba656622-fd93-4d67-8821-f95c3c1c78ae",
+    "ui_acceptance": "3ab94655-c0d8-433b-a2c5-ba71e592bc11"
+  },
+  "verified": [
+    "平台领取控制权后 token 不出现在响应；vendor 第二操作者领取返回 409 control-busy",
+    "平台手势 WS 透传 start/end，vendor ack down/end 并 ended",
+    "UI 直接操控：确认后出现「操控中」与返回/Home 按钮",
+    "UI 点击「我的」后设备树出现 学员/学习统计/学习时长（页面真实切换）",
+    "UI 点击 Home 后 topResumedActivity 变为 com.miui.home/.launcher.Launcher",
+    "退出操控与关闭会话后 active leases=0、active debug sessions=0"
+  ],
+  "boundaries": [
+    "浏览器后台标签页会节流 2s 心跳；超过 vendor 5s TTL 后控制权失效，UI 显示 control_expired 并要求重新启用",
+    "控制 token 存平台进程内（与 _READY_PORTS 同口径）；多 worker 部署需共享存储",
+    "H.264 预览不在 Phase 1；见 acceptance.md §11"
+  ]
+}
