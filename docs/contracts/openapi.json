@@ -1760,6 +1760,31 @@
         }
       }
     },
+    "/api/v1/template-library": {
+      "get": {
+        "parameters": [],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Template Library Api V1 Template Library Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
     "/api/v1/templates": {
       "get": {
         "parameters": [
@@ -1813,6 +1838,33 @@
       }
     },
     "/api/v1/templates/validate": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/templates/validate-crop": {
       "post": {
         "parameters": [
           {
@@ -3299,6 +3351,17 @@
     "SuiteSourcesOut": {
       "additionalProperties": false,
       "properties": {
+        "hint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Hint"
+        },
         "items": {
           "items": {
             "$ref": "#/components/schemas/SuiteSourceOut"

@@ -36,9 +36,17 @@ router = APIRouter(tags=["suites"])
 
 @router.get("/suite-sources", response_model=SuiteSourcesOut)
 async def list_suite_sources() -> dict[str, Any]:
-    """预配置套件来源：只返回 source_id、显示名与适用类型，不含宿主目录。"""
+    """预配置套件来源：只返回 source_id、显示名与适用类型，不含宿主目录。
+
+    来源为空时额外给一句 `hint`：需要宿主配置来源，页面据此提示，
+    而不是退化成一个可以填任意路径的输入框。
+    """
     items = discover_integration.list_suite_sources()
-    return {"items": items, "total": len(items)}
+    return {
+        "items": items,
+        "total": len(items),
+        "hint": discover_integration.suite_sources_hint(items),
+    }
 
 
 @router.get("/suites")

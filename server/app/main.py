@@ -193,10 +193,22 @@ async def _http_exception_handler(request: Request, exc: StarletteHTTPException)
 async def _validation_error_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    """请求体校验失败也要走信封：把 pydantic 的 errors 原样放进 details。"""
-    errors = exc.errors()
+    """请求体校验失败也要走信封：保留 loc/type/msg，但不回显请求值。
+
+    pydantic 的 errors() 会带上 `input`（原始输入）和 `ctx`（含异常对象/原始值），
+    把它们原样回给浏览器等于把请求体里的任意字符串（可能是宿主绝对路径、
+    token 之类）再抄一遍。这里只留定位与原因，前端据此展示字段与规则即可。
+    """
+    errors = [
+        {
+            "type": str(err.get("type", "")),
+            "loc": [str(part) for part in err.get("loc", ())],
+            "msg": str(err.get("msg", "")),
+        }
+        for err in exc.errors()
+    ]
     summary = "; ".join(
-        f"{'.'.join(str(p) for p in err.get('loc', ()))}: {err.get('msg', '')}" for err in errors
+        f"{'.'.join(err['loc'])}: {err['msg']}" for err in errors
     )
     return JSONResponse(
         status_code=422,

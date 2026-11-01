@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## 现状指针
 
@@ -47,3 +47,7 @@ D:\python312\python.exe -m pytest tests/test_issue05_suite_sources.py tests/test
 - 真机与真实来源的验收由本工单记录为「待用户提供来源」，不得伪造。
 
 ## Comments
+
+- 2026-11-01 实现完成（commit `5ec2416`，合并 `cda1893`）。修复：①空来源 `GET /suite-sources` 增 `hint`（说明需宿主预配置 `TESTDOCK_SUITE_SOURCES`，不含宿主路径）；②`RequestValidationError` 信封只留 `type/loc/msg`，不再回显请求值（含宿主路径），登记/发现入口拒绝路径字段；③页面来源为空/无适用来源时明确提示，不再静默留空下拉；④移除 `manifest.suite_root` 展示，旧版本 `has_code_copy=false` 时明确要求重新发现。
+- 证据：新增 `server/tests/test_issue02_source_lifecycle.py` 3 例（空来源提示无路径、路径字段被拒绝且不回显、collect 失败保留副本不发布版本）；定向回归 `test_issue02_source_lifecycle.py + test_error_contract.py + test_p2_static.py` 22 passed；`web/tests/ui-suites.test.cjs` 4 passed。
+- 附注：`docs/contracts/openapi.json` 因契约基线在本工单前已落后（缺模板库/验框选接口）一并刷新；真实可信来源仍待用户提供，真实来源下的登记/发现验收记入工单 10。

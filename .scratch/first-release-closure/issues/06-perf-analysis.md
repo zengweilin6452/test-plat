@@ -39,6 +39,13 @@ $env:TESTDOCK_TEST_DATABASE_URL="postgresql+psycopg://testdock@127.0.0.1:55432/<
 D:\python312\python.exe -m pytest tests/test_issue12_analysis_selection.py tests/test_issue13_original_freeze.py tests/test_issue14_historical_reanalysis.py tests/test_perf_gate_api.py tests/test_profiles.py -q
 ```
 
+## 已核实缺陷（探索笔记）
+
+- `run_perf_job`（`server/runner_pkg/testdock_runner/debug_job.py:96-102`）只校验 `duration>0`，没有 10–3600 约束；任务修订 readiness（`server/app/domain/task.py:92-168`）也没有校验，与声明式清单规则不一致。
+- 执行只读修订 `config_snapshot.perf`（`runs.py:441-508`、`dispatcher._resolve_config:84-105`），不合并 `suite_versions.manifest.scenario`；两处声明可能漂移。
+- 成功采集返回 `not_tested/gate_policy_missing` 是「判定交给平台」的设计，不要改成 runner 直接出结论。
+- 详细笔记：`C:\Users\williamzeng\AppData\Local\Temp\testdock-frc-notes\06-perf.md`
+
 ## 约束
 
 - 不修改 `vendor/`、不安装依赖、不 push。
