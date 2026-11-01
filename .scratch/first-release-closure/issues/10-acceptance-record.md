@@ -54,3 +54,5 @@
 - 2026-11-01 客户真实套件 + 1440×900（补充）：Beta Academy 客户套件（客户仓库 HEAD `f0d2ce0`，副本见 `.scratch/first-release-closure/beta-academy-suite`，仅新增 `pytest.ini`）经 TestDock 真机执行 RUN-0011：12 用例 7 passed / 3 skipped / 2 failed。失败 1 为平台 vendor 快照 `24a1daa` 缺少 `UpstreamChannel.touch_down`（客户 HEAD 已有，需同步 vendor），失败 2 为套件点击后立即断言 WebView 的时序问题；均未记为客户套件通过。
 - 集成修复：`976b8d5`（mobile-config 写入设备/应用身份）、`6941ab2`（套件自带 mobile_session 时平台插件让位，修复 RUN-0010 的 pytest_error）。
 - 1440×900：九页实现与九页原型同尺寸截图（Edge headless + CDP 设备度量），实测无横向溢出、侧栏 218px、越界元素 0；有意差异见 §9.2。验收记录新增 §9，原像素核对与“页面↔HEAD 同版数据”两项关闭；客户套件全绿仍需 vendor 同步。
+- 2026-11-01 vendor 同步 + 客户套件收口：`mobile_auto` 从 `24a1daa` 同步到 `f0d2ce0`（132 文件，`vendor_sync.py check` OK：349 文件/42.6 MiB；mobile_perf 未动）；vendor 自身 663 项 = 662 passed / 1 skipped（GBK 解码问题用 PYTHONIOENCODING=utf-8 消除），平台全量 564 项通过。宿主副本为 `test_settings_webview.py` 增加 WebView 等待（客户仓库未改，PROVENANCE/FILES.sha256 已更新）。
+- 客户套件 RUN-0012：12 用例 9 passed / 3 skipped / 0 failed，completed/passed；套件 v2 树 `fe99dd34…`，知识库滚动与 WebView 均通过。§9.1 的 2 个失败已关闭，历史证据保留。

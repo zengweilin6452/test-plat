@@ -31,6 +31,11 @@ async def test_feedback_opens_webview(app):
     assert await app.wait_for(SETTINGS_FEEDBACK, timeout=6), "设置页缺问题反馈入口"
     await app.click(SETTINGS_FEEDBACK)
 
+    # 宿主适配：WebView 容器需要加载时间，原用例点击后立即断言会读到加载中
+    # 画面（真机失败截图仍是 spinner）。只增加等待，断言强度不变。
+    assert await app.wait_for(WEBVIEW_NODE, timeout=10), (
+        "问题反馈页 10s 内未出现 android.webkit.WebView 容器"
+    )
     webviews = await app.find_elements(WEBVIEW_NODE)
     assert len(webviews) >= 1, "问题反馈应打开 android.webkit.WebView 容器"
 

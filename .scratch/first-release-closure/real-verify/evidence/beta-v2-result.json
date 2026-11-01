@@ -1,0 +1,18 @@
+{
+  "run_id": "6ec3b1d0-7ada-4500-a091-349d139e2ef4",
+  "display_id": "RUN-0012",
+  "suite_version_id": "15a9a3a5-11b5-4ca7-87e0-027f0f5bc844",
+  "suite_version": 2,
+  "code_copy_tree_sha256": "fe99dd342b345eef0bf937414f0ed039d202a16abd37122371b60c8305e0dfa1",
+  "vendor_mobile_auto": "f0d2ce0c37b6434f519b87ce7fc6c48e436753bc",
+  "vendor_mobile_perf": "8df850f31ec08850e02d0b8a24b9c9eb01bbbae1",
+  "junit": {"tests": 12, "failures": 0, "errors": 0, "skipped": 3, "present": true, "failed": 0},
+  "pytest": "9 passed, 3 skipped in 37.53s",
+  "skips": [
+    "test_coldstart_landing.py::test_login_landing_is_classifiable_not_error（当前会话有效直达首页，登录页判据不适用）",
+    "test_platform_injection.py::test_web_only_case_needs_browser（web 驱动未接入）",
+    "test_platform_injection.py::test_shared_case_runs_on_both_ends（web 端跳过）"
+  ],
+  "host_adaptation": "test_settings_webview.py 增加 wait_for(WEBVIEW_NODE, timeout=10)，断言强度不变",
+  "note": "历史 RUN-0011（同步前）为 7 passed / 3 skipped / 2 failed，见 §9.1"
+}

@@ -358,3 +358,52 @@
 - 最终 HEAD 全量后端回归（`testdock_frc10`，迁移 `0008`）：**564 项，563 passed / 1 skipped / 0 failed，退出码 0**（计数方式同 §3 #1；新增 2 项为 mobile-config 身份与套件自有会话让位的回归）。前端本轮未改产品代码，§7 的 `tsc --noEmit` / `npm test` 48 passed / `npm run build` 结果仍适用。
 - 收尾：验收用的 `:8010`（HEAD 后端）与 `:5174`（Vite 反代）已停止；`testdock_real` 活动租约 0、无未关闭调试会话；设备 `749622c9` 仍在线；常驻 `:8000` / `:5173` 均 200，未被重启或改写。
 - 本轮提交：`976b8d5`（mobile-config 身份）、`6941ab2`（套件自有会话让位）、`90918d8`（客户套件 + 1440 证据与 §9）。未 push。
+
+## 10. Vendor 同步与客户套件收口（2026-11-01 傍晚）
+
+用户授权后进行 `mobile_auto` vendor 同步与套件 WebView 修复，目标是把 §9.1 的两个失败收敛掉。
+
+### 10.1 Vendor 同步
+
+| 项 | 值 |
+| --- | --- |
+| 同步命令 | `python scripts/vendor_sync.py sync mobile_auto`（只同步 mobile_auto；mobile_perf 未动） |
+| mobile_auto | `24a1daa…` → **`f0d2ce0c37b6434f519b87ce7fc6c48e436753bc`**，132 文件 / 14.8 MiB |
+| mobile_perf | 保持 `8df850f31ec08850e02d0b8a24b9c9eb01bbbae1`（217 文件） |
+| 锁文件校验 | `vendor_sync.py check` → **OK：349 文件 / 42.6 MiB 与锁文件逐字节一致** |
+| 代码变更规模 | 33 文件修改，+3353 / −383；新增 journal、videostream、video_player.js 及 12 个测试文件 |
+| 清理 | 删除早期性能运行在 `vendor/mobile_perf/data/mobile_perf.db` 留下的运行时 DB，以及 `__pycache__/.pytest_cache`（均为未登记产物，无产品文件被删） |
+
+为什么能修 §9.1 的滑动失败：同步后的 `stream/upstream.py` 的 `UpstreamChannel` 已提供 `touch_down/touch_move/touch_up`（`592` 行），与 `core/device_ops.py` 的调用一致。
+
+验证：
+
+- **vendor 自身回归**（pathonly，`PYTHONDONTWRITEBYTECODE=1 PYTHONIOENCODING=utf-8`）：mobile_auto unit + contract **663 项 = 662 passed / 1 skipped / 0 failed**。未加 `PYTHONIOENCODING` 时出现 5 个失败，均为 pytester 读取 GBK 子进程输出的 `UnicodeDecodeError`，与同步代码无关。
+- **平台相关回归**（`testdock_frc10`）：调试/框选/模板/运行/联动/性能/runner 契约等 147 项通过。
+- **平台全量回归**：564 项 = 563 passed / 1 skipped / 0 failed，退出码 0（与同步前相同）。
+- **真机调试冒烟**（新 vendor）：会话 active → 快照 1080×2400 + UI 树 59 节点、`consistent=true` → 关闭；活动租约 0。
+
+### 10.2 套件 WebView 修复
+
+- 宿主副本 `.scratch/first-release-closure/beta-academy-suite/test_settings_webview.py` 在点击「问题反馈」后增加 `wait_for(WEBVIEW_NODE, timeout=10)`，再执行原有的 `find_elements` 断言；**断言强度不变**（仍要求 WebView 容器存在）。
+- 客户仓库 `moblie-auto` **未修改**；`PROVENANCE.md` 与 `FILES.sha256` 已更新，明确这是宿主适配的 1 处差异，其余文件逐字复制。
+
+### 10.3 客户套件复跑（RUN-0012）
+
+| 项 | 值 |
+| --- | --- |
+| 套件版本 | v2 `15a9a3a5-11b5-4ca7-87e0-027f0f5bc844`，固定副本树 `fe99dd342b345eef…`，12 用例 |
+| 终态 | **completed / passed** |
+| 结果 | **12 用例：9 passed / 3 skipped / 0 failed**（`pytest: 9 passed, 3 skipped in 37.53s`） |
+| 跳过 | 2 个 web 专属（本环境无 browser 驱动）+ 1 个「会话有效直达首页」分支 |
+| 覆盖 | 冷启动首页、我的/课程/动态端点、页签往返、知识库入口、**知识库滚动**、平台身份、Android 驱动截图、**问题反馈 WebView** |
+| 证据 | `evidence/beta-v2-result.json`、`evidence/beta-v2-junit.xml`；运行产物 `.runtime/real-verify/data/artifacts/6ec3b1d0-…/` |
+
+历史 RUN-0011（同步前 7 passed / 3 skipped / 2 failed）保留在 §9.1，作为两个缺陷的现场证据；§9.3 第 1 条（客户套件全绿）**已由本节关闭**。
+
+### 10.4 最终状态
+
+- 工单 01–10 全部 `resolved`；集成分支 `integration/first-release-closure`。
+- 客户真实套件经 TestDock 真机执行全绿（9 passed / 3 skipped / 0 failed），平台 vendor 已同步并逐字节校验；平台全量 564 项通过。
+- 原 §5/§8.5/§9.3 的“客户套件全绿、像素核对、页面↔HEAD 数据”三项均已关闭；其余边界（多用户/跨机器/对象存储、保留期 `expired` 态、多 worker 凭证共享、客户仓库自身代码未改）仍按 spec 或约束保留。
+- 收尾：验收用 `:8010` 已停止（本轮复跑后），`8000/5173` 未动；租约 0；设备在线；未 push。
