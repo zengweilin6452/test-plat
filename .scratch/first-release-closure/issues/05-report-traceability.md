@@ -47,6 +47,13 @@ cd ../web
 npx tsc -p tsconfig.json --noEmit
 ```
 
+## 已核实缺陷（探索笔记）
+
+- `_report_view`（`server/app/routers/runs.py:880-1024`）没有 suite 块，`revision` 也没有 `suite_version_id`；导出同源同样缺。
+- `domain/artifacts.py:252` 只写 `availability="available"`，没有过期清扫，导致 missing/expired 在生产不可达、下载门控形同虚设。需要能产生三态的真实路径或明确的过期判定。
+- `web/src/components/ReportDrawer.tsx:161-207` 未展示 build/revision；`web/src/api/types.ts:122-174` 无 suite 字段。
+- 详细笔记：`C:\Users\williamzeng\AppData\Local\Temp\testdock-frc-notes\05-report.md`
+
 ## 约束
 
 - 不修改 `vendor/`、不安装依赖、不 push。

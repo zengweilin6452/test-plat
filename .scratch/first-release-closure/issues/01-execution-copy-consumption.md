@@ -43,6 +43,14 @@ D:\python312\python.exe -m pytest tests/test_issue24_execution_wiring.py tests/t
 D:\python312\python.exe -m pytest tests -q
 ```
 
+## 已核实副作用风险（必须处理）
+
+- vendor `MobileConfig.assets_dir` / `artifacts_dir` 默认是相对路径（`vendor/mobile_auto/src/mobile_auto/config.py:79-80`），未显式传绝对路径时按 cwd 解析。
+- vendor evidence 插件在 `pytest_sessionstart` 会往 `base.artifacts_dir/runs` 写运行状态（`vendor/mobile_auto/src/mobile_auto/evidence/pytest_plugin.py:142-170`）。若 cwd 改成固定副本，会**写进副本**，导致下次摘要校验失败。
+- `assets_dir` 是模板库的存储根（`vendor/mobile_auto/src/mobile_auto/imaging/store.py`）；切 cwd 后若仍用默认值，模板库会指向副本内，破坏跨会话共享与执行锁定。
+- 处理要求：pytest 子进程显式使用绝对 `assets_dir`（共享资产根）与绝对 `artifacts_dir`；并设置 `PYTHONDONTWRITEBYTECODE=1`，避免 `__pycache__` 写进副本。可为平台插件补一个 `--mobile-config` 选项，生成指向绝对目录的临时 TOML（不改 vendor）。
+- 验收再加一条：执行前后固定副本的文件树摘要保持不变（平台自身不写副本）。
+
 ## 约束
 
 - 不修改 `vendor/`；不安装/升级依赖；不新增外部来源。

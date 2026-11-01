@@ -42,6 +42,12 @@ $env:TESTDOCK_TEST_DATABASE_URL="postgresql+psycopg://testdock@127.0.0.1:55432/<
 D:\python312\python.exe -m pytest tests/test_issue08_run_lifecycle.py tests/test_issue09_stable_run_id.py tests/test_issue15_resource_readiness.py tests/test_p3_transitions.py tests/test_run_submission.py -q
 ```
 
+## 已核实缺陷（探索笔记）
+
+- 取消 running 的 run 只写 `cancel_requested_at`（`server/app/routers/runs.py:752-840`），不主动终止 runner 进程树；依赖 heartbeat/60s 陈旧判定（`server/app/scheduler/reconciler.py:58-80`）。vendor 卡死时设备可能长期被占。`server/app/runner/spawn.py:472-507` 的 `terminate_run_process` 已支持从 ack 取 pid，可直接复用。
+- 需要一条端到端测试：取消 running → 进程树终止 → run 终态 → 租约释放 → 设备可立即再领。
+- 详细笔记：`C:\Users\williamzeng\AppData\Local\Temp\testdock-frc-notes\04-run-lifecycle.md`
+
 ## 约束
 
 - 禁止把测试库指向共享库 `testdock`（8000 调度器会认领并占用真机）。

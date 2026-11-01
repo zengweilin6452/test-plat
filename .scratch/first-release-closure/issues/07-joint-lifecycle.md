@@ -42,6 +42,14 @@ $env:TESTDOCK_TEST_DATABASE_URL="postgresql+psycopg://testdock@127.0.0.1:55432/<
 D:\python312\python.exe -m pytest tests/test_issue16_joint_lifecycle.py -q
 ```
 
+## 已核实缺陷（探索笔记）
+
+- `ui_timeout_s` 只进窗口描述（`joint_job.py:147-153`），真实 pytest deadline 仍用总 `options.timeout`（`ui_job.py:321`）——UI 窗口上限是装饰。
+- UI 超时分支返回前不调用 `scope.finalize()`（`joint_job.py:155-168`），没有 report.json，采集未收口。
+- 派发不合并 `suite_versions.manifest.ui_timeout_s`（`dispatcher.py:84-105`），生产恒为默认 600；既有测试直接把值塞进修订 config，掩盖了缺口。
+- runner 写出的 `collectWindow`（`joint_job.py:197`）被平台 `runtime.py:688-707` 只挑 4 个键丢弃，`/report` 看不到采集窗口。
+- 详细笔记：`C:\Users\williamzeng\AppData\Local\Temp\testdock-frc-notes\07-joint.md`
+
 ## 约束
 
 - 不修改 `vendor/`、不安装依赖、不 push。
