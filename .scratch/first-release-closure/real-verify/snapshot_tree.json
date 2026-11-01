@@ -1,0 +1,808 @@
+{
+ "nodes": [
+  {
+   "index": 0,
+   "class_name": "root",
+   "resource_id": "",
+   "text": "",
+   "content_desc": "",
+   "bounds": null,
+   "clickable": false,
+   "children": [
+    1,
+    2,
+    22
+   ]
+  },
+  {
+   "index": 1,
+   "class_name": "android.widget.FrameLayout",
+   "resource_id": "",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    2332,
+    1080,
+    2400
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 2,
+   "class_name": "android.widget.FrameLayout",
+   "resource_id": "",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    0,
+    1080,
+    2400
+   ],
+   "clickable": false,
+   "children": [
+    3
+   ]
+  },
+  {
+   "index": 3,
+   "class_name": "android.widget.LinearLayout",
+   "resource_id": "",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    0,
+    1080,
+    2400
+   ],
+   "clickable": false,
+   "children": [
+    4
+   ]
+  },
+  {
+   "index": 4,
+   "class_name": "android.widget.FrameLayout",
+   "resource_id": "",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    0,
+    1080,
+    2400
+   ],
+   "clickable": false,
+   "children": [
+    5
+   ]
+  },
+  {
+   "index": 5,
+   "class_name": "android.widget.FrameLayout",
+   "resource_id": "com.miui.securitycenter:id/action_bar_overlay_layout",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    0,
+    1080,
+    2400
+   ],
+   "clickable": false,
+   "children": [
+    6
+   ]
+  },
+  {
+   "index": 6,
+   "class_name": "android.widget.FrameLayout",
+   "resource_id": "android:id/content",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    0,
+    1080,
+    2400
+   ],
+   "clickable": false,
+   "children": [
+    7
+   ]
+  },
+  {
+   "index": 7,
+   "class_name": "android.widget.LinearLayout",
+   "resource_id": "com.miui.securitycenter:id/root_layout",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    0,
+    1080,
+    2400
+   ],
+   "clickable": false,
+   "children": [
+    8,
+    13,
+    16
+   ]
+  },
+  {
+   "index": 8,
+   "class_name": "androidx.recyclerview.widget.RecyclerView",
+   "resource_id": "com.miui.securitycenter:id/cta_content",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    87,
+    1080,
+    1663
+   ],
+   "clickable": false,
+   "children": [
+    9
+   ]
+  },
+  {
+   "index": 9,
+   "class_name": "android.widget.LinearLayout",
+   "resource_id": "",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    88,
+    87,
+    992,
+    922
+   ],
+   "clickable": false,
+   "children": [
+    10,
+    11,
+    12
+   ]
+  },
+  {
+   "index": 10,
+   "class_name": "android.widget.ImageView",
+   "resource_id": "com.miui.securitycenter:id/cta_pkg_icon",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    463,
+    285,
+    617,
+    439
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 11,
+   "class_name": "android.widget.TextView",
+   "resource_id": "com.miui.securitycenter:id/cta_pkg_label",
+   "text": "计算器",
+   "content_desc": "",
+   "bounds": [
+    465,
+    461,
+    615,
+    534
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 12,
+   "class_name": "android.widget.TextView",
+   "resource_id": "com.miui.securitycenter:id/main_purpose",
+   "text": "欢迎使用计算器，您可使用数字、汇率、长度、面积换算、房贷和个人所得税等计算功能。在使用本应用的过程中，我们将联网提供必要服务。",
+   "content_desc": "",
+   "bounds": [
+    88,
+    600,
+    992,
+    856
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 13,
+   "class_name": "android.widget.LinearLayout",
+   "resource_id": "com.miui.securitycenter:id/mid_fixed_group",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    88,
+    1663,
+    992,
+    1914
+   ],
+   "clickable": false,
+   "children": [
+    14,
+    15
+   ]
+  },
+  {
+   "index": 14,
+   "class_name": "android.widget.ImageView",
+   "resource_id": "com.miui.securitycenter:id/privacy_image",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    463,
+    1663,
+    617,
+    1729
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 15,
+   "class_name": "android.widget.TextView",
+   "resource_id": "com.miui.securitycenter:id/cta_permission_optional",
+   "text": "在使用过程中，为提供更多服务，我们可能还将向您申请以下权限：获取位置信息。您可随时前往权限管理调整所有权限的授权情况。",
+   "content_desc": "",
+   "bounds": [
+    88,
+    1729,
+    992,
+    1914
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 16,
+   "class_name": "android.widget.LinearLayout",
+   "resource_id": "com.miui.securitycenter:id/bottom_fixed_group",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    1914,
+    1080,
+    2356
+   ],
+   "clickable": false,
+   "children": [
+    17,
+    18,
+    19
+   ]
+  },
+  {
+   "index": 17,
+   "class_name": "android.view.View",
+   "resource_id": "com.miui.securitycenter:id/cta_permission_declare_divider",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    88,
+    1957,
+    992,
+    1959
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 18,
+   "class_name": "android.widget.TextView",
+   "resource_id": "com.miui.securitycenter:id/double_link",
+   "text": "请您阅读并同意我们的《隐私政策》。",
+   "content_desc": "请您阅读并同意我们的《隐私政策》。",
+   "bounds": [
+    88,
+    2002,
+    992,
+    2054
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 19,
+   "class_name": "android.widget.LinearLayout",
+   "resource_id": "com.miui.securitycenter:id/btn_group",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    2054,
+    1080,
+    2356
+   ],
+   "clickable": false,
+   "children": [
+    20,
+    21
+   ]
+  },
+  {
+   "index": 20,
+   "class_name": "android.widget.Button",
+   "resource_id": "com.miui.securitycenter:id/cta_negative",
+   "text": "不同意",
+   "content_desc": "",
+   "bounds": [
+    77,
+    2142,
+    523,
+    2279
+   ],
+   "clickable": true,
+   "children": []
+  },
+  {
+   "index": 21,
+   "class_name": "android.widget.Button",
+   "resource_id": "com.miui.securitycenter:id/cta_positive",
+   "text": "同意",
+   "content_desc": "",
+   "bounds": [
+    556,
+    2142,
+    1003,
+    2279
+   ],
+   "clickable": true,
+   "children": []
+  },
+  {
+   "index": 22,
+   "class_name": "android.widget.FrameLayout",
+   "resource_id": "",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    0,
+    1080,
+    87
+   ],
+   "clickable": false,
+   "children": [
+    23,
+    24
+   ]
+  },
+  {
+   "index": 23,
+   "class_name": "android.widget.FrameLayout",
+   "resource_id": "com.android.systemui:id/status_bar_launch_animation_container",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    0,
+    1080,
+    87
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 24,
+   "class_name": "android.widget.FrameLayout",
+   "resource_id": "com.android.systemui:id/status_bar_container",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    0,
+    1080,
+    87
+   ],
+   "clickable": false,
+   "children": [
+    25
+   ]
+  },
+  {
+   "index": 25,
+   "class_name": "android.widget.FrameLayout",
+   "resource_id": "com.android.systemui:id/status_bar",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    0,
+    0,
+    1080,
+    87
+   ],
+   "clickable": false,
+   "children": [
+    26
+   ]
+  },
+  {
+   "index": 26,
+   "class_name": "android.widget.LinearLayout",
+   "resource_id": "com.android.systemui:id/status_bar_contents",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    52,
+    0,
+    1028,
+    87
+   ],
+   "clickable": false,
+   "children": [
+    27,
+    35,
+    36
+   ]
+  },
+  {
+   "index": 27,
+   "class_name": "android.widget.LinearLayout",
+   "resource_id": "com.android.systemui:id/phone_status_bar_left_container",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    55,
+    28,
+    507,
+    87
+   ],
+   "clickable": false,
+   "children": [
+    28,
+    29
+   ]
+  },
+  {
+   "index": 28,
+   "class_name": "android.widget.TextView",
+   "resource_id": "com.android.systemui:id/clock",
+   "text": "2:56",
+   "content_desc": "2:56",
+   "bounds": [
+    55,
+    28,
+    128,
+    87
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 29,
+   "class_name": "android.widget.FrameLayout",
+   "resource_id": "com.android.systemui:id/drip_notification_icon_area",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    139,
+    28,
+    507,
+    87
+   ],
+   "clickable": false,
+   "children": [
+    30
+   ]
+  },
+  {
+   "index": 30,
+   "class_name": "android.view.ViewGroup",
+   "resource_id": "com.android.systemui:id/notificationIcons",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    139,
+    28,
+    507,
+    87
+   ],
+   "clickable": false,
+   "children": [
+    31,
+    32,
+    33,
+    34
+   ]
+  },
+  {
+   "index": 31,
+   "class_name": "android.widget.ImageView",
+   "resource_id": "",
+   "text": "",
+   "content_desc": "抖音通知：我是广东茂名电白的",
+   "bounds": [
+    139,
+    39,
+    189,
+    75
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 32,
+   "class_name": "android.widget.ImageView",
+   "resource_id": "",
+   "text": "",
+   "content_desc": "应用商店通知：78%的用户已更新这88款应用",
+   "bounds": [
+    178,
+    39,
+    228,
+    75
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 33,
+   "class_name": "android.widget.ImageView",
+   "resource_id": "",
+   "text": "",
+   "content_desc": "Android 系统通知：",
+   "bounds": [
+    215,
+    39,
+    265,
+    75
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 34,
+   "class_name": "android.widget.ImageView",
+   "resource_id": "",
+   "text": "",
+   "content_desc": "浏览器通知：被抓后搜出20吨黄金？赵本山私生活谣言太离谱",
+   "bounds": [
+    215,
+    39,
+    265,
+    75
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 35,
+   "class_name": "android.view.View",
+   "resource_id": "com.android.systemui:id/cutout_space_view",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    507,
+    14,
+    573,
+    87
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 36,
+   "class_name": "android.view.ViewGroup",
+   "resource_id": "com.android.systemui:id/system_icon_area",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    573,
+    28,
+    1025,
+    87
+   ],
+   "clickable": false,
+   "children": [
+    37
+   ]
+  },
+  {
+   "index": 37,
+   "class_name": "android.view.ViewGroup",
+   "resource_id": "com.android.systemui:id/system_icons",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    801,
+    28,
+    1019,
+    87
+   ],
+   "clickable": false,
+   "children": [
+    38,
+    44
+   ]
+  },
+  {
+   "index": 38,
+   "class_name": "android.widget.LinearLayout",
+   "resource_id": "com.android.systemui:id/statusIcons",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    801,
+    28,
+    917,
+    87
+   ],
+   "clickable": false,
+   "children": [
+    39,
+    40
+   ]
+  },
+  {
+   "index": 39,
+   "class_name": "android.widget.ImageView",
+   "resource_id": "",
+   "text": "",
+   "content_desc": "没有 SIM 卡",
+   "bounds": [
+    801,
+    29,
+    857,
+    85
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 40,
+   "class_name": "android.widget.FrameLayout",
+   "resource_id": "com.android.systemui:id/wifi_combo",
+   "text": "",
+   "content_desc": "WLAN 信号满格。",
+   "bounds": [
+    857,
+    29,
+    917,
+    85
+   ],
+   "clickable": false,
+   "children": [
+    41
+   ]
+  },
+  {
+   "index": 41,
+   "class_name": "android.widget.FrameLayout",
+   "resource_id": "com.android.systemui:id/wifi_group",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    857,
+    29,
+    917,
+    85
+   ],
+   "clickable": false,
+   "children": [
+    42,
+    43
+   ]
+  },
+  {
+   "index": 42,
+   "class_name": "android.widget.ImageView",
+   "resource_id": "com.android.systemui:id/wifi_signal",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    857,
+    29,
+    917,
+    85
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 43,
+   "class_name": "android.widget.TextView",
+   "resource_id": "com.android.systemui:id/wifi_standard",
+   "text": "6",
+   "content_desc": "",
+   "bounds": [
+    894,
+    54,
+    917,
+    85
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 44,
+   "class_name": "android.widget.LinearLayout",
+   "resource_id": "com.android.systemui:id/battery",
+   "text": "",
+   "content_desc": "正在充电，已完成百分之 100。",
+   "bounds": [
+    917,
+    28,
+    1019,
+    87
+   ],
+   "clickable": false,
+   "children": [
+    45,
+    48
+   ]
+  },
+  {
+   "index": 45,
+   "class_name": "android.widget.FrameLayout",
+   "resource_id": "com.android.systemui:id/battery_icon_container",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    917,
+    28,
+    1001,
+    87
+   ],
+   "clickable": false,
+   "children": [
+    46,
+    47
+   ]
+  },
+  {
+   "index": 46,
+   "class_name": "android.widget.ImageView",
+   "resource_id": "com.android.systemui:id/battery_image",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    917,
+    29,
+    1001,
+    85
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 47,
+   "class_name": "android.widget.TextView",
+   "resource_id": "com.android.systemui:id/battery_digit",
+   "text": "100",
+   "content_desc": "",
+   "bounds": [
+    936,
+    41,
+    975,
+    73
+   ],
+   "clickable": false,
+   "children": []
+  },
+  {
+   "index": 48,
+   "class_name": "android.widget.ImageView",
+   "resource_id": "com.android.systemui:id/battery_charge_out_image",
+   "text": "",
+   "content_desc": "",
+   "bounds": [
+    1001,
+    28,
+    1019,
+    87
+   ],
+   "clickable": false,
+   "children": []
+  }
+ ]
+}

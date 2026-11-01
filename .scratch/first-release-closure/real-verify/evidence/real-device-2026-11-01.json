@@ -1,0 +1,1224 @@
+{
+ "collected_at": "2026-11-01",
+ "device": {
+  "serial": "749622c9",
+  "model": "2206123SC",
+  "android": "14",
+  "resolution": "1080x2400"
+ },
+ "backend": {
+  "base": "http://127.0.0.1:8010",
+  "database": "testdock_real",
+  "data_dir": ".runtime/real-verify/data"
+ },
+ "application": {
+  "id": "7715ad9c-71f1-52da-a9fc-ad7cb0896bcd",
+  "package": "com.miui.calculator"
+ },
+ "build": "a342d799-f8ce-487f-8f39-df8766c37042",
+ "suite_source": "D:/workspace/claudecode-test/testplat-auto/.scratch/first-release-closure/real-suite",
+ "runs": [
+  {
+   "display_id": "RUN-0001",
+   "id": "dc822a07-af62-4747-8646-58c12e6275b9",
+   "module": "ui",
+   "state": "completed",
+   "outcome": "passed",
+   "reason_code": "passed",
+   "not_tested_reason": null,
+   "suite": {
+    "id": "fc0e3698-c8c0-4e28-a09c-8ab46b0ebe7b",
+    "version": 1,
+    "source_ref": "local",
+    "source_commit": "local",
+    "code_copy": {
+     "tree_sha256": "6f8ad35a6172125d16593c303d51a564043e73dbca610d7110def801182be716",
+     "file_count": 1,
+     "root_rel": "e4a829fdd4834295afe02c674be48425"
+    }
+   },
+   "build": {
+    "id": "a342d799-f8ce-487f-8f39-df8766c37042",
+    "version": "15.0.14",
+    "build_key": "com.miui.calculator@15.0.14",
+    "source_commit": "local",
+    "sha256": null
+   },
+   "revision": {
+    "id": "f1cbcbdc-e5c9-4972-9f59-7bfd381ec1ea",
+    "readiness": "validated",
+    "test_type": "ui",
+    "suite_version_id": "fc0e3698-c8c0-4e28-a09c-8ab46b0ebe7b"
+   },
+   "junit": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "present": true,
+    "failed": 0
+   },
+   "metricsSummary": {},
+   "collectWindow": null,
+   "components": [
+    {
+     "component": "ui",
+     "kind": "ui",
+     "state": "completed",
+     "outcome": "passed",
+     "created_at": "2026-11-01T14:47:42.445556+08:00"
+    }
+   ],
+   "evidence": [
+    {
+     "logical_key": "junit.xml",
+     "mime_type": "text/xml",
+     "byte_size": 540,
+     "availability": "available"
+    },
+    {
+     "logical_key": "mobile-config.toml",
+     "mime_type": "application/octet-stream",
+     "byte_size": 208,
+     "availability": "available"
+    },
+    {
+     "logical_key": "runs/main.json",
+     "mime_type": "application/json",
+     "byte_size": 143,
+     "availability": "available"
+    }
+   ],
+   "verdict": "passed",
+   "reason": "passed"
+  },
+  {
+   "display_id": "RUN-0002",
+   "id": "085e183a-1a23-4bcb-b29f-5c6384c07c06",
+   "module": "perf",
+   "state": "completed",
+   "outcome": "not_tested",
+   "reason_code": "gate_policy_missing",
+   "not_tested_reason": "gate_policy_missing",
+   "suite": {
+    "id": "748950e2-fd0f-4780-b311-9e5014cc925e",
+    "version": 1,
+    "source_ref": "suite:97cbe14f-5901-44f4-9b70-106e8ece7081",
+    "source_commit": "local",
+    "code_copy": null
+   },
+   "build": {
+    "id": "a342d799-f8ce-487f-8f39-df8766c37042",
+    "version": "15.0.14",
+    "build_key": "com.miui.calculator@15.0.14",
+    "source_commit": "local",
+    "sha256": null
+   },
+   "revision": {
+    "id": "b00f1a11-0d33-4227-8267-7dcaa52cf2cc",
+    "readiness": "validated",
+    "test_type": "performance",
+    "suite_version_id": "748950e2-fd0f-4780-b311-9e5014cc925e"
+   },
+   "junit": {},
+   "metricsSummary": {
+    "cpu_global_pct": {
+     "unit": "%",
+     "source": "solo_pi",
+     "min": 4.1994753,
+     "median": 8.917158,
+     "mean": 10.575135981818182,
+     "max": 22.613066,
+     "p90": 19.614712200000007,
+     "sampleCount": 22,
+     "labelZh": "全局CPU占用",
+     "labelEn": "Global CPU usage"
+    },
+    "cpu_process_pct": {
+     "unit": "%",
+     "source": "solo_pi",
+     "min": 0.0,
+     "median": 1.10294115,
+     "mean": 1.349863790909091,
+     "max": 4.455446,
+     "p90": 2.75415585,
+     "sampleCount": 22,
+     "labelZh": "应用进程CPU占用",
+     "labelEn": "Process CPU usage"
+    },
+    "mem_global_mb": {
+     "unit": "MB",
+     "source": "solo_pi",
+     "min": 5217.0,
+     "median": 5221.0,
+     "mean": 5220.416666666667,
+     "max": 5224.0,
+     "p90": 5223.8,
+     "sampleCount": 12,
+     "labelZh": "全局内存占用",
+     "labelEn": "Global memory usage"
+    },
+    "mem_privdirty_mb": {
+     "unit": "MB",
+     "source": "solo_pi",
+     "min": 3.6054688,
+     "median": 7.3164062,
+     "mean": 6.940340909090909,
+     "max": 7.3515625,
+     "p90": 7.3203125,
+     "sampleCount": 11,
+     "labelZh": "应用PrivateDirty内存",
+     "labelEn": "Process PrivateDirty memory"
+    },
+    "mem_pss_mb": {
+     "unit": "MB",
+     "source": "solo_pi",
+     "min": 35.54492,
+     "median": 38.723633,
+     "mean": 38.40616118181818,
+     "max": 38.773438,
+     "p90": 38.72754,
+     "sampleCount": 11,
+     "labelZh": "应用PSS内存",
+     "labelEn": "Process PSS memory"
+    },
+    "temp_battery_c": {
+     "unit": "°C",
+     "source": "pc_supplement",
+     "min": 35.8,
+     "median": 35.8,
+     "mean": 35.839999999999996,
+     "max": 35.9,
+     "p90": 35.9,
+     "sampleCount": 5,
+     "labelZh": "电池温度",
+     "labelEn": "Battery temperature"
+    },
+    "gpu_util_pct": {
+     "unit": "%",
+     "source": "pc_supplement",
+     "min": 0.0,
+     "median": 0.0,
+     "mean": 1.4913532298839007,
+     "max": 7.456766149419503,
+     "p90": 4.474059689651702,
+     "sampleCount": 5,
+     "labelZh": "GPU占用",
+     "labelEn": "GPU utilization"
+    }
+   },
+   "collectWindow": null,
+   "components": [
+    {
+     "component": "performance",
+     "kind": "performance",
+     "state": "completed",
+     "outcome": "not_tested",
+     "created_at": "2026-11-01T14:48:15.963873+08:00"
+    }
+   ],
+   "evidence": [
+    {
+     "logical_key": "perf.sqlite3",
+     "mime_type": "application/octet-stream",
+     "byte_size": 4096,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf.sqlite3-shm",
+     "mime_type": "application/octet-stream",
+     "byte_size": 32768,
+     "availability": "missing"
+    },
+    {
+     "logical_key": "perf.sqlite3-wal",
+     "mime_type": "application/octet-stream",
+     "byte_size": 107152,
+     "availability": "missing"
+    },
+    {
+     "logical_key": "perf/085e183a-1a23-4bcb-b29f-5c6384c07c06/artifacts/app_process-main-1012_CPU_145d2912566d9acb_1793515683095_1793515694657.csv",
+     "mime_type": "text/csv",
+     "byte_size": 663,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf/085e183a-1a23-4bcb-b29f-5c6384c07c06/artifacts/global_usage_CPU_4825d887a67ac1a9_1793515683095_1793515694657.csv",
+     "mime_type": "text/csv",
+     "byte_size": 713,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf/085e183a-1a23-4bcb-b29f-5c6384c07c06/artifacts/global_usage_Memory_34b95815677c2c1b_1793515683095_1793515694658.csv",
+     "mime_type": "text/csv",
+     "byte_size": 379,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf/085e183a-1a23-4bcb-b29f-5c6384c07c06/artifacts/privatedirty-main-1012_Memory_d85d1e4cbc676be7_1793515683095_1793515694658.csv",
+     "mime_type": "text/csv",
+     "byte_size": 396,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf/085e183a-1a23-4bcb-b29f-5c6384c07c06/artifacts/pss-main-1012_Memory_93cf5a9084e2e3d4_1793515683095_1793515694658.csv",
+     "mime_type": "text/csv",
+     "byte_size": 386,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf/085e183a-1a23-4bcb-b29f-5c6384c07c06/artifacts/supplement_thermal_gpu.csv",
+     "mime_type": "text/csv",
+     "byte_size": 139,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf/085e183a-1a23-4bcb-b29f-5c6384c07c06/meta.json",
+     "mime_type": "application/json",
+     "byte_size": 1271,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf/085e183a-1a23-4bcb-b29f-5c6384c07c06/report.html",
+     "mime_type": "text/html",
+     "byte_size": 1043950,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf/085e183a-1a23-4bcb-b29f-5c6384c07c06/report.json",
+     "mime_type": "application/json",
+     "byte_size": 11451,
+     "availability": "available"
+    },
+    {
+     "logical_key": "report.json",
+     "mime_type": "application/json",
+     "byte_size": 11449,
+     "availability": "available"
+    }
+   ],
+   "verdict": "not_tested",
+   "reason": "gate_policy_missing"
+  },
+  {
+   "display_id": "RUN-0003",
+   "id": "9b13afd6-1d9a-4fb6-a180-a63e7bb9f746",
+   "module": "joint",
+   "state": "completed",
+   "outcome": "not_tested",
+   "reason_code": "baseline_missing",
+   "not_tested_reason": "baseline_missing",
+   "suite": {
+    "id": "9fe430d4-dc14-4222-889b-10c924bb1fb1",
+    "version": 1,
+    "source_ref": "local",
+    "source_commit": "local",
+    "code_copy": {
+     "tree_sha256": "6f8ad35a6172125d16593c303d51a564043e73dbca610d7110def801182be716",
+     "file_count": 1,
+     "root_rel": "6bde29da13684cd3ba8a777ec3f21e06"
+    }
+   },
+   "build": {
+    "id": "a342d799-f8ce-487f-8f39-df8766c37042",
+    "version": "15.0.14",
+    "build_key": "com.miui.calculator@15.0.14",
+    "source_commit": "local",
+    "sha256": null
+   },
+   "revision": {
+    "id": "12a2051a-98cc-4379-a9b6-6f90a599077c",
+    "readiness": "validated",
+    "test_type": "joint",
+    "suite_version_id": "9fe430d4-dc14-4222-889b-10c924bb1fb1"
+   },
+   "junit": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "present": true,
+    "failed": 0
+   },
+   "metricsSummary": {},
+   "collectWindow": {
+    "collect_started_at": "2026-11-01T06:48:28.585776+00:00",
+    "collect_stopped_at": "2026-11-01T06:48:33.012836+00:00",
+    "ui": {
+     "started_at": "2026-11-01T06:48:28.612278+00:00",
+     "ended_at": "2026-11-01T06:48:33.012836+00:00",
+     "timeout_s": 180
+    }
+   },
+   "components": [
+    {
+     "component": "performance",
+     "kind": "performance",
+     "state": "completed",
+     "outcome": "not_tested",
+     "created_at": "2026-11-01T14:48:33.022053+08:00"
+    },
+    {
+     "component": "ui",
+     "kind": "ui",
+     "state": "completed",
+     "outcome": "passed",
+     "created_at": "2026-11-01T14:48:33.022053+08:00"
+    }
+   ],
+   "evidence": [
+    {
+     "logical_key": "junit.xml",
+     "mime_type": "text/xml",
+     "byte_size": 540,
+     "availability": "available"
+    },
+    {
+     "logical_key": "mobile-config.toml",
+     "mime_type": "application/octet-stream",
+     "byte_size": 208,
+     "availability": "available"
+    },
+    {
+     "logical_key": "report.json",
+     "mime_type": "application/json",
+     "byte_size": 462,
+     "availability": "available"
+    },
+    {
+     "logical_key": "runs/main.json",
+     "mime_type": "application/json",
+     "byte_size": 143,
+     "availability": "available"
+    }
+   ],
+   "verdict": "not_tested",
+   "reason": "baseline_missing"
+  },
+  {
+   "display_id": "RUN-0004",
+   "id": "77852de0-8617-4200-a4a8-a4cd67dad8af",
+   "module": "ui",
+   "state": "completed",
+   "outcome": "passed",
+   "reason_code": "passed",
+   "not_tested_reason": null,
+   "suite": {
+    "id": "42450ab5-5565-4bfb-837e-f4aeea400771",
+    "version": 2,
+    "source_ref": "v2",
+    "source_commit": "local",
+    "code_copy": {
+     "tree_sha256": "a8e626e8da38a954e73bfa0760f546cf52f3619cf1cee79f6ed440f4056f72c0",
+     "file_count": 1,
+     "root_rel": "02c6b68d5b8c43378ac195ed3fccdb3b"
+    }
+   },
+   "build": {
+    "id": "a342d799-f8ce-487f-8f39-df8766c37042",
+    "version": "15.0.14",
+    "build_key": "com.miui.calculator@15.0.14",
+    "source_commit": "local",
+    "sha256": null
+   },
+   "revision": {
+    "id": "4dcf01e7-e26c-422a-87f4-ef534b38f352",
+    "readiness": "validated",
+    "test_type": "ui",
+    "suite_version_id": "42450ab5-5565-4bfb-837e-f4aeea400771"
+   },
+   "junit": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "present": true,
+    "failed": 0
+   },
+   "metricsSummary": {},
+   "collectWindow": null,
+   "components": [
+    {
+     "component": "ui",
+     "kind": "ui",
+     "state": "completed",
+     "outcome": "passed",
+     "created_at": "2026-11-01T14:49:12.770156+08:00"
+    }
+   ],
+   "evidence": [
+    {
+     "logical_key": "junit.xml",
+     "mime_type": "text/xml",
+     "byte_size": 697,
+     "availability": "available"
+    },
+    {
+     "logical_key": "mobile-config.toml",
+     "mime_type": "application/octet-stream",
+     "byte_size": 208,
+     "availability": "available"
+    },
+    {
+     "logical_key": "runs/main.json",
+     "mime_type": "application/json",
+     "byte_size": 143,
+     "availability": "available"
+    }
+   ],
+   "verdict": "passed",
+   "reason": "passed"
+  },
+  {
+   "display_id": "RUN-0005",
+   "id": "cdfc7b41-f324-42ed-8d3d-4add514cf7ee",
+   "module": "joint",
+   "state": "completed",
+   "outcome": "not_tested",
+   "reason_code": "baseline_missing",
+   "not_tested_reason": "baseline_missing",
+   "suite": {
+    "id": "8e466ef7-c892-4ccb-b69c-8d34dacc5604",
+    "version": 2,
+    "source_ref": "v2",
+    "source_commit": "local",
+    "code_copy": {
+     "tree_sha256": "a8e626e8da38a954e73bfa0760f546cf52f3619cf1cee79f6ed440f4056f72c0",
+     "file_count": 1,
+     "root_rel": "a76e720537bd45138121f95caf0c98d8"
+    }
+   },
+   "build": {
+    "id": "a342d799-f8ce-487f-8f39-df8766c37042",
+    "version": "15.0.14",
+    "build_key": "com.miui.calculator@15.0.14",
+    "source_commit": "local",
+    "sha256": null
+   },
+   "revision": {
+    "id": "5b669a59-89d3-4e69-ac4d-096f42caffdd",
+    "readiness": "validated",
+    "test_type": "joint",
+    "suite_version_id": "8e466ef7-c892-4ccb-b69c-8d34dacc5604"
+   },
+   "junit": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "present": true,
+    "failed": 0
+   },
+   "metricsSummary": {},
+   "collectWindow": {
+    "collect_started_at": "2026-11-01T06:49:23.569866+00:00",
+    "collect_stopped_at": "2026-11-01T06:49:42.979608+00:00",
+    "ui": {
+     "started_at": "2026-11-01T06:49:23.598095+00:00",
+     "ended_at": "2026-11-01T06:49:42.979608+00:00",
+     "timeout_s": 180
+    }
+   },
+   "components": [
+    {
+     "component": "performance",
+     "kind": "performance",
+     "state": "completed",
+     "outcome": "not_tested",
+     "created_at": "2026-11-01T14:49:42.992600+08:00"
+    },
+    {
+     "component": "ui",
+     "kind": "ui",
+     "state": "completed",
+     "outcome": "passed",
+     "created_at": "2026-11-01T14:49:42.992600+08:00"
+    }
+   ],
+   "evidence": [
+    {
+     "logical_key": "junit.xml",
+     "mime_type": "text/xml",
+     "byte_size": 697,
+     "availability": "available"
+    },
+    {
+     "logical_key": "mobile-config.toml",
+     "mime_type": "application/octet-stream",
+     "byte_size": 208,
+     "availability": "available"
+    },
+    {
+     "logical_key": "report.json",
+     "mime_type": "application/json",
+     "byte_size": 462,
+     "availability": "available"
+    },
+    {
+     "logical_key": "runs/main.json",
+     "mime_type": "application/json",
+     "byte_size": 143,
+     "availability": "available"
+    }
+   ],
+   "verdict": "not_tested",
+   "reason": "baseline_missing"
+  },
+  {
+   "display_id": "RUN-0006",
+   "id": "a7a9819f-5655-46eb-a87e-517094ce219a",
+   "module": "joint",
+   "state": "completed",
+   "outcome": "not_tested",
+   "reason_code": "baseline_missing",
+   "not_tested_reason": "baseline_missing",
+   "suite": {
+    "id": "8e466ef7-c892-4ccb-b69c-8d34dacc5604",
+    "version": 2,
+    "source_ref": "v2",
+    "source_commit": "local",
+    "code_copy": {
+     "tree_sha256": "a8e626e8da38a954e73bfa0760f546cf52f3619cf1cee79f6ed440f4056f72c0",
+     "file_count": 1,
+     "root_rel": "a76e720537bd45138121f95caf0c98d8"
+    }
+   },
+   "build": {
+    "id": "a342d799-f8ce-487f-8f39-df8766c37042",
+    "version": "15.0.14",
+    "build_key": "com.miui.calculator@15.0.14",
+    "source_commit": "local",
+    "sha256": null
+   },
+   "revision": {
+    "id": "5b669a59-89d3-4e69-ac4d-096f42caffdd",
+    "readiness": "validated",
+    "test_type": "joint",
+    "suite_version_id": "8e466ef7-c892-4ccb-b69c-8d34dacc5604"
+   },
+   "junit": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "present": true,
+    "failed": 0
+   },
+   "metricsSummary": {
+    "cpu_global_pct": {
+     "unit": "%",
+     "source": "solo_pi",
+     "min": 3.7878788,
+     "median": 22.48062,
+     "mean": 22.661494312195124,
+     "max": 64.22977,
+     "p90": 36.633663,
+     "sampleCount": 41,
+     "labelZh": "全局CPU占用",
+     "labelEn": "Global CPU usage"
+    },
+    "cpu_process_pct": {
+     "unit": "%",
+     "source": "solo_pi",
+     "min": 0.0,
+     "median": 0.0,
+     "mean": 1.400754320689655,
+     "max": 5.050505,
+     "p90": 3.0627904,
+     "sampleCount": 29,
+     "labelZh": "应用进程CPU占用",
+     "labelEn": "Process CPU usage"
+    },
+    "mem_global_mb": {
+     "unit": "MB",
+     "source": "solo_pi",
+     "min": 5165.0,
+     "median": 5307.0,
+     "mean": 5284.047619047619,
+     "max": 5315.0,
+     "p90": 5313.0,
+     "sampleCount": 21,
+     "labelZh": "全局内存占用",
+     "labelEn": "Global memory usage"
+    },
+    "mem_privdirty_mb": {
+     "unit": "MB",
+     "source": "solo_pi",
+     "min": 0.484375,
+     "median": 5.4453125,
+     "mean": 5.096875006666666,
+     "max": 5.4570312,
+     "p90": 5.453125,
+     "sampleCount": 15,
+     "labelZh": "应用PrivateDirty内存",
+     "labelEn": "Process PrivateDirty memory"
+    },
+    "mem_pss_mb": {
+     "unit": "MB",
+     "source": "solo_pi",
+     "min": 29.27246,
+     "median": 37.94629,
+     "mean": 37.120377866666665,
+     "max": 38.08008,
+     "p90": 38.049608,
+     "sampleCount": 15,
+     "labelZh": "应用PSS内存",
+     "labelEn": "Process PSS memory"
+    },
+    "temp_battery_c": {
+     "unit": "°C",
+     "source": "pc_supplement",
+     "min": 36.1,
+     "median": 36.1,
+     "mean": 36.1,
+     "max": 36.1,
+     "p90": 36.1,
+     "sampleCount": 9,
+     "labelZh": "电池温度",
+     "labelEn": "Battery temperature"
+    },
+    "gpu_util_pct": {
+     "unit": "%",
+     "source": "pc_supplement",
+     "min": 0.0,
+     "median": 4.028053544486482,
+     "mean": 2.34680891910382,
+     "max": 5.009066093988452,
+     "p90": 4.224256054386876,
+     "sampleCount": 9,
+     "labelZh": "GPU占用",
+     "labelEn": "GPU utilization"
+    }
+   },
+   "collectWindow": {
+    "collect_started_at": "2026-11-01T06:53:09.077491+00:00",
+    "collect_stopped_at": "2026-11-01T06:53:32.122017+00:00",
+    "ui": {
+     "started_at": "2026-11-01T06:53:10.917875+00:00",
+     "ended_at": "2026-11-01T06:53:30.124094+00:00",
+     "timeout_s": 180
+    }
+   },
+   "components": [
+    {
+     "component": "performance",
+     "kind": "performance",
+     "state": "completed",
+     "outcome": "not_tested",
+     "created_at": "2026-11-01T14:53:32.178965+08:00"
+    },
+    {
+     "component": "ui",
+     "kind": "ui",
+     "state": "completed",
+     "outcome": "passed",
+     "created_at": "2026-11-01T14:53:32.178965+08:00"
+    }
+   ],
+   "evidence": [
+    {
+     "logical_key": "junit.xml",
+     "mime_type": "text/xml",
+     "byte_size": 697,
+     "availability": "available"
+    },
+    {
+     "logical_key": "mobile-config.toml",
+     "mime_type": "application/octet-stream",
+     "byte_size": 208,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/a7a9819f-5655-46eb-a87e-517094ce219a/artifacts/app_process-main-4763_CPU_02f58a47a61505e9_1793515989977_1793516010732.csv",
+     "mime_type": "text/csv",
+     "byte_size": 870,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/a7a9819f-5655-46eb-a87e-517094ce219a/artifacts/global_usage_CPU_95de931658a1fd95_1793515989977_1793516010732.csv",
+     "mime_type": "text/csv",
+     "byte_size": 1312,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/a7a9819f-5655-46eb-a87e-517094ce219a/artifacts/global_usage_Memory_7da3b10c5c16b898_1793515989978_1793516010732.csv",
+     "mime_type": "text/csv",
+     "byte_size": 639,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/a7a9819f-5655-46eb-a87e-517094ce219a/artifacts/privatedirty-main-4763_Memory_7db16279b11df69f_1793515989978_1793516010732.csv",
+     "mime_type": "text/csv",
+     "byte_size": 522,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/a7a9819f-5655-46eb-a87e-517094ce219a/artifacts/pss-main-4763_Memory_f0a64db0e0df0029_1793515989978_1793516010732.csv",
+     "mime_type": "text/csv",
+     "byte_size": 512,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/a7a9819f-5655-46eb-a87e-517094ce219a/artifacts/supplement_thermal_gpu.csv",
+     "mime_type": "text/csv",
+     "byte_size": 260,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/a7a9819f-5655-46eb-a87e-517094ce219a/meta.json",
+     "mime_type": "application/json",
+     "byte_size": 1278,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/a7a9819f-5655-46eb-a87e-517094ce219a/report.html",
+     "mime_type": "text/html",
+     "byte_size": 1044963,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/a7a9819f-5655-46eb-a87e-517094ce219a/report.json",
+     "mime_type": "application/json",
+     "byte_size": 14573,
+     "availability": "available"
+    },
+    {
+     "logical_key": "report.json",
+     "mime_type": "application/json",
+     "byte_size": 2684,
+     "availability": "available"
+    },
+    {
+     "logical_key": "runs/main.json",
+     "mime_type": "application/json",
+     "byte_size": 141,
+     "availability": "available"
+    }
+   ],
+   "verdict": "not_tested",
+   "reason": "baseline_missing"
+  },
+  {
+   "display_id": "RUN-0007",
+   "id": "5724b589-0699-426b-ad20-d0b35239bb21",
+   "module": "joint",
+   "state": "completed",
+   "outcome": "not_tested",
+   "reason_code": "baseline_missing",
+   "not_tested_reason": "baseline_missing",
+   "suite": {
+    "id": "8e466ef7-c892-4ccb-b69c-8d34dacc5604",
+    "version": 2,
+    "source_ref": "v2",
+    "source_commit": "local",
+    "code_copy": {
+     "tree_sha256": "a8e626e8da38a954e73bfa0760f546cf52f3619cf1cee79f6ed440f4056f72c0",
+     "file_count": 1,
+     "root_rel": "a76e720537bd45138121f95caf0c98d8"
+    }
+   },
+   "build": {
+    "id": "a342d799-f8ce-487f-8f39-df8766c37042",
+    "version": "15.0.14",
+    "build_key": "com.miui.calculator@15.0.14",
+    "source_commit": "local",
+    "sha256": null
+   },
+   "revision": {
+    "id": "5b669a59-89d3-4e69-ac4d-096f42caffdd",
+    "readiness": "validated",
+    "test_type": "joint",
+    "suite_version_id": "8e466ef7-c892-4ccb-b69c-8d34dacc5604"
+   },
+   "junit": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "present": true,
+    "failed": 0
+   },
+   "metricsSummary": {
+    "cpu_global_pct": {
+     "unit": "%",
+     "source": "solo_pi",
+     "min": 2.763819,
+     "median": 10.218978,
+     "mean": 12.514490009756098,
+     "max": 42.606518,
+     "p90": 24.3309,
+     "sampleCount": 41,
+     "labelZh": "全局CPU占用",
+     "labelEn": "Global CPU usage"
+    },
+    "cpu_process_pct": {
+     "unit": "%",
+     "source": "solo_pi",
+     "min": 0.0,
+     "median": 0.0,
+     "mean": 0.39107271246153846,
+     "max": 2.5641026,
+     "p90": 2.007727892400002,
+     "sampleCount": 13,
+     "labelZh": "应用进程CPU占用",
+     "labelEn": "Process CPU usage"
+    },
+    "mem_global_mb": {
+     "unit": "MB",
+     "source": "solo_pi",
+     "min": 5223.0,
+     "median": 5308.0,
+     "mean": 5295.571428571428,
+     "max": 5321.0,
+     "p90": 5318.0,
+     "sampleCount": 21,
+     "labelZh": "全局内存占用",
+     "labelEn": "Global memory usage"
+    },
+    "mem_privdirty_mb": {
+     "unit": "MB",
+     "source": "solo_pi",
+     "min": 5.734375,
+     "median": 5.7363281,
+     "mean": 5.7363281,
+     "max": 5.7382812,
+     "p90": 5.73789058,
+     "sampleCount": 2,
+     "labelZh": "应用PrivateDirty内存",
+     "labelEn": "Process PrivateDirty memory"
+    },
+    "mem_pss_mb": {
+     "unit": "MB",
+     "source": "solo_pi",
+     "min": 38.6709,
+     "median": 38.674317,
+     "mean": 38.674317,
+     "max": 38.677734,
+     "p90": 38.6770506,
+     "sampleCount": 2,
+     "labelZh": "应用PSS内存",
+     "labelEn": "Process PSS memory"
+    },
+    "temp_battery_c": {
+     "unit": "°C",
+     "source": "pc_supplement",
+     "min": 36.3,
+     "median": 36.3,
+     "mean": 36.3,
+     "max": 36.3,
+     "p90": 36.3,
+     "sampleCount": 1,
+     "labelZh": "电池温度",
+     "labelEn": "Battery temperature"
+    },
+    "gpu_util_pct": {
+     "unit": "%",
+     "source": "pc_supplement",
+     "min": 2.4223407593347974,
+     "median": 2.4223407593347974,
+     "mean": 2.4223407593347974,
+     "max": 2.4223407593347974,
+     "p90": 2.4223407593347974,
+     "sampleCount": 1,
+     "labelZh": "GPU占用",
+     "labelEn": "GPU utilization"
+    }
+   },
+   "collectWindow": {
+    "collect_started_at": "2026-11-01T06:55:11.965921+00:00",
+    "collect_stopped_at": "2026-11-01T06:55:35.213604+00:00",
+    "ui": {
+     "started_at": "2026-11-01T06:55:13.802195+00:00",
+     "ended_at": "2026-11-01T06:55:33.301140+00:00",
+     "timeout_s": 180
+    }
+   },
+   "components": [
+    {
+     "component": "performance",
+     "kind": "performance",
+     "state": "completed",
+     "outcome": "not_tested",
+     "created_at": "2026-11-01T14:55:35.268765+08:00"
+    },
+    {
+     "component": "ui",
+     "kind": "ui",
+     "state": "completed",
+     "outcome": "passed",
+     "created_at": "2026-11-01T14:55:35.268765+08:00"
+    }
+   ],
+   "evidence": [
+    {
+     "logical_key": "junit.xml",
+     "mime_type": "text/xml",
+     "byte_size": 697,
+     "availability": "available"
+    },
+    {
+     "logical_key": "mobile-config.toml",
+     "mime_type": "application/octet-stream",
+     "byte_size": 208,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/5724b589-0699-426b-ad20-d0b35239bb21/artifacts/app_process-main-4763_CPU_d852a74214a0688a_1793516112839_1793516133884.csv",
+     "mime_type": "text/csv",
+     "byte_size": 395,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/5724b589-0699-426b-ad20-d0b35239bb21/artifacts/global_usage_CPU_8906648b58b61e33_1793516112839_1793516133884.csv",
+     "mime_type": "text/csv",
+     "byte_size": 1308,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/5724b589-0699-426b-ad20-d0b35239bb21/artifacts/global_usage_Memory_dd79e9a95bb59a68_1793516112839_1793516133886.csv",
+     "mime_type": "text/csv",
+     "byte_size": 637,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/5724b589-0699-426b-ad20-d0b35239bb21/artifacts/privatedirty-main-4763_Memory_d19987ad5369f6aa_1793516112839_1793516133886.csv",
+     "mime_type": "text/csv",
+     "byte_size": 115,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/5724b589-0699-426b-ad20-d0b35239bb21/artifacts/pss-main-4763_Memory_9f695551c9fe3610_1793516112839_1793516133886.csv",
+     "mime_type": "text/csv",
+     "byte_size": 105,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/5724b589-0699-426b-ad20-d0b35239bb21/artifacts/supplement_thermal_gpu.csv",
+     "mime_type": "text/csv",
+     "byte_size": 80,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/5724b589-0699-426b-ad20-d0b35239bb21/meta.json",
+     "mime_type": "application/json",
+     "byte_size": 1277,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/5724b589-0699-426b-ad20-d0b35239bb21/report.html",
+     "mime_type": "text/html",
+     "byte_size": 1043920,
+     "availability": "available"
+    },
+    {
+     "logical_key": "perf-runs/5724b589-0699-426b-ad20-d0b35239bb21/report.json",
+     "mime_type": "application/json",
+     "byte_size": 11092,
+     "availability": "available"
+    },
+    {
+     "logical_key": "report.json",
+     "mime_type": "application/json",
+     "byte_size": 2699,
+     "availability": "available"
+    },
+    {
+     "logical_key": "runs/main.json",
+     "mime_type": "application/json",
+     "byte_size": 143,
+     "availability": "available"
+    }
+   ],
+   "verdict": "not_tested",
+   "reason": "baseline_missing"
+  },
+  {
+   "display_id": "RUN-0008",
+   "id": "8bd5a691-44cd-48f7-969c-d3b459306ee7",
+   "module": "ui",
+   "state": "completed",
+   "outcome": "failed",
+   "reason_code": "case_failure",
+   "not_tested_reason": null,
+   "suite": {
+    "id": "97a84584-451b-46b0-b450-2a2aa900b14e",
+    "version": 3,
+    "source_ref": "v3-fail",
+    "source_commit": "local",
+    "code_copy": {
+     "tree_sha256": "daaf7bc844a84a7bf373181ab3e41a9b7514a3a0d6e33fcd2acb6ba1c075bb86",
+     "file_count": 1,
+     "root_rel": "a8e46288a246497f99ea8e8c501feb1c"
+    }
+   },
+   "build": {
+    "id": "a342d799-f8ce-487f-8f39-df8766c37042",
+    "version": "15.0.14",
+    "build_key": "com.miui.calculator@15.0.14",
+    "source_commit": "local",
+    "sha256": null
+   },
+   "revision": {
+    "id": "b5ac3f0e-7d38-48ef-b3e2-18cc08f932ab",
+    "readiness": "validated",
+    "test_type": "ui",
+    "suite_version_id": "97a84584-451b-46b0-b450-2a2aa900b14e"
+   },
+   "junit": {
+    "tests": 4,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "present": true,
+    "failed": 1
+   },
+   "metricsSummary": {},
+   "collectWindow": null,
+   "components": [
+    {
+     "component": "ui",
+     "kind": "ui",
+     "state": "completed",
+     "outcome": "failed",
+     "created_at": "2026-11-01T14:57:37.181974+08:00"
+    }
+   ],
+   "evidence": [
+    {
+     "logical_key": "evidence/e4e00e9f100549c9/failure-frame.png",
+     "mime_type": "image/png",
+     "byte_size": 212795,
+     "availability": "available"
+    },
+    {
+     "logical_key": "evidence/e4e00e9f100549c9/meta.json",
+     "mime_type": "application/json",
+     "byte_size": 1350,
+     "availability": "available"
+    },
+    {
+     "logical_key": "evidence/e4e00e9f100549c9/ui-tree.xml",
+     "mime_type": "text/xml",
+     "byte_size": 22363,
+     "availability": "available"
+    },
+    {
+     "logical_key": "junit.xml",
+     "mime_type": "text/xml",
+     "byte_size": 1546,
+     "availability": "available"
+    },
+    {
+     "logical_key": "mobile-config.toml",
+     "mime_type": "application/octet-stream",
+     "byte_size": 208,
+     "availability": "available"
+    },
+    {
+     "logical_key": "run-manifest.jsonl",
+     "mime_type": "application/octet-stream",
+     "byte_size": 301,
+     "availability": "available"
+    },
+    {
+     "logical_key": "runs/main.json",
+     "mime_type": "application/json",
+     "byte_size": 143,
+     "availability": "available"
+    }
+   ],
+   "verdict": "failed",
+   "reason": "case_failure"
+  },
+  {
+   "display_id": "RUN-0009",
+   "id": "4ffd824c-01b9-4fbe-8c8f-f237fc187fe9",
+   "module": "ui",
+   "state": "cancelled",
+   "outcome": null,
+   "reason_code": "cancel_requested",
+   "not_tested_reason": null,
+   "suite": {
+    "id": "42450ab5-5565-4bfb-837e-f4aeea400771",
+    "version": 2,
+    "source_ref": "v2",
+    "source_commit": "local",
+    "code_copy": {
+     "tree_sha256": "a8e626e8da38a954e73bfa0760f546cf52f3619cf1cee79f6ed440f4056f72c0",
+     "file_count": 1,
+     "root_rel": "02c6b68d5b8c43378ac195ed3fccdb3b"
+    }
+   },
+   "build": {
+    "id": "a342d799-f8ce-487f-8f39-df8766c37042",
+    "version": "15.0.14",
+    "build_key": "com.miui.calculator@15.0.14",
+    "source_commit": "local",
+    "sha256": null
+   },
+   "revision": {
+    "id": "4dcf01e7-e26c-422a-87f4-ef534b38f352",
+    "readiness": "validated",
+    "test_type": "ui",
+    "suite_version_id": "42450ab5-5565-4bfb-837e-f4aeea400771"
+   },
+   "junit": {},
+   "metricsSummary": {},
+   "collectWindow": null,
+   "components": [],
+   "evidence": [
+    {
+     "logical_key": "mobile-config.toml",
+     "mime_type": "application/octet-stream",
+     "byte_size": 208,
+     "availability": "available"
+    },
+    {
+     "logical_key": "runs/main.json",
+     "mime_type": "application/json",
+     "byte_size": 248,
+     "availability": "available"
+    }
+   ],
+   "verdict": null,
+   "reason": "cancel_requested"
+  }
+ ],
+ "debug": {
+  "session_id": "72458232-6539-4853-a2fe-ebcbd7f74cd2",
+  "sessions_snapshot_tree": "9cd79d88265f4089",
+  "crop_validation": {
+   "count": 1,
+   "matches": [
+    {
+     "x": 556,
+     "y": 2142,
+     "width": 447,
+     "height": 137
+    }
+   ],
+   "scores": [
+    1.0
+   ],
+   "snapshot_id": "b27bdf15c5b74e8c",
+   "source_snapshot_id": "9cd79d88265f4089",
+   "region": [
+    556,
+    2142,
+    447,
+    137
+   ],
+   "verification": "n-9goLRcIZ0tggig1A3Ui00Fa3VrdcLi",
+   "width": 1080,
+   "height": 2400,
+   "captured_at": "2026-11-01T06:56:39.006+00:00"
+  },
+  "template": {
+   "logical": "acceptance/calculator-consent-agree.png",
+   "version_id": "8e67584b626e4534a3a76d7db6f079d8",
+   "sha256": "0bd150c124c580c1ad8e43a21bb0aa6da4b62c6d94074c7b473063703f33cc2d",
+   "stored": "server/assets/versions/8e67584b626e4534a3a76d7db6f079d8/image.png"
+  },
+  "closed_state": "closed"
+ }
+}

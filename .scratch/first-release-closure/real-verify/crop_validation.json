@@ -1,0 +1,26 @@
+{
+ "count": 1,
+ "matches": [
+  {
+   "x": 556,
+   "y": 2142,
+   "width": 447,
+   "height": 137
+  }
+ ],
+ "scores": [
+  1.0
+ ],
+ "snapshot_id": "b27bdf15c5b74e8c",
+ "source_snapshot_id": "9cd79d88265f4089",
+ "region": [
+  556,
+  2142,
+  447,
+  137
+ ],
+ "verification": "n-9goLRcIZ0tggig1A3Ui00Fa3VrdcLi",
+ "width": 1080,
+ "height": 2400,
+ "captured_at": "2026-11-01T06:56:39.006+00:00"
+}

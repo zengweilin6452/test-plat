@@ -199,3 +199,82 @@
   - 定向子集（运行生命周期 / 执行接线 / 调试登记 / 框选 / 报告追溯 / 性能场景与派发 / 联动）：**119 passed**。
   - 前端：`tsc --noEmit` 退出码 0；`npm test` **48 passed**（新增采集窗口用例）；`npm run build` 成功（128 modules，`index-Dn4VK9xr.js` 369.31 kB）。
 - 边界不变：评审修复不改变真机执行、可信来源、1440×900 像素核对三类未执行项的结论（§3.1、§5、§6）；§5 第 7 条的 `collectWindow` 展示缺口已关闭。
+
+## 8. 真机验收执行记录（2026-11-01 下午）
+
+用户连接真机后，在 HEAD 的独立实例上补做 UI / 独立性能 / 联动 / 调试四类真机验证。为避免影响常驻开发环境，**未启动/停止 `:8000` 与 `:5173`**，而是用同一份 HEAD 代码在 `127.0.0.1:8010` 起独立后端，使用隔离库 `testdock_real`（迁移 `0008`），数据与产物根为 `.runtime/real-verify/data`；共享库 `testdock` 未写入。
+
+### 8.1 环境与前置
+
+| 项 | 值 |
+| --- | --- |
+| 后端 | HEAD 代码，`http://127.0.0.1:8010`（`:8000` 旧进程未动），库 `testdock_real` |
+| 设备 | serial `749622c9`，Xiaomi 2206123SC，Android 14，1080×2400；同步后状态 ready，自动档案 "Xiaomi 2206123SC / Android 14 / 1080x2400" |
+| 被测应用 | `com.miui.calculator`，versionName `15.0.14`，versionCode `315000014`（设备已安装；未安装/升级/推送任何 APK） |
+| 构建 | `com.miui.calculator@15.0.14`，登记后做了真实身份核对（package/versionName match，versionCode 为观测值），再显式确认基准（`confirmed`，baseline versionCode=315000014） |
+| 可信来源 | `TESTDOCK_SUITE_SOURCES` 指向 `.scratch/first-release-closure/real-suite`（**宿主配置的受控验收套件，不是客户生产套件**；内容为真机冒烟 pytest 用例，真实冷启动应用并截帧） |
+| 套件版本 | UI v1（2 用例）、v2（3 用例，含 15s 前台停留）、v3（4 用例，含故意失败）；joint v1/v2 均锁定对应 UI 代码副本 |
+| 设备占用 | 所有运行串行；调试会话关闭与每次运行结束后活动租约均为 0 |
+
+### 8.2 执行结果
+
+| 运行 | 类型 | 终态 / 结论 | 真机证据 |
+| --- | --- | --- | --- |
+| RUN-0001 | UI v1 | completed / passed | pytest 2 passed；cwd 为固定副本 `code-copies/<id>`；run_events 含 `lease_acquired(serial=749622c9)`、`identity_verified`、`suite_copy`、`pytest: 2 passed`；junit 2/0/0 |
+| RUN-0002 | 独立性能 | completed / not_tested(`gate_policy_missing`) | SoloPi 真实采集：CPU（全局/进程）、PSS/PrivateDirty/全局内存、电池温度共 7 类指标，CPU 样本 22 个；未配置门禁策略，如实未判定，不补零 |
+| RUN-0003/0005 | 联动（修复前） | completed / not_tested(`baseline_missing`) | 采集窗口存在但指标为空；由此发现"采集作用域未启动"缺陷（见 §8.3） |
+| RUN-0004 | UI v2 | completed / passed | pytest 3 passed（含 15.04s 前台停留用例）；固定副本摘要与 v2 一致 |
+| RUN-0006 | 联动（修复采集后） | completed / not_tested(`baseline_missing`) | 7 类真实指标；`collectWindow` 因报告选择缺陷暂为 null，修复后可读到 |
+| RUN-0007 | 联动（全部修复后） | completed / not_tested(`baseline_missing`) | UI passed + 性能 7 类指标；`collectWindow` 23.2s 包围 UI 19.5s；UI 与 performance 两个组件分别保留；无同档基线，性能如实未判定 |
+| RUN-0008 | UI v3（故意失败） | completed / failed(`case_failure`) | junit 4 用例 1 failure（断言消息可见）；真实失败证据 `failure-frame.png`（212,795 bytes，PNG 486×1080）、`ui-tree.xml`（22,363 bytes）、`meta.json`、`run-manifest.jsonl` 均 available 且可下载 |
+| RUN-0009 | UI v2 + 取消 | cancelled / outcome NULL | 运行 4s 后取消：响应 `state=cancelled`、`runner_terminated=true`；终态 `cancelled/cancel_requested`；活动租约 0 |
+
+调试会话（真实设备）：
+
+1. `POST /debug-sessions` → 会话 `72458232-6539-4853-a2fe-ebcbd7f74cd2`，viewer `http://127.0.0.1:13650`，状态 active。
+2. 快照 `9cd79d88265f4089`（1080×2400）；带树快照 `131ffa6d643148e7` / `9cd79d88265f4089`，`tree_captured_at == captured_at`、`consistent=true`（冻结画面与节点树同源）。
+3. 框选计算器隐私弹窗"同意"按钮（bounds → region `[556,2142,447,137]`），`POST /templates/validate-crop` 用**新捕获画面**验证：唯一命中 `count=1`、`score=1.0`，服务端发放一次性 `verification`（TTL 120s）。
+4. 凭该凭证登记模板 `acceptance/calculator-consent-agree.png`：version `8e67584b626e4534a3a76d7db6f079d8`，sha256 `0bd150c1…33cc2d`；磁盘 `server/assets/versions/8e675…/image.png` 实测同哈希；`GET /templates` 可查。
+5. `DELETE /debug-sessions/{id}` → 会话 closed；会话凭证按会话清除；活动租约 0。
+
+### 8.3 真机验收新发现并修复的缺陷
+
+| # | 缺陷（真机实证） | 修复 | 复验 |
+| --- | --- | --- | --- |
+| 1 | **联动性能采集从未启动**：`_start_perf_collect` 只调用 `kit.collect()` 构造作用域，没有 `__enter__`；UI 跑完后 finalize 在 `_session=None` 上报 `'NoneType' object has no attribute 'stop'`。报告仍把 performance 记成 completed，属于"没执行却像执行了" | `2295877`：显式进入作用域，启动失败按既有矩阵收敛（UI cancelled / performance errored） | `test_issue16_joint_lifecycle.py::test_perf_collect_scope_is_entered_before_ui_runs`；RUN-0007 采到 7 类真实指标 |
+| 2 | **run 级报告被嵌套报告挤掉**：采集真正启动后多出 `perf-runs/<run>/report.json`，平台按 logical_key 取第一个 report.json，导致 `collectWindow` 经 `/report` 变 null | `837e671`：run 级（`logical_key == "report.json"`）优先，其余按路径最短回退 | `test_report_prefers_run_level_report_over_nested_perf_report`；RUN-0007 `collectWindow` 可读且覆盖 UI |
+| 3 | **指定 node_id 同步设备 500**：SQL 未取 `execution_nodes.status` 却读取 `fixed_node.status`（真机同步传 node_id 时直接 AttributeError） | `4adf7ca`：补上列并加回归 | `test_p7_device_sync.py::test_sync_with_explicit_node_id_does_not_crash` |
+
+### 8.4 真机后的状态更新（相对 §2.1）
+
+| 用户故事 | 原状态 | 现状态 | 依据 |
+| --- | --- | --- | --- |
+| 1 可信套件来源可见 | 受阻 | **已通过（受控来源）** | `GET /suite-sources` 返回宿主配置的 `calculator-smoke`（受控验收套件，非客户套件）；来源为空时的 `hint` 行为仍由既有测试覆盖 |
+| 4 登记套件并发现用例 | 已实现待验 | **已通过（受控来源）** | 真实目录 → 固定副本 → pytest collect-only 发布 v1（2 用例），v2/v3 追加版本 |
+| 9/10 安装身份核对与基准确认 | 已实现待验 | **已通过** | 真机 `dumpsys` 核对 match，确认后 baseline 固定（versionCode=315000014） |
+| 13 启动运行并跟踪状态/事件 | 已实现待验 | **已通过** | RUN-0001/0004：排队→派发→运行→完成；事件含租约、身份、副本、pytest 进度；报告可查 |
+| 14 取消运行并释放设备 | 已实现待验 | **已通过** | RUN-0009：cancelled/outcome NULL、`runner_terminated=true`、活动租约 0 |
+| 16 失败截图/日志/断言 | 已实现待验 | **已通过** | RUN-0008：真实 212KB 截图、UI 树、junit 断言消息、运行清单 |
+| 18 独立性能采集 | 已实现待验 | **已通过** | RUN-0002：真实 7 类指标与样本数；无策略时如实 `not_tested` |
+| 22 联动同一次 UI 执行采性能 | 已实现待验 | **已通过（修复后）** | RUN-0007：单租约、窗口包围 UI、UI/性能分别落结论；采集中断缺陷已修 |
+| 24 调试会话实时画面/连接状态 | 已实现待验 | **已通过** | 真机会话 active、viewer 就绪、快照/树/框选/登记/关闭全链路 |
+| 25/26/28 冻结同源、验证后登记、跨会话可查 | 已通过（夹具） | **已通过（真机补证）** | 快照与树同时刻 consistent；新画面唯一命中后凭证登记；模板库可查且 sha256 与磁盘一致 |
+
+未改变：US27 的"刷新/恢复预览清旧匹配"仍由前端测试覆盖，本轮真机只验证了服务端凭证失效与会话关闭清理；US20 无同档基线，性能如实未判定。
+
+### 8.5 仍未执行 / 边界
+
+1. **客户真实套件**：本轮来源是宿主配置的受控验收套件，证明来源→副本→发现→执行链路在真机可用，但不代表任何客户既有套件已通过。
+2. **1440×900 像素级视觉核对**：仍未执行（内置浏览器无可见视口，见 §5 第 4 条）。
+3. **页面 ↔ HEAD 后端同版数据**：`:8000` 仍是旧进程、`:5173` 仍代理它；本轮真机证据全部走 `:8010` HEAD，不宣称页面数据已同版。
+4. **门禁/基线结论**：本轮未配置门禁策略与同档基线，性能运行如实 `not_tested(gate_policy_missing / baseline_missing)`，不伪造判定。
+5. **模板资产**：真机登记会在共享模板根 `server/assets/versions/<version_id>/` 落下模板版本（本轮 `8e67584b…`），属真实登记结果；如需清理应按模板版本管理，不直接删目录。
+6. **数据与环境**：隔离库 `testdock_real`、产物根 `.runtime/real-verify/data`、证据文件 `.scratch/first-release-closure/real-verify/evidence/`；未写共享库 `testdock`，未占用设备超过单次运行期。
+
+### 8.6 真机修复后的复跑
+
+- 后端全量（`testdock_frc10`，迁移 `0008`）：**562 项，561 passed / 1 skipped / 0 failed，退出码 0**（计数方式同 §3 #1：进度行共 562 个字符，`.`×561、`s`×1，无 F/E；唯一 skip 仍是 Windows 符号链接权限）。
+- 定向：`test_issue16_joint_lifecycle.py` 23 passed；`test_issue16 + test_p7_device_sync + test_issue06_perf_dispatch + test_issue06_perf_scenario` 77 passed。
+- 前端本轮未改动，§7 的 `tsc --noEmit` / `npm test` 48 passed / `npm run build` 结果仍适用。
+- 本轮代码提交：`2295877`（joint 采集作用域）、`4adf7ca`（node_id 同步）、`837e671`（run 级报告优先）；验收记录与证据随本节提交。
+- 证据文件：`.scratch/first-release-closure/real-verify/evidence/real-device-2026-11-01.json`（9 次运行与调试会话摘要）、`evidence/failure-frame.png`（真实失败截图）、`crop_validation.json`、`snapshot_tree.json`；运行产物在 `.runtime/real-verify/data/artifacts/<run_id>/`。

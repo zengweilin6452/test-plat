@@ -48,3 +48,6 @@
 - 结论：自动化与契约层满足；首期交付验收为「有条件通过」，不满足点已在记录 §6 单列。
 - 2026-11-01 评审修复复验：`code-review` 两轴在集成分支上提出 14 条，采纳 8 组并在 `cba314a`/`f810806`/`57f9cd5`（合并 `4b4fea2`）修复——取消登记已落盘产物、`runner_terminated` 如实回报、派发窗口复查取消、快照 id 白名单、会话关闭清理验证凭证、报告页展示采集窗口、契约文档补齐、死代码清理；驳回 1 条已被 `finalize` 终态短路证伪的"取消覆盖完成态"。
 - 复跑结果：后端全量 559 项（558 passed / 1 skipped / 0 failed，退出码 0）、定向 119 passed、`tsc` 0、`npm test` 48 passed、`npm run build` 成功、`alembic heads=0008`。验收记录新增 §7，§2 状态判定不变。
+- 2026-11-01 真机验收（用户连接 749622c9 后补做）：独立 HEAD 后端 `:8010` + 隔离库 `testdock_real`，宿主配置受控验收套件（非客户套件）。完成 UI v1/v2（passed）、UI v3 故意失败（real screenshot/ui-tree/junit）、独立性能（7 类真实指标，`gate_policy_missing`）、联动（修复后 7 类指标 + collectWindow 覆盖 UI）、取消（`cancelled`/`runner_terminated=true`/租约 0）、调试会话（快照+树同源、新画面唯一命中 score 1.0、凭证登记模板、关闭释放）。
+- 真机新发现并修复 3 个缺陷：joint 采集作用域未 `__enter__`（`2295877`）、run 级 report.json 被嵌套报告挤掉（`837e671`）、`/resources/sync` 指定 node_id 500（`4adf7ca`）。修复后全量 562 项（561 passed / 1 skipped / 0 failed，退出码 0）。
+- 验收记录新增 §8（执行记录、状态更新、边界）。US1/4/9/10/13/14/16/18/22/24/25/26/28 获得真机或受控来源证据；客户真实套件、1440×900 像素核对、页面↔HEAD 同版数据仍未执行。

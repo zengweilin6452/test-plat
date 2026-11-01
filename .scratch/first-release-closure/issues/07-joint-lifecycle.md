@@ -68,3 +68,4 @@ D:\python312\python.exe -m pytest tests/test_issue16_joint_lifecycle.py -q
 - 测试（`testdock_frc07`）：`test_issue16_joint_lifecycle.py` 等定向 71 passed；实现代理跑后端全量 543 passed + 1 skipped。
 - 未执行：真机联动运行（不占用 749622c9），证据留 10 记录。
 - 遗留：`ui_timeout_s` 以套件清单为准，修订里的冲突值被覆盖（版本不可变优先）；前端只补了 `collectWindow` 类型，展示留 09/10。
+- 2026-11-01 真机复验（补充）：RUN-0007 联动在 749622c9 上真实采集到 7 类指标、collectWindow 23.2s 包围 UI 19.5s。复验中发现并修复 `_start_perf_collect` 未 `__enter__`、采集从未启动的缺陷（提交 `2295877`，回归 `test_perf_collect_scope_is_entered_before_ui_runs`）；同一轮修复了 run 级报告被 `perf-runs/.../report.json` 挤掉导致 collectWindow 为 null 的问题（`837e671`，回归 `test_report_prefers_run_level_report_over_nested_perf_report`）。
