@@ -197,6 +197,14 @@ def build_spec(
         argv += ["--app-activity", str(config["app_activity"])]
     if config.get("perf"):
         argv += ["--perf-config", json.dumps(config["perf"], ensure_ascii=False)]
+    # 固定代码副本：runner 以它为 pytest 的 cwd，并只在副本边界内解析目标。
+    # 套件版本 id 与树摘要随行，供事件/报告追溯「本次实际执行的套件版本」。
+    if config.get("suite_root"):
+        argv += ["--suite-root", str(config["suite_root"])]
+    if config.get("suite_version_id"):
+        argv += ["--suite-version", str(config["suite_version_id"])]
+    if config.get("suite_sha256"):
+        argv += ["--suite-sha256", str(config["suite_sha256"])]
     if fake_runner_enabled():
         argv.append("--fake")
 

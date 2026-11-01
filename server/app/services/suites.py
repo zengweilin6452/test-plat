@@ -450,13 +450,25 @@ async def create_version(
     return _version_dict(row)
 
 
+@dataclass(frozen=True)
+class ExecutionCopy:
+    """执行前复验通过的固定代码副本（供派发写入 spawn 配置并追溯）。"""
+
+    suite_version_id: str
+    root: Path
+    tree_sha256: str
+    copy_id: str
+
+
 async def prepare_execution_copy(
     session: AsyncSession, suite_version_id: str
-) -> Path:
-    """执行前解析并复验该版本的固定代码副本，返回副本根目录。
+) -> ExecutionCopy:
+    """执行前解析并复验该版本的固定代码副本，返回副本根与版本身份。
 
     缺失/损坏一律阻断（422 discover_failed），绝不回退到可变来源目录。
     旧版本没有 code_copy 时明确要求重新发现并创建新版本，不追认。
+    摘要只从 manifest 的 code_copy 读并交给 verify_code_copy 复验，不在这里
+    重算（摘要真源只有 discover 一处）。
     """
     sid = as_uuid(suite_version_id)
     if sid is None:
@@ -476,9 +488,15 @@ async def prepare_execution_copy(
             "该套件版本未保留固定代码副本，请重新发现并创建新版本", [], None
         )
     try:
-        return discover_integration.verify_code_copy(code_copy)
+        root = discover_integration.verify_code_copy(code_copy)
     except discover_integration.CodeCopyError as exc:
         raise _code_copy_api_error(exc) from exc
+    return ExecutionCopy(
+        suite_version_id=str(row["id"]),
+        root=root,
+        tree_sha256=str(code_copy.get("tree_sha256") or ""),
+        copy_id=str(code_copy.get("copy_id") or root.name),
+    )
 
 
 # --------------------------------------------------------------------------- #
