@@ -346,7 +346,7 @@ async def _apply_original_gate(session, run_id: str) -> dict[str, Any]:
     await session.execute(
         text(
             "UPDATE run_components SET outcome = :outcome, reason_code = :reason "
-            "WHERE run_id = :rid AND kind = 'performance'"
+            "WHERE run_id = :rid AND kind = 'performance' AND state = 'completed'"
         ),
         {
             "rid": run_id,

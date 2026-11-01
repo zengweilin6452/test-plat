@@ -43,6 +43,7 @@ MAX_UI_TIMEOUT_S = 3600
 
 UI_CANCELLED_BEFORE_START = "collect_start_failed_ui_not_started"
 PERF_COLLECT_START_FAILED = "perf_collect_start_failed"
+PERF_COLLECT_STOP_FAILED = "perf_collect_stop_failed"
 UI_TIMEOUT = "ui_timeout"
 
 
@@ -89,7 +90,13 @@ def _start_perf_collect(options: UiJobOptions):
     if not options.app_package:
         raise ValueError("joint 运行缺少 app_package：采集需要目标前台应用")
     runs_dir = options.artifacts_dir / "perf-runs"
-    kit = PerfKit(serial=options.serial or None, runs_dir=str(runs_dir))
+    # SQLite 必须落在本次运行产物目录：vendor 目录是只读固定副本，
+    # 默认（<repo>/data/mobile_perf.db）会写穿 vendor。
+    kit = PerfKit(
+        serial=options.serial or None,
+        runs_dir=str(runs_dir),
+        db_path=str(options.artifacts_dir / "perf.sqlite3"),
+    )
     spec = SessionSpec(
         target=str(options.app_package),
         items=items,
@@ -116,19 +123,22 @@ def _ui_window_timeout(options: UiJobOptions) -> int:
     return clamp_ui_timeout(raw)
 
 
-def _stop_collection(scope: Any) -> dict[str, Any] | None:
+def _stop_collection(scope: Any) -> tuple[dict[str, Any] | None, str | None]:
     """UI 一返回（正常或超时）立即停采。
 
-    finalize 失败不吞 UI 结果：指标按缺失呈现，但采集窗口必须收口，
-    不能把采集留到进程退出（工单 07 缺陷 2）。
+    finalize 失败不吞 UI 结果，但必须把失败作为性能组件事实返回：
+    指标按缺失呈现，采集窗口仍要收口，不能把采集留到进程退出
+    （工单 07 缺陷 2；复审缺陷 2）。
     """
     if scope is None:
-        return None
+        return None, None
     try:
-        return scope.finalize()
+        report = scope.finalize()
+        return report if isinstance(report, dict) else None, None
     except Exception as exc:  # noqa: BLE001 - 停采失败不吞 UI 结果
-        emit_text("perf_collect_stop_failed", detail=str(exc)[:300])
-        return None
+        detail = str(exc)[:300]
+        emit_text(PERF_COLLECT_STOP_FAILED, detail=detail)
+        return None, detail
 
 
 def _write_joint_report(
@@ -160,20 +170,34 @@ def _write_joint_report(
     write_report_json(options.artifacts_dir, report_data)
 
 
-def _ui_timeout_result(ui_result: Any) -> JointJobResult:
+def _ui_timeout_result(
+    ui_result: Any, perf_stop_error: str | None = None
+) -> JointJobResult:
+    performance = (
+        {
+            "kind": "performance",
+            "state": "errored",
+            "reason_code": PERF_COLLECT_STOP_FAILED,
+        }
+        if perf_stop_error
+        else {
+            "kind": "performance",
+            "state": "cancelled",
+            "reason_code": "collect_stopped_at_ui_timeout",
+        }
+    )
+    message = "UI 执行达到 ui_timeout_s 上限，已停止采集并收口"
+    if perf_stop_error:
+        message += "；性能采集停止失败：" + perf_stop_error[:200]
     return JointJobResult(
         exit_code=EXIT_INFRA_ERROR,
         reason=UI_TIMEOUT,
-        message="UI 执行达到 ui_timeout_s 上限，已停止采集并收口",
+        message=message,
         junit=getattr(ui_result, "junit", {}) or {},
         cases=getattr(ui_result, "cases", []) or [],
         components=[
             {"kind": "ui", "state": "errored", "reason_code": UI_TIMEOUT},
-            {
-                "kind": "performance",
-                "state": "cancelled",
-                "reason_code": "collect_stopped_at_ui_timeout",
-            },
+            performance,
         ],
     )
 
@@ -256,7 +280,7 @@ def run_joint_job(options: UiJobOptions, context: RunnerContext) -> JointJobResu
     }
 
     # UI 一返回立即停采：正常结束与超时都必须先收口（不补采、不等样本，D11）。
-    vendor_report = _stop_collection(scope)
+    vendor_report, perf_stop_error = _stop_collection(scope)
     collect_stopped_at = _now()
     emit_stage("perf_collect_stop", 90, stage=2)
 
@@ -269,7 +293,7 @@ def run_joint_job(options: UiJobOptions, context: RunnerContext) -> JointJobResu
 
     if ui_result.timed_out:
         # UI 达到上限：停止采集并收口，记超时错误（不是用例失败）
-        return _ui_timeout_result(ui_result)
+        return _ui_timeout_result(ui_result, perf_stop_error)
 
     components = list(ui_result.components or [])
     if not components:
@@ -281,13 +305,21 @@ def run_joint_job(options: UiJobOptions, context: RunnerContext) -> JointJobResu
                 "reason_code": ui_result.reason if ui_result.outcome == "not_tested" else None,
             }
         ]
-    components.append({"kind": "performance", "state": "completed"})
+    # 停采失败不得把性能组件写成 completed：UI 结果保留，性能如实报 errored
+    components.append(
+        {"kind": "performance", "state": "errored", "reason_code": PERF_COLLECT_STOP_FAILED}
+        if perf_stop_error
+        else {"kind": "performance", "state": "completed"}
+    )
 
     layout = ui_result.layout or collect_layout(options.artifacts_dir)
+    message = ui_result.message
+    if perf_stop_error:
+        message = (message + "；" if message else "") + "性能采集停止失败：" + perf_stop_error[:200]
     return JointJobResult(
         exit_code=ui_result.exit_code,
         reason=ui_result.reason,
-        message=ui_result.message,
+        message=message,
         junit=ui_result.junit,
         cases=ui_result.cases,
         layout=layout,

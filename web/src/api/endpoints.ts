@@ -232,6 +232,22 @@ export function captureSnapshot(sessionId: string | number, withTree = true) {
   )
 }
 
+/** GET /api/v1/debug-sessions/{id}/snapshots/{nid}/image —— 快照原图（PNG/JPEG） */
+export function snapshotImagePath(sessionId: string | number, snapshotId: string | number): string {
+  return (
+    '/debug-sessions/' + encodeURIComponent(String(sessionId)) +
+    '/snapshots/' + encodeURIComponent(String(snapshotId)) + '/image'
+  )
+}
+
+export function fetchSnapshotImage(
+  sessionId: string | number,
+  snapshotId: string | number,
+  signal?: AbortSignal,
+) {
+  return api.blob(snapshotImagePath(sessionId, snapshotId), signal)
+}
+
 /** GET /api/v1/debug-sessions/{id}/snapshots/{nid}/tree —— vendor 归一化节点表 */
 export function fetchSnapshotTree(sessionId: string | number, snapshotId: string | number, signal?: AbortSignal) {
   return api.get<SnapshotTreeResponse>(

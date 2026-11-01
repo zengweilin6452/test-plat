@@ -42,6 +42,7 @@ import {
   debugGestureWsPath,
   debugVideoWsPath,
   fetchDebugSession,
+  fetchSnapshotImage,
   fetchSnapshotTree,
   fetchTemplates,
   heartbeatDebugControl,
@@ -639,7 +640,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         if (frozenRef.current) return
         drawFrame(canvasRef.current, message.jpeg_base64, (size) => {
           setFrameSize((prev) => (prev && prev.w === size.w && prev.h === size.h ? prev : size))
-        })
+        }, () => frozenRef.current)
         previewFrameCountRef.current += 1
         return
       }
@@ -728,25 +729,42 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     onSessionChange?.(session ? session.id : null)
   }, [onSessionChange, session])
 
-  /** 采集快照 + 层级树 */
+  /** 采集快照 + 层级树 + 同一快照的图片 */
   const snapshotMutation = useMutation({
     mutationFn: async () => {
       const id = sessionRef.current
       if (id === null) throw new Error('缺少调试会话')
       const captured = await captureSnapshot(id, true)
       if (!captured.snapshot_id) throw new Error('快照响应缺少 snapshot_id')
-      const tree = await fetchSnapshotTree(id, captured.snapshot_id)
+      // 树和画面必须来自同一个 snapshot_id：只冻结实时流会把错帧当成快照展示
+      const [tree, image] = await Promise.all([
+        fetchSnapshotTree(id, captured.snapshot_id),
+        fetchSnapshotImage(id, captured.snapshot_id),
+      ])
       return {
+        sessionId: id,
         snapshotId: captured.snapshot_id,
-        width: captured.width ?? null,
-        height: captured.height ?? null,
         tree,
+        image,
       }
     },
-    onSuccess: ({ snapshotId: capturedId, width, height, tree }) => {
-      setSnapshotId(capturedId)
-      setSnapshotSize(width && height ? { w: width, h: height } : null)
+    onSuccess: async ({ sessionId: capturedSession, snapshotId: capturedId, tree, image }) => {
+      if (sessionRef.current !== capturedSession) return
+      // 先冻结 ref 再解码：解码期间到达的实时帧（含已排队的 onload）不得覆盖快照
       frozenRef.current = true
+      let size: FrameSize
+      try {
+        size = await drawSnapshotImage(canvasRef.current, image)
+      } catch (error) {
+        frozenRef.current = false
+        setFrozen(false)
+        const described = describeError(error)
+        setTreeError('快照画面加载失败（' + described.code + '）：' + described.message)
+        return
+      }
+      if (sessionRef.current !== capturedSession) return
+      setSnapshotId(capturedId)
+      setSnapshotSize(size)
       setFrozen(true)
       setTreeError(null)
       const list = Array.isArray(tree?.nodes) ? tree.nodes : []
@@ -2007,15 +2025,18 @@ export function shouldSendGestureMove(
   return lastSentAt === null || now - lastSentAt >= intervalMs
 }
 
-/** 把 vendor 的 base64 JPEG 帧画到 canvas；解码失败保留上一帧 */
+/** 把 vendor 的 base64 JPEG 帧画到 canvas；解码失败保留上一帧。
+ *  onload 是异步的：到帧时未冻结、解码完成时已冻结的情况必须复查。 */
 function drawFrame(
   canvas: HTMLCanvasElement | null,
   base64: string,
   onSize?: (size: FrameSize) => void,
+  isPaused?: () => boolean,
 ): void {
   if (!canvas) return
   const image = new Image()
   image.onload = () => {
+    if (isPaused?.()) return
     canvas.width = image.naturalWidth
     canvas.height = image.naturalHeight
     const ctx = canvas.getContext('2d')
@@ -2023,4 +2044,26 @@ function drawFrame(
     onSize?.({ w: image.naturalWidth, h: image.naturalHeight })
   }
   image.src = 'data:image/jpeg;base64,' + base64
+}
+
+/** 把快照原图画到 canvas：冻结画面必须与层级树来自同一张快照。 */
+async function drawSnapshotImage(canvas: HTMLCanvasElement | null, blob: Blob): Promise<FrameSize> {
+  if (!canvas) throw new Error('画布未就绪')
+  const url = URL.createObjectURL(blob)
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = () => reject(new Error('快照图片解码失败'))
+      img.src = url
+    })
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('画布不可用')
+    ctx.drawImage(image, 0, 0)
+    return { w: image.naturalWidth, h: image.naturalHeight }
+  } finally {
+    URL.revokeObjectURL(url)
+  }
 }

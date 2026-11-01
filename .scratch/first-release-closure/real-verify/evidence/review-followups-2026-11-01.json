@@ -1,0 +1,62 @@
+{
+  "reviewedHead": "d089770",
+  "generatedAt": "2026-11-01T19:52:00+08:00",
+  "freezeSnapshot": {
+    "device": "749622c9",
+    "backend": "http://127.0.0.1:8010",
+    "frontend": "http://127.0.0.1:5174",
+    "sessionId": "5ee81307-983c-4798-a2d8-0b2cce962b85",
+    "snapshotId": "fc6adbb1a0b7473b",
+    "imageRequest": {
+      "path": "/api/v1/debug-sessions/5ee81307-983c-4798-a2d8-0b2cce962b85/snapshots/fc6adbb1a0b7473b/image",
+      "status": 200,
+      "mimeType": "image/png"
+    },
+    "canvasPixels": [1080, 2400],
+    "snapshotImagePixels": [1080, 2400],
+    "diffPixelsOver3": 0,
+    "maxChannelDiff": 0,
+    "totalPixels": 2592000,
+    "recheckAfterMs": 2500,
+    "canvasAfterRecheck": [1080, 2400],
+    "uiTreeNodes": 141,
+    "sessionClosed": true,
+    "activeDebugSessionsAfter": 0,
+    "activeLeasesAfter": 0
+  },
+  "tests": {
+    "backend": {
+      "command": "python -m pytest -o addopts=\"\" --junitxml=.runtime/junit-local.xml -q",
+      "passed": 581,
+      "skipped": 1,
+      "failed": 0,
+      "exitCode": 0,
+      "junitCases": 582,
+      "junitDatabaseSkips": 0
+    },
+    "frontend": {
+      "command": "npm test && npm run typecheck && npm run build",
+      "passed": 63,
+      "failed": 0,
+      "typecheck": "passed",
+      "build": "passed"
+    },
+    "vendor": {
+      "command": "python scripts/vendor_sync.py check",
+      "result": "OK: 349 files / 42.6 MiB",
+      "removedGeneratedCacheFiles": 28,
+      "sourceHashChanges": 0
+    },
+    "ciWorkflow": {
+      "yamlParsed": true,
+      "serverRunner": "windows-latest",
+      "serviceContainers": 0,
+      "usesPortablePostgres": true,
+      "testDsnEnv": "TESTDOCK_TEST_DATABASE_URL",
+      "alembicDsnEnv": "TESTDOCK_DATABASE_URL",
+      "junitSkipCheck": true,
+      "executedOnGitHub": false,
+      "note": "仓库未配置 git remote，工作流只在本地做 YAML 解析与静态断言，未在 GitHub runner 实跑"
+    }
+  }
+}

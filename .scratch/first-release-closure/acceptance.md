@@ -577,3 +577,70 @@
 **修复**：控制条改为常驻设备正下方；未启用时显示「直接操控未启用 · 先在工具栏点「直接操控」」，两个按键 disabled 且 title 说明原因；启用后解除禁用并显示「直接操控中」。
 
 **验证**：浏览器 DOM 实测——未启用：bar 存在、按钮均 disabled；启用后：按钮均 enabled、提示切换为「直接操控中」。`tsc --noEmit`、`npm test` 61 passed、`npm run build` 通过。
+
+## 16. 复审 5 项 P2 收口（2026-11-01 晚）
+
+**基线**：按 `d089770` 对照 `spec.md` 与工单 01–10 复审。本轮修复复审指出的 5 项 P2，并在复验中连带修复 2 个使问题成立的底层缺陷。证据：`real-verify/evidence/review-followups-2026-11-01.json`。
+
+### 16.1 冻结画面必须与层级树来自同一快照
+
+**缺陷**：采集检查只取回 `snapshot_id` 与层级树，然后暂停实时流；canvas 停在最后一帧实时画面。轮播/动画/滚动时，树与裁剪坐标来自快照，画面却不是同一帧。
+
+**修复**（`web/src/components/DebugDrawer.tsx`、`web/src/api/client.ts`、`web/src/api/endpoints.ts`）：
+- 新增二进制请求 `requestBlob` 与 `fetchSnapshotImage`（`GET .../snapshots/{nid}/image`）。
+- 采集时用同一个 `snapshot_id` **并行**取树和原图；先置 `frozenRef` 再解码绘制，避免解码期间的实时帧覆盖。
+- 快照图片解码失败时不进入冻结态，恢复实时预览并显示错误，不把最后一帧伪装成快照。
+- JPEG 帧的异步 `onload` 增加冻结复查。
+
+**复验暴露的连带缺陷**：H.264 的 `draw()` 在暂停时仍先改 `canvas.width/height`——改尺寸本身会清空已绘制的快照。修复为先判 `isPaused`，暂停时完全不动 canvas，也不上报帧（`web/src/lib/h264Preview.ts`）。
+
+**真机证据**（749622c9，会话 `5ee81307…`，快照 `fc6adbb1a0b7473b`）：
+- 网络：`GET .../snapshots/fc6adbb1a0b7473b/image` → **200 image/png**。
+- 冻结后 canvas **1080×2400**，快照原图 **1080×2400**；逐像素比较 **0/2,592,000 差异，最大通道差 0**。
+- 2.5 秒后 canvas 仍为 **1080×2400**（H.264 持续解码但不再清屏）。
+- 层级树 141 个节点与快照同 id；关闭会话后 active 会话 0、active 租约 0。
+
+**测试**：`web/tests/debug-crop-state.test.cjs` 新增“必须加载同一快照图片且先冻结再绘制”；`web/tests/h264-preview.test.cjs` 新增“冻结时不得 resize/清空 canvas”。
+
+### 16.2 联动停采失败不再伪装“性能已完成”
+
+**缺陷**：`_stop_collection` 吞掉 `finalize()` 异常后，调用方无条件追加 `performance=completed`。
+
+**修复**（`server/runner_pkg/testdock_runner/joint_job.py`）：
+- `_stop_collection` 返回 `(report, error)`；失败时发 `perf_collect_stop_failed` 并把详情带回。
+- 正常路径：保留 UI 结果与退出码，性能组件记 `errored / perf_collect_stop_failed`，message 追加停采失败原因。
+- UI 超时路径同样区分：停采成功仍为 `cancelled`，停采失败改为 `errored`。
+
+**平台侧连带缺陷**：新增矩阵用例发现 `_apply_original_gate` 会把**任意**性能组件改写成判定结论；性能组件已 `errored` 时更新为 `not_tested`，直接违反 `ck_run_components_state_outcome_pair`。修复为只更新 `state='completed'` 的性能组件（`server/app/runtime.py`）。
+
+**测试**：
+- runner：停采抛错时 `ui=completed/passed`、`performance=errored/perf_collect_stop_failed`、`exit_code=0`、report.json 仍有 `collectWindow`。
+- 平台矩阵：同一组组件收敛为 `state=completed / outcome=not_tested / reason=perf_collect_stop_failed`，UI 结果保留。
+
+### 16.3 联动 SQLite 落运行产物目录
+
+`PerfKit` 未指定 `db_path` 时默认 `<vendor>/mobile_perf/data/mobile_perf.db`，会写只读 vendor。联动现在与独立性能一致，显式传 `db_path=<artifacts>/perf.sqlite3`（`joint_job.py`）；`runs_dir` 保持 `<artifacts>/perf-runs`。回归测试捕获 `PerfKit` 构造参数并断言 SQLite 在 `artifacts_dir` 内。
+
+### 16.4 / 16.5 后端 CI：Windows + 便携 PostgreSQL
+
+**缺陷**：`windows-latest` 上声明 PostgreSQL service container（GitHub 服务容器仅支持 Linux）；且工作流只设 `TESTDOCK_DATABASE_URL`，测试读取 `TESTDOCK_TEST_DATABASE_URL`，干净检出没有便携库时数据库用例全部 skip。
+
+**修复**（`.github/workflows/ci.yml`）：
+- 删除 `services`；Windows runner 用仓库 `scripts/pg_portable_setup.ps1` 的便携 PostgreSQL 17.6，并缓存 `.runtime/pg17/pgsql`。
+- 同一测试步骤启动便携实例，设置**两个** DSN 后执行 `alembic upgrade head` 与 pytest：测试读 `TESTDOCK_TEST_DATABASE_URL`，alembic/运行期读 `TESTDOCK_DATABASE_URL`；`finally` 停库。
+- pytest 生成 JUnit，下一步解析并断言：无 `TESTDOCK_TEST_DATABASE_URL`/“测试数据库不可用” 的 skip，且用例数不低于后端基线 550（当前 582）。
+- 新增 `server/tests/test_ci_workflow.py` 静态守住 Windows、无 service container、便携库、双 DSN 与 JUnit 核对。
+
+**边界**：仓库未配置 git remote，工作流**未在 GitHub runner 实跑**；本轮只做 YAML 解析、静态断言与本地等价 JUnit 校验，不能宣称 CI 已绿。
+
+### 16.6 本轮验证汇总
+
+| 项 | 结果 |
+| --- | --- |
+| 后端全量（含新矩阵用例） | **581 passed / 1 skipped / 0 failed，exit 0**（JUnit 582 cases，数据库 skip 0；1 skip 为 Windows 符号链接权限） |
+| 前端 | **63 passed / 0 failed**；`tsc --noEmit`、`npm run build` 通过 |
+| vendor 只读校验 | **OK 349 files / 42.6 MiB**；清理 28 个未登记 `__pycache__`，锁定源码哈希无变化 |
+| 真机冻结画面 | canvas 与快照原图 **0 像素差**，2.5s 后仍保持；会话/租约收尾 0 |
+| CI 工作流 | YAML 可解析、静态测试 2 passed；未在 GitHub 实跑 |
+
+本次未重新执行客户套件与 1440×900 像素核对；相关结论仍引用 §9 的历史记录。修正后的影响面是调试冻结画面、联动结果收敛、联动存储与 CI 配置，不涉及报告/判定语义之外的产品路径。

@@ -82,6 +82,21 @@ test('解码积压时丢 delta，保关键帧', () => {
   assert.equal(shouldDropDelta(8, false), false)
 })
 
+test('冻结时 H.264 不得 resize/清空 canvas', () => {
+  const source = fs.readFileSync(require.resolve('../src/lib/h264Preview.ts'), 'utf8')
+  const start = source.indexOf('function draw(frame')
+  const end = source.indexOf('function ensureDecoder', start)
+  assert.ok(start >= 0 && end > start)
+  const body = source.slice(start, end)
+  const pausedAt = body.indexOf('const paused = options.isPaused()')
+  const widthAt = body.indexOf('canvas.width')
+  assert.ok(
+    pausedAt >= 0 && pausedAt < widthAt,
+    '暂停判断必须在改 canvas 尺寸之前：否则每帧都会清掉已绘制的快照',
+  )
+  assert.match(body, /if \(canvas && !paused\)/)
+})
+
 test('预览传输选择：无 WebCodecs 时明确回退 JPEG', () => {
   assert.deepEqual(choosePreviewTransport(true), { mode: 'h264', reason: null })
   assert.deepEqual(choosePreviewTransport(false), {

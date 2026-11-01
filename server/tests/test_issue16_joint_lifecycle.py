@@ -226,6 +226,115 @@ def test_joint_real_ui_timeout_finalizes_collect_scope(tmp_path, monkeypatch):
     assert report["collectWindow"]["ui"]["timeout_s"] == 30
 
 
+def test_joint_collect_stop_failure_keeps_ui_result_but_reports_perf_errored(
+    tmp_path, monkeypatch
+):
+    """停采抛错不得把性能组件写成 completed：UI 结果保留，性能如实报错。"""
+    from runner_pkg.testdock_runner import joint_job
+    from runner_pkg.testdock_runner.ui_job import UiJobResult
+
+    class BrokenScope:
+        def finalize(self):
+            raise RuntimeError("vendor stop failed")
+
+    monkeypatch.setattr(joint_job, "_start_perf_collect", lambda options: BrokenScope())
+    monkeypatch.setattr(
+        joint_job,
+        "run_ui_job",
+        lambda options, context: UiJobResult(
+            exit_code=0,
+            reason="completed",
+            outcome="passed",
+            components=[
+                {"kind": "ui", "state": "completed", "outcome": "passed"}
+            ],
+        ),
+    )
+    copy_root = tmp_path / "copy"
+    copy_root.mkdir()
+    options = _joint_options(
+        tmp_path,
+        fake=False,
+        suite_root=copy_root,
+        app_package="com.example.joint",
+    )
+
+    result = joint_job.run_joint_job(options, _runner_context(tmp_path))
+
+    by_kind = {component["kind"]: component for component in result.components}
+    assert result.exit_code == 0, "UI 成功不得因为停采失败被改写"
+    assert by_kind["ui"] == {
+        "kind": "ui",
+        "state": "completed",
+        "outcome": "passed",
+    }
+    assert by_kind["performance"] == {
+        "kind": "performance",
+        "state": "errored",
+        "reason_code": "perf_collect_stop_failed",
+    }
+    assert "性能采集停止失败" in result.message
+    # 采集窗口仍要收口写盘，不能因为 finalize 抛错就丢失窗口
+    report = json.loads(
+        (options.artifacts_dir / "report.json").read_text(encoding="utf-8")
+    )
+    assert "collectWindow" in report
+
+
+def test_joint_perf_kit_writes_sqlite_under_artifacts(tmp_path, monkeypatch):
+    """联动采集的 SQLite 必须落在运行产物目录，不能写只读 vendor 目录。"""
+    import sys
+    import types
+
+    from runner_pkg.testdock_runner import joint_job
+
+    captured: dict = {}
+
+    class FakeKit:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def collect(self, spec):
+            captured["spec"] = spec
+            return FakeScope()
+
+    class FakeScope:
+        def __enter__(self):
+            return self
+
+        def finalize(self):
+            return {}
+
+    class FakeSpec:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    package = types.ModuleType("mobile_perf")
+    kit_module = types.ModuleType("mobile_perf.kit")
+    kit_module.PerfKit = FakeKit
+    session_module = types.ModuleType("mobile_perf.session")
+    session_module.SessionSpec = FakeSpec
+    package.kit = kit_module
+    package.session = session_module
+    monkeypatch.setitem(sys.modules, "mobile_perf", package)
+    monkeypatch.setitem(sys.modules, "mobile_perf.kit", kit_module)
+    monkeypatch.setitem(sys.modules, "mobile_perf.session", session_module)
+    monkeypatch.setattr(joint_job, "ensure_vendor_on_path", lambda vendor: None)
+
+    options = _joint_options(
+        tmp_path,
+        fake=False,
+        serial="serial-1",
+        app_package="com.example.joint",
+    )
+    joint_job._start_perf_collect(options)
+
+    db_path = options.artifacts_dir / "perf.sqlite3"
+    assert captured["db_path"] == str(db_path)
+    assert db_path.is_relative_to(options.artifacts_dir)
+    assert captured["runs_dir"] == str(options.artifacts_dir / "perf-runs")
+
+
 def test_joint_collect_start_failure_never_starts_ui(tmp_path, monkeypatch):
     """采集启动失败时 UI 根本不执行，也不得留下采集窗口。"""
     from runner_pkg.testdock_runner import joint_job
@@ -454,6 +563,41 @@ def test_matrix_ui_assertion_failure_is_completed_failed(client, project, sync_e
     components = _components_of(sync_engine, run_id)
     assert components["ui"]["outcome"] == "failed"
     assert "performance" in components, "性能组件必须保留，不得只显示整体"
+
+
+def test_matrix_perf_stop_failure_keeps_ui_result_and_not_tested(
+    client, project, sync_engine
+):
+    """停采失败：UI 结果保留，整体不得伪装 passed；性能组件必须是 errored。"""
+    run_id = _joint_run(sync_engine, project)
+    _complete(
+        client,
+        run_id,
+        components=[
+            {"kind": "ui", "state": "completed", "outcome": "passed"},
+            {
+                "kind": "performance",
+                "state": "errored",
+                "reason_code": "perf_collect_stop_failed",
+            },
+        ],
+        junit={"tests": 2, "failures": 0, "errors": 0, "skipped": 0},
+    )
+    with sync_engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT state, outcome, reason_code FROM test_runs"
+                " WHERE id = CAST(:id AS uuid)"
+            ),
+            {"id": run_id},
+        ).mappings().one()
+    assert row["state"] == "completed"
+    assert row["outcome"] == "not_tested", "性能采集失败不得让整体结论变成 passed"
+    assert row["reason_code"] == "perf_collect_stop_failed"
+    components = _components_of(sync_engine, run_id)
+    assert components["ui"]["outcome"] == "passed", "UI 结果必须保留"
+    assert components["performance"]["state"] == "errored"
+    assert components["performance"]["reason_code"] == "perf_collect_stop_failed"
 
 
 def test_matrix_collect_start_failure_is_errored_with_cancelled_ui(client, project, sync_engine):
@@ -889,5 +1033,5 @@ def test_perf_collect_scope_is_entered_before_ui_runs(monkeypatch, tmp_path):
     scope = joint_job._start_perf_collect(options)
 
     assert calls == ["kit", "collect", "enter"], calls
-    assert joint_job._stop_collection(scope) == FakeScope.report
+    assert joint_job._stop_collection(scope) == (FakeScope.report, None)
     assert calls == ["kit", "collect", "enter", "finalize"], calls

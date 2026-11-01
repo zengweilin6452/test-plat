@@ -31,34 +31,30 @@ jobs:
         run: python -m pytest vendor/mobile_perf/tests/unit vendor/mobile_perf/tests/contract -q
 
   server:
-    name: 后端测试（需 PG）
+    name: 后端测试（Windows + 便携 PostgreSQL）
     runs-on: windows-latest
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: testdock
-          POSTGRES_PASSWORD: testdock
-          POSTGRES_DB: testdock
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    # GitHub 的服务容器只能跑在 Linux runner 上；Windows 测试环境沿用仓库
+    # 自带的便携 PostgreSQL（scripts/pg_portable_setup.ps1），conftest 也认这个路径。
     env:
-      TESTDOCK_DATABASE_URL: postgresql+psycopg://testdock:testdock@127.0.0.1:5432/testdock
       PYTHONPATH: ${{ github.workspace }}/vendor/mobile_auto/src;${{ github.workspace }}/vendor/mobile_perf/src
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: 缓存便携 PostgreSQL 二进制
+        uses: actions/cache@v4
+        with:
+          path: .runtime/pg17/pgsql
+          key: pg17-17.6-1-${{ runner.os }}
       - name: 安装后端依赖
         working-directory: server
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+      - name: 准备便携 PostgreSQL
+        shell: pwsh
+        run: ./scripts/pg_portable_setup.ps1 init
       - name: 契约测试（无需数据库，失败即阻断）
         working-directory: server
         run: >-
@@ -67,12 +63,46 @@ jobs:
           tests/test_error_contract.py
           tests/test_migration_append_only.py
           -q
-      - name: alembic 升级（建 24 表）
+      - name: 后端测试（含 PostgreSQL 用例）
         working-directory: server
-        run: python -m alembic upgrade head
-      - name: 后端测试
+        shell: pwsh
+        env:
+          # 测试只读 TESTDOCK_TEST_DATABASE_URL；alembic 与运行期设置读
+          # TESTDOCK_DATABASE_URL，两者指向同一个专用测试库。
+          TESTDOCK_TEST_DATABASE_URL: postgresql+psycopg://testdock@127.0.0.1:55432/testdock
+          TESTDOCK_DATABASE_URL: postgresql+psycopg://testdock@127.0.0.1:55432/testdock
+        run: |
+          ../scripts/pg_portable_setup.ps1 start
+          try {
+            python -m alembic upgrade head
+            if ($LASTEXITCODE -ne 0) { throw "alembic upgrade 失败" }
+            python -m pytest -o addopts="" --junitxml=junit.xml -q
+            if ($LASTEXITCODE -ne 0) { throw "后端测试失败（退出码 $LASTEXITCODE）" }
+          } finally {
+            ../scripts/pg_portable_setup.ps1 stop
+          }
+      - name: 核对数据库用例确实执行（不是全量 skip）
         working-directory: server
-        run: python -m pytest -q
+        shell: pwsh
+        run: |
+          @'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("junit.xml").getroot()
+          cases = list(root.iter("testcase"))
+          skipped = [case for case in cases if case.find("skipped") is not None]
+          db_skips = []
+          for case in skipped:
+              message = case.find("skipped").get("message") or ""
+              if "TESTDOCK_TEST_DATABASE_URL" in message or "测试数据库不可用" in message:
+                  db_skips.append(case.get("name"))
+          if db_skips:
+              sys.exit(f"数据库测试被跳过 {len(db_skips)} 个，CI 未接通测试连接")
+          if len(cases) < 550:
+              sys.exit(f"只执行了 {len(cases)} 个用例，低于后端基线 577")
+          print(f"执行 {len(cases)} 个用例，跳过 {len(skipped)} 个（无数据库跳过）")
+          '@ | python -
 
   web:
     name: 前端构建

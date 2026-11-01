@@ -162,18 +162,18 @@ export function createH264Preview(options: H264PreviewOptions): H264PreviewHandl
   }
 
   function draw(frame: VideoFrame) {
+    const paused = options.isPaused()
     const width = frame.displayWidth
     const height = frame.displayHeight
     const canvas = options.canvas
-    if (canvas) {
+    // 冻结时必须完全不动 canvas：改尺寸本身就会清空已绘制的快照
+    if (canvas && !paused) {
       if (canvas.width !== width) canvas.width = width
       if (canvas.height !== height) canvas.height = height
-      if (!options.isPaused()) {
-        canvas.getContext('2d')?.drawImage(frame, 0, 0)
-      }
+      canvas.getContext('2d')?.drawImage(frame, 0, 0)
     }
     frame.close()
-    options.onFrame?.({ w: width, h: height })
+    if (!paused) options.onFrame?.({ w: width, h: height })
   }
 
   function ensureDecoder(codec: string) {

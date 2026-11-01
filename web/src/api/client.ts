@@ -103,6 +103,32 @@ function buildUrl(path: string, query?: RequestOptions['query']): string {
   return url.pathname + url.search
 }
 
+async function throwResponseError(response: Response): Promise<never> {
+  const text = await response.text()
+  let parsed: unknown = null
+  if (text) {
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      parsed = null
+    }
+  }
+  if (isEnvelope(parsed)) {
+    throw new ApiError(
+      parsed.code,
+      parsed.message,
+      response.status,
+      parsed.request_id ?? null,
+      (parsed as { details?: unknown }).details ?? null,
+    )
+  }
+  throw new ApiError(
+    'HTTP_' + response.status,
+    text ? text.slice(0, 200) : '服务返回了无法解析的错误响应',
+    response.status,
+  )
+}
+
 /**
  * 发起一次请求并解析 JSON。
  * 统一进入点：所有页面都通过这里取数据，禁止在页面里直接 fetch。
@@ -132,6 +158,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   // 204 无响应体
   if (response.status === 204) return undefined as T
 
+  if (!response.ok) return throwResponseError(response)
   const text = await response.text()
   let parsed: unknown = null
   if (text) {
@@ -142,29 +169,32 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     }
   }
 
-  if (!response.ok) {
-    if (isEnvelope(parsed)) {
-      throw new ApiError(
-        parsed.code,
-        parsed.message,
-        response.status,
-        parsed.request_id ?? null,
-        (parsed as { details?: unknown }).details ?? null,
-      )
-    }
-    throw new ApiError(
-      'HTTP_' + response.status,
-      text ? text.slice(0, 200) : '服务返回了无法解析的错误响应',
-      response.status,
-    )
-  }
-
   return parsed as T
+}
+
+/** 下载二进制响应（快照图片等）；错误仍走统一信封。 */
+export async function requestBlob(
+  path: string,
+  options: { query?: RequestOptions['query']; signal?: AbortSignal } = {},
+): Promise<Blob> {
+  let response: Response
+  try {
+    response = await fetch(buildUrl(path, options.query), {
+      signal: options.signal,
+      headers: { Accept: 'image/*', [CLIENT_HEADER]: CLIENT_ID },
+    })
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') throw cause
+    throw new NetworkError('无法连接后端服务，请确认 API 已启动', cause)
+  }
+  if (!response.ok) return throwResponseError(response)
+  return response.blob()
 }
 
 export const api = {
   get: <T>(path: string, query?: RequestOptions['query'], signal?: AbortSignal) =>
     request<T>(path, { query, signal }),
+  blob: (path: string, signal?: AbortSignal) => requestBlob(path, { signal }),
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body }),
   patch: <T>(path: string, body?: unknown) => request<T>(path, { method: 'PATCH', body }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),

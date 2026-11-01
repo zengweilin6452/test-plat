@@ -81,13 +81,29 @@ test('节点拾取优先 resource-id，其次 text，都没有则如实为空', 
   assert.equal(preferredLocator({ index: 4 }), null)
 })
 
-test('冻结快照的节点树与图像来自同一次采集，后续实时帧不改快照含义', () => {
+test('冻结快照必须显示同一快照的图片，而不是最后一帧实时画面', () => {
   const source = fs.readFileSync(require.resolve('../src/components/DebugDrawer.tsx'), 'utf8')
-  // 一次采集返回 snapshot + tree，树必须用同一个 snapshot_id 去取
+  // 一次采集返回 snapshot + tree，树和画面都必须用同一个 snapshot_id 去取
   assert.match(source, /const captured = await captureSnapshot\(id, true\)/)
   assert.match(source, /fetchSnapshotTree\(id, captured\.snapshot_id\)/)
-  // 冻结后丢弃实时帧，画面停在采集那一刻
-  assert.match(source, /if \(frozenRef\.current\) return/)
+  assert.match(
+    source,
+    /fetchSnapshotImage\(id, captured\.snapshot_id\)/,
+    '冻结画面必须加载该快照的图片；只暂停实时流会展示错帧',
+  )
+  const freezeAt = source.indexOf('frozenRef.current = true', source.indexOf('const snapshotMutation'))
+  const drawAt = source.indexOf('drawSnapshotImage(canvasRef.current, image)', freezeAt)
+  assert.ok(freezeAt >= 0 && drawAt > freezeAt, '先冻结再绘制快照，防止解码期间的实时帧覆盖')
+  // 实时帧改成异步解码后也要复查冻结标记
+  assert.match(source, /if \(isPaused\?\.\(\)\) return/, '实时帧 onload 必须复查冻结状态')
+})
+
+test('快照画面地址与会话/快照 id 对应', () => {
+  const { snapshotImagePath } = require('../src/api/endpoints.ts')
+  assert.equal(
+    snapshotImagePath('s 1', '0123456789abcdef'),
+    '/debug-sessions/s%201/snapshots/0123456789abcdef/image',
+  )
 })
 
 test('刷新/恢复预览清临时状态，但模板清单只来自服务端（不本地删除）', () => {
