@@ -351,3 +351,30 @@ def test_sync_writes_are_scoped_to_own_project(client, p3_project, fake_adb, syn
         from tests._p3_common import drop_project
 
         drop_project(other["project_id"])
+
+
+@requires_db
+def test_sync_with_explicit_node_id_does_not_crash(client, p3_project, fake_adb, sync_engine):
+    """真机验收发现的 500：指定 node_id 时 SQL 没取 status，却读取 fixed_node.status。"""
+    fake_adb([_dev()])
+    project_id = p3_project["project_id"]
+    node_id = p3_project["node_id"]
+    with sync_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE execution_nodes SET capabilities = '{\"local\": true, \"adb\": true}'::jsonb"
+                " WHERE id = CAST(:nid AS uuid)"
+            ),
+            {"nid": node_id},
+        )
+
+    response = client.post(
+        "/api/v1/resources/sync",
+        json={"project_id": project_id, "node_id": node_id},
+        headers=CLIENT_HEADERS,
+    )
+
+    assert response.status_code == 200, response.text
+    node = response.json()["nodes"][0]
+    assert node["node_id"] == node_id
+    assert node["status"] == "ok"

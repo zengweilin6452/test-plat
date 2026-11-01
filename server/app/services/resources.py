@@ -201,7 +201,7 @@ async def sync_resources(
         fixed_node = (
             await session.execute(
                 text(
-                    "SELECT id, project_id, name, capabilities"
+                    "SELECT id, project_id, name, capabilities, status"
                     " FROM execution_nodes WHERE id = CAST(:nid AS uuid)"
                 ),
                 {"nid": node_id},
