@@ -286,7 +286,7 @@ GET    /api/v1/templates/{logical:path}/image
 POST   /api/v1/templates/validate      # IMAGE 目标验证 -> { matches[], scores[], note }
 ```
 
-**登记模板必须带验证凭证**：`POST /templates` 与 `PUT /templates/{logical}` 除 `snapshot_id/region/logical` 外，**必须**同时传 `threshold`（0.10–1.00）与 `validate-crop` 刚发放的 `verification`。凭证绑定「会话 + 验证时新捕获的快照 + 新画面里的命中框 + 阈值」，一次性、TTL 120s：缺凭证、复用、过期，或会话/快照/框选/阈值任一变化都返回 409 `crop_not_verified` 且**不触达 vendor**（前端的按钮 disabled 只是体验，服务端独立拒绝未验证登记）。凭证只证明「发凭证那一刻画面上唯一命中」，所以登记必须用验证返回的新快照与命中框，不能用框选时的旧快照。调试会话关闭（DELETE、runner 退出兜底、spawn 失败）时该会话的凭证立即作废，TTL 只是兜底。
+**登记模板必须带验证凭证**：`POST /templates` 与 `PUT /templates/{logical}` 除 `snapshot_id/region/logical` 外，**必须**同时传 `threshold`（0.10–1.00）与 `validate-crop` 刚发放的 `verification`。凭证绑定「会话 + 验证时新捕获的快照 + 新画面里的命中框 + 阈值」，一次性、TTL 120s：缺凭证、复用、过期，或会话/快照/框选/阈值任一变化都返回 409 `crop_not_verified` 且**不触达 vendor**（前端的按钮 disabled 只是体验，服务端独立拒绝未验证登记）。凭证只证明「发凭证那一刻画面上唯一命中」，所以登记必须用验证返回的新快照与命中框，不能用框选时的旧快照。调试会话关闭（客户端 DELETE 或 spawn 失败）时该会话的凭证立即作废；无关闭事件的会话由 TTL 120s 兜底。
 
 `snapshot_id` 只接受 vendor 真实 id 空间（`uuid4().hex[:16]`，16 位小写十六进制）：它会被拼进上游 `/api/v1/snapshots/{id}/image|tree`，路径穿越、查询串或任意文本一律 400 `validation_error`，不触达 vendor。
 
