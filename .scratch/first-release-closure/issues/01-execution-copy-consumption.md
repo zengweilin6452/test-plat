@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## 现状（已核实，不是猜测）
 
@@ -58,3 +58,7 @@ D:\python312\python.exe -m pytest tests -q
 - 本工单只改本地分支并合入 `integration/first-release-closure`，不 push。
 
 ## Comments
+
+- 2026-11-01 实现完成（`60ecbe1` + 补强 `5484f0c`，合并 `428df88`）。①`spawn.build_spec` 透传 `--suite-root/--suite-version/--suite-sha256`；②dispatcher 返回 `ExecutionCopy` 并把副本根、套件版本 id、树摘要写进 spawn 配置；③runner 以副本为 pytest cwd，默认目标为副本根，显式目标必须是副本内相对路径（绝对路径/盘符/`..`/链接逃逸 → `suite_path_out_of_bounds`），副本缺失 → `execution_copy_unavailable`，不回退 `server/` 或来源目录；④运行开始发 `suite_copy` 事件记录版本/摘要/目标；⑤joint 复用同一套边界校验且在采集前阻断。
+- 副作用补强：pytest 子进程 `PYTHONDONTWRITEBYTECODE=1`；`_open_session` 的 `assets_dir` 固定到 `server/assets`；为 vendor 插件生成绝对路径的 `mobile-config.toml`（`--mobile-config`），避免 `artifacts/runs` 写进副本。测试 `test_execution_leaves_copy_tree_unchanged` 实测执行前后副本文件集合与 sha256 完全一致。
+- 证据：`test_issue01_execution_copy.py` 17 passed；与 02/03 合并后 `test_issue01 + test_issue24 + test_issue02_source_lifecycle + test_error_contract + test_runner_contracts` exit=0；`web/tests/*.test.cjs` 28 passed。真机执行复验记入工单 10。
