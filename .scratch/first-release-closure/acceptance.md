@@ -5,6 +5,7 @@
 - 工单：[10: 首期交付验收记录](issues/10-acceptance-record.md)
 - 记录方式：在集成分支最终 HEAD 上**重新执行**验证；工单 Comments 里的数字只作为历史证据引用，并标注日期，不代替本次结果。
 - 本工作区（`worktree-frc-10`，基于 `cf9f799`）除本文件外未改动任何产品代码、工单或证据文件。
+- 附节 §7 记录验收之后的代码评审修复与复跑（代码 HEAD 已从 `cf9f799` 前进），§2 的逐条状态判定不变，真机/来源/像素核对仍未执行。
 
 ## 状态口径
 
@@ -158,7 +159,7 @@
 4. **视觉核对未完成**：九页 DOM/可访问树证据齐全（2026-11-01 主代理核查：22 个 XHR 全 200、无 console error，见证 `evidence/`），但 1440×900 像素级比对因内置浏览器无可见视口（证据中 4 份 `viewport 0×0`、另 4 份 1145×1145；截图接口 `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`，`agent-browser` 启动挂起）未取得，标「已实现待验」，不宣称视觉对齐。
 5. **证据过期态不可自然出现**：`TESTDOCK_ARTIFACT_RETENTION_DAYS` 默认 0；三态中 `expired` 需宿主配置保留期或产物被清理才可观测（工单 05 遗留）。
 6. **框选验证凭证存进程内**：多 worker 部署需共享存储（工单 08 遗留）；阈值成为登记必填字段。
-7. **联动 `ui_timeout_s` 以套件清单为准**：修订中的冲突值被版本快照覆盖（工单 07 遗留）；前端只补了 `collectWindow` 类型，展示留待后续。
+7. **联动 `ui_timeout_s` 以套件清单为准**：修订中的冲突值被版本快照覆盖（工单 07 遗留）；`collectWindow` 的报告页展示已由评审修复补齐（见 §7），不再留待后续。
 8. **环境能力限制**：`test_03_code_copy.py:119` 因 Windows 权限无法创建文件符号链接而跳过（1 项），与产品行为无关。
 9. **out-of-scope**（`spec.md`）：多用户登录/组织/权限、Web/iOS 真实执行、跨机器调度、实时性能曲线、对象存储、应用 CRUD/上传/自动安装、设备自动修复、调试触控、修改 `vendor/`。
 
@@ -174,3 +175,27 @@
   5. 真实可信套件来源未配置：US1 受阻，US4 待验，真实副本执行的"来源变更仍执行原内容"缺少真实来源侧的观测。
   6. 1440×900 像素级视觉核对与"页面 ↔ HEAD 后端"同版数据证据缺失。
 - 未执行项一律标注原因与解除条件（§3.1），本记录不把任何未执行项写成已通过。
+
+## 7. 代码评审与修复（验收之后）
+
+- 触发：在集成分支上执行 `code-review` 两轴评审（Standards / Spec），固定点 `9756484`（`integration/prototype-alignment` 起点），评审范围 46 commits / 86 files。
+- 评审提出 14 条：采纳并修复 8 组；驳回 1 条（"取消会覆盖已 completed 的运行"——`runtime.finalize_run` 对终态短路，取消不会改写完成态，经代码与测试证伪）；其余为本地工单约定、风格判断或有意保留的范围，明确不改。
+- 修复内容与复验：
+
+| 组 | 缺陷（评审发现） | 修复要点 | 复验测试 |
+| --- | --- | --- | --- |
+| 1 | 取消收敛不登记已落盘产物，报告页丢失同一次运行写出的 `report.json` / 采集窗口 | `cancel_run` 收敛时传 `artifacts_dir`（与 `spawn._finalize_after_exit` 同口径） | `test_issue04_run_lifecycle.py::test_cancel_running_run_registers_artifacts_already_on_disk` |
+| 2 | `terminate_run_process` 无条件返回 True，`runner_terminated` 谎报已终止 | 按 taskkill 退出码 + 是否观测到进程退出判定；没有 pid 或杀不掉时为 False | `test_issue04_run_lifecycle.py::test_terminate_run_process_reports_whether_a_process_was_really_killed` |
+| 3 | 派发事务提交与 spawn 之间取消已受理，仍会拉起"幽灵 runner" | spawn 前只读复查 `cancel_requested_at` / state，终态与租约交给取消路径收敛 | `test_issue24_execution_wiring.py::test_cancel_requested_in_dispatch_window_blocks_spawn` |
+| 4 | 客户端 `snapshot_id` 原样拼进 vendor URL（路径穿越 / 查询串） | 只放行 vendor 真实 id 空间（`uuid4().hex[:16]`），validate-crop 与 image/tree 代理一致 | `test_frc08_debug_registration.py` 的非法 id 参数组（9 项）+ `test_proxy_snapshot_id_endpoints_reject_illegal_snapshot_id` |
+| 5 | 调试会话关闭后框选验证凭证仍可用到 TTL 结束 | 会话关闭（DELETE / spawn 失败）按 session 清理该会话全部凭证，TTL 仅兜底 | `test_frc08_debug_registration.py::test_closing_debug_session_drops_its_crop_verifications` |
+| 6 | 报告页不展示 `collectWindow` | `ReportDrawer` 增加「采集窗口」段；无窗口时如实写「无联合采集窗口」，不编造时间 | `web/tests/report-and-debug.test.cjs`（采集窗口用例） |
+| 7 | 契约文档未跟上新枚举与语义 | `docs/plan/api-design.md`、`docs/plan/data-model.md` 补：取消主动终止与 `runner_terminated`、取消/失败登记产物、`crop_not_verified`、快照 id 规则、`collectWindow`、运行级 `reason_code` 表 | 逐条与代码核对 |
+| 8 | 死代码 | 删除未使用的 `_scenario_problems` 别名与 `effective_availability(now=)` 参数 | 全量回归 |
+
+- 提交：修复 `cba314a`、测试 `f810806`、契约文档 `57f9cd5`，合并 `4b4fea2`；随后文档措辞修正 `96c6bec`（调试会话没有"runner 退出兜底"清理路径，改为 DELETE / spawn 失败 + TTL 兜底）。
+- 本次复跑（评审修复后的 HEAD，库 `testdock_frc10`，迁移仍 `0008`）：
+  - 后端全量：**559 项，558 passed / 1 skipped / 0 failed，退出码 0**（skip 仍为 `test_03_code_copy.py:119` 的 Windows 符号链接权限；计数方式同 §3 #1：进度行共 559 个字符，`.`×558、`s`×1，无 F/E）。
+  - 定向子集（运行生命周期 / 执行接线 / 调试登记 / 框选 / 报告追溯 / 性能场景与派发 / 联动）：**119 passed**。
+  - 前端：`tsc --noEmit` 退出码 0；`npm test` **48 passed**（新增采集窗口用例）；`npm run build` 成功（128 modules，`index-Dn4VK9xr.js` 369.31 kB）。
+- 边界不变：评审修复不改变真机执行、可信来源、1440×900 像素核对三类未执行项的结论（§3.1、§5、§6）；§5 第 7 条的 `collectWindow` 展示缺口已关闭。

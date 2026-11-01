@@ -46,3 +46,5 @@
 - 本次结果：后端全量 544 项（543 passed / 1 skipped / 0 failed，退出码 0；`addopts=-q` 与命令行 `-q` 合成 `-qq` 不打印收尾行，判定方式已写入记录）、定向 19 文件 200 passed、前端 `tsc --noEmit` 0 / `npm test` 47 passed / `npm run build` 成功、`alembic heads=0008`、契约基线一致；专用库 `testdock_frc10`，共享库 `testdock.test_runs` 为 0。
 - 31 条 User Stories：已通过 22、已实现待验 8、未完成 0、受阻 1（US1 可信来源为空）。真机 UI / 性能 / 联动 / 调试、真实来源、1440×900 像素核对均未执行并写明解除条件，未记成通过。
 - 结论：自动化与契约层满足；首期交付验收为「有条件通过」，不满足点已在记录 §6 单列。
+- 2026-11-01 评审修复复验：`code-review` 两轴在集成分支上提出 14 条，采纳 8 组并在 `cba314a`/`f810806`/`57f9cd5`（合并 `4b4fea2`）修复——取消登记已落盘产物、`runner_terminated` 如实回报、派发窗口复查取消、快照 id 白名单、会话关闭清理验证凭证、报告页展示采集窗口、契约文档补齐、死代码清理；驳回 1 条已被 `finalize` 终态短路证伪的"取消覆盖完成态"。
+- 复跑结果：后端全量 559 项（558 passed / 1 skipped / 0 failed，退出码 0）、定向 119 passed、`tsc` 0、`npm test` 48 passed、`npm run build` 成功、`alembic heads=0008`。验收记录新增 §7，§2 状态判定不变。
