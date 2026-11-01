@@ -536,3 +536,34 @@
 **边界**：该数字是 Home 过渡的首次画面变化，包含应用过渡起始，不是纯 codec 基准；浏览器在后台标签页时合成器上屏可能再多一帧。测量期间计算器数字键的 tap 未改变显示（独立问题，未用于本次测量；如需排查另开工单）。
 
 证据：`evidence/h264-presentation-latency.json`。
+
+## 15. 调试页框选与控制键布局修复（2026-11-01 晚）
+
+### 15.1 原生节点模式误触框选
+
+**现象**：原生节点模式下在设备画面拖拽也会生成橙色选择框，并一直留在画面上。
+
+**根因**：`handleStageDown/Move/Up` 只判断了 `controlEnabled`，没有判断 `inspectMode`；选择框 overlay 也无条件渲染。框选本应只属于图像模板模式。
+
+**修复**：
+- 新增 `cropSelectionEnabled(inspectMode)`（仅 `image` 为真）；三个拖拽 handler 与 overlay 统一用它门控。
+- 切回「原生节点」时清空 `dragging/region/cropVerification`，旧框立即消失。
+
+**验证**（浏览器 DOM 几何）：
+- 原生节点模式拖拽：`.debug-box.pick` 数量 **0**。
+- 切到图像模板后拖拽：数量 **1**（功能保留）。
+- 再切回原生节点：数量 **0**（旧框清除）。
+- 回归测试：`web/tests/debug-control.test.cjs` 新增门控纯函数 + 三个 handler 的源码级检查。
+
+### 15.2 返回键/Home 位置
+
+**现象**：两个按键在设备下方的信息/图例之后，离设备较远。
+
+**修复**：控制条移到 `.debug-stage` 之后、快照信息之前；CSS `justify-content:center` 居中。
+
+**验证**（浏览器 DOM 几何）：控制条 top 距 stage bottom **8px**，水平中心与 phone panel 中心偏差 **<3px**，DOM 顺序在「设备画面未冻结」信息之前；按钮为「返回键 / Home」。
+
+### 15.3 回归
+
+- 前端 `tsc --noEmit` 通过；`npm test` **61 passed**；`npm run build` 成功。
+- 无后端/数据库/契约改动；收尾租约与调试会话均为 0。

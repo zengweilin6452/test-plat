@@ -20,6 +20,7 @@ const {
   controlAvailability,
   gestureMessage,
   shouldSendGestureMove,
+  cropSelectionEnabled,
 } = require('../src/components/DebugDrawer.tsx')
 
 test('操控坐标归一化到 [0,1]，框外夹紧', () => {
@@ -95,4 +96,27 @@ test('pointerStart 必须在 openGesture 之后设置（closeGestureSocket 会�
     openAt < pointerAt,
     'openGesture() 会调用 closeGestureSocket() 并把 pointerStartRef 清空；先设指针会导致 finishControlPointer 直接 return，end 永远不发',
   )
+})
+
+
+test('框选门控：只有图像模板模式允许在设备画面上拖拽', () => {
+  assert.equal(cropSelectionEnabled('image'), true)
+  assert.equal(cropSelectionEnabled('native'), false)
+})
+
+test('原生节点模式的三个拖拽 handler 都必须检查 cropSelectionEnabled', () => {
+  const source = fs.readFileSync('src/components/DebugDrawer.tsx', 'utf8')
+  for (const name of ['handleStageDown', 'handleStageMove', 'handleStageUp']) {
+    const start = source.indexOf(`const ${name}`)
+    const next = source.indexOf('\n  const ', start + 5)
+    const body = source.slice(start, next === -1 ? undefined : next)
+    assert.ok(body.includes('cropSelectionEnabled(inspectMode)'), `${name} 缺少框选门控`)
+  }
+})
+
+test('直接操控键位于设备画面正下方（在快照信息之前）', () => {
+  const source = fs.readFileSync('src/components/DebugDrawer.tsx', 'utf8')
+  const bar = source.indexOf('className="debug-control-bar"')
+  const meta = source.indexOf("'设备画面未冻结'")
+  assert.ok(bar >= 0 && meta > bar, '返回/Home 必须在设备画面之后、快照信息之前')
 })

@@ -1185,21 +1185,21 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   }
 
   const handleStageDown = (event: React.MouseEvent) => {
-    if (controlEnabled) return
+    if (controlEnabled || !cropSelectionEnabled(inspectMode)) return
     const point = pointToDevice(event)
     if (!point) return
     setDragging({ x: point.x, y: point.y, w: 0, h: 0 })
   }
 
   const handleStageMove = (event: React.MouseEvent) => {
-    if (controlEnabled || !dragging) return
+    if (controlEnabled || !cropSelectionEnabled(inspectMode) || !dragging) return
     const point = pointToDevice(event)
     if (!point) return
     setDragging(normalizeRegion(dragging.x, dragging.y, point.x, point.y))
   }
 
   const handleStageUp = () => {
-    if (controlEnabled || !dragging) return
+    if (controlEnabled || !cropSelectionEnabled(inspectMode) || !dragging) return
     const box = dragging
     setDragging(null)
     // 太小的框多半是误点：清掉而不是留一个 1px 的模板区域
@@ -1262,7 +1262,14 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
             size="small"
             kind={inspectMode === value ? 'soft' : 'default'}
             aria-pressed={inspectMode === value}
-            onClick={() => setInspectMode(value)}
+            onClick={() => {
+              setInspectMode(value)
+              if (value === 'native') {
+                setDragging(null)
+                setRegion(null)
+                setCropVerification(null)
+              }
+            }}
           >
             {label}
           </Button>
@@ -1449,7 +1456,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                       </span>
                     </div>
                   ))}
-                  {overlayRegion && coordinateSize ? (
+                  {cropSelectionEnabled(inspectMode) && overlayRegion && coordinateSize ? (
                     <div
                       className="debug-box pick"
                       style={{
@@ -1473,6 +1480,13 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                 <div className="phone-bottom" aria-hidden="true" />
               </div>
             </div>
+            {controlEnabled ? (
+              <div className="debug-control-bar">
+                <span className="small muted">直接操控中 · 点击/拖动画面（单操作者）</span>
+                <Button size="small" onClick={() => void handleControlKey('back')}>返回键</Button>
+                <Button size="small" onClick={() => void handleControlKey('home')}>Home</Button>
+              </div>
+            ) : null}
             <div className="between small muted">
               <span>{snapshotId ? '快照 ' + snapshotId : frozen ? '快照待采集' : '设备画面未冻结'}</span>
               <span>{deviceResolution}</span>
@@ -1489,13 +1503,6 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                     <div className="small" style={{ marginTop: 6 }}>{upstreamHint(detailError)}</div>
                   ) : null}
                 </Notice>
-              </div>
-            ) : null}
-            {controlEnabled ? (
-              <div className="debug-control-bar">
-                <span className="small muted">直接操控中 · 点击/拖动画面（单操作者）</span>
-                <Button size="small" onClick={() => void handleControlKey('back')}>返回键</Button>
-                <Button size="small" onClick={() => void handleControlKey('home')}>Home</Button>
               </div>
             ) : null}
           </section>
@@ -1919,6 +1926,11 @@ function editRegion(region: Region | null, key: keyof Region, raw: string): Regi
   if (value === '') return null
   if (!/^\d+$/.test(value)) return region
   return { ...(region ?? { x: 0, y: 0, w: 0, h: 0 }), [key]: Number(value) }
+}
+
+/** 框选只在图像模板模式可用；原生节点模式拖拽不应产生/保留选择框。 */
+export function cropSelectionEnabled(inspectMode: 'native' | 'image'): boolean {
+  return inspectMode === 'image'
 }
 
 /** 直接操控：把指针位置换算成 vendor 手势 WS 的归一化坐标（0..1）。 */
