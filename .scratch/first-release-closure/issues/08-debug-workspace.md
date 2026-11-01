@@ -45,6 +45,13 @@ npx tsc -p tsconfig.json --noEmit
 npm test
 ```
 
+## 已核实缺陷（探索笔记）
+
+- 服务端 `POST /templates`（`server/app/routers/debug.py:583-587`）直接转发，不校验「刚刚用新画面验证通过」；唯一防线是前端按钮 disabled（`DebugDrawer.tsx:685/1254`）。服务端必须可独立拒绝未验证登记。
+- `validate_crop` 确实新捕获画面（`debug.py:629-632`），但返回的新 `snapshot_id` 前端只展示（`DebugDrawer.tsx:1245`），后续登记仍可能用旧快照。
+- 模板存储位置两处注释矛盾：`debug.py:549-563`（按会话隔离）vs `domain/templates.py:3-6`（共享 `server/assets`）；跨会话共享需以真实行为核实并统一说明。
+- 详细笔记：`C:\Users\williamzeng\AppData\Local\Temp\testdock-frc-notes\08-debug.md`
+
 ## 约束
 
 - 调试只读，不做触控/安装/设置修改。
