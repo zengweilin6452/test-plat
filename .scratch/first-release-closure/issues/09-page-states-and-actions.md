@@ -41,6 +41,13 @@ npm test
 npm run build
 ```
 
+## 已核实缺陷（探索笔记）
+
+- 四处把加载态当空态：`OverviewPage.tsx:53/145/177`、`ReportsPage.tsx:68/118`、`UiPage.tsx:399`、`PerfPage.tsx:247/317/384` 缺 `isLoading` 分支。
+- `OverviewPage.tsx:104` 在没有 overview 数据时写「接口未接入」，会把加载失败/加载中误报成未接入。
+- 当前没有任何 loading-state 测试。原型参考 sha256：`576d5402…ed4d5f`（180445 bytes）。
+- 详细笔记：`C:\Users\williamzeng\AppData\Local\Temp\testdock-frc-notes\09-pages.md`
+
 ## 约束
 
 - 不修改 `vendor/`、不安装依赖、不 push。
