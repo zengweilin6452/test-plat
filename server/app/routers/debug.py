@@ -27,7 +27,7 @@
    接受 `validate-crop` 刚发放的一次性凭证（绑定 session + 新快照 + 命中框 +
    阈值，TTL 见 CROP_VERIFICATION_TTL_SECONDS）。凭证缺失/复用/过期/任何一项
    变化都 409 crop_not_verified 且不触达 vendor —— 前端的按钮 disabled 只是体验，
-   服务端自己能独立拒绝未验证登记。
+   服务端自己能独立拒绝未验证登记。会话关闭时按 session 清理（TTL 只是兜底）。
 
 6. **WS 双向透传**：/ws/debug/{id} 仅在会话 active 时接受（否则 close 4403/4404），
    与 vendor /api/v1/preview 之间做字节级双向转发（json 帧与 binary 帧都不改），
@@ -41,6 +41,7 @@ import base64
 import subprocess
 import contextlib
 import json
+import re
 import secrets
 import sys
 import logging
@@ -90,6 +91,23 @@ CROP_VERIFICATION_TTL_SECONDS = 120.0
 #: 进程内验证凭证：token -> {session_id, snapshot_id, region, threshold, expires_at}。
 #: 单进程 uvicorn 下与 _READY_PORTS 同口径：多 worker 部署要换成共享存储。
 _CROP_VERIFICATIONS: dict[str, dict[str, Any]] = {}
+
+#: vendor viewer 的快照 id 是 `uuid4().hex[:16]`
+#: （vendor/mobile_auto/src/mobile_auto/viewer/store.py:43），不是带连字符的 UUID。
+#: 客户端传来的 snapshot_id 会被原样拼进上游 path，所以只放行这个 id 空间内的
+#: 字符串：`../`、`/`、`?`、任意文本都挡在到达 vendor 之前。用严格 RFC UUID
+#: 校验反而会拒绝真实快照（平台会把正常调试请求全部打成 400）。
+_SNAPSHOT_ID_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
+def _require_snapshot_id(value: Any) -> str:
+    """上游 path 里只允许 vendor 真实形态的快照 id（16 位小写十六进制）。"""
+    text = value if isinstance(value, str) else ""
+    if _SNAPSHOT_ID_RE.fullmatch(text) is None:
+        raise validation_error(
+            ["snapshot_id 必须是 vendor 返回的快照 id（16 位十六进制），不能含路径或查询字符"]
+        )
+    return text
 
 
 # --------------------------------------------------------------------------- #
@@ -433,9 +451,14 @@ async def create_debug_session(
 
 
 async def _close_session(session_id: str, *, reason: str) -> dict[str, Any] | None:
-    """关闭会话（幂等）：runner 终止 -> state=closed + closed_at -> 释放租约 -> 审计。"""
+    """关闭会话（幂等）：runner 终止 -> state=closed + closed_at -> 释放租约 -> 审计。
+
+    所有关闭路径（DELETE、spawn 失败、runner 退出兜底）都汇到这里，所以验证凭证
+    的按会话清理也放在这里：会话没了，旧凭证就不该还能解锁模板登记。
+    """
     from ..db import get_sessionmaker
 
+    _drop_crop_verifications(str(session_id))
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session:
         async with session.begin():
@@ -535,7 +558,8 @@ async def proxy_snapshot_image(
     session_id: str, snapshot_id: str, session: AsyncSession = Depends(get_session)
 ) -> Response:
     row = await _active_row(session, session_id)
-    return await _forward(str(row["id"]), "GET", f"/api/v1/snapshots/{snapshot_id}/image")
+    target = _require_snapshot_id(snapshot_id)
+    return await _forward(str(row["id"]), "GET", f"/api/v1/snapshots/{target}/image")
 
 
 @router.get("/debug-sessions/{session_id}/snapshots/{snapshot_id}/tree")
@@ -543,7 +567,8 @@ async def proxy_snapshot_tree(
     session_id: str, snapshot_id: str, session: AsyncSession = Depends(get_session)
 ) -> Response:
     row = await _active_row(session, session_id)
-    return await _forward(str(row["id"]), "GET", f"/api/v1/snapshots/{snapshot_id}/tree")
+    target = _require_snapshot_id(snapshot_id)
+    return await _forward(str(row["id"]), "GET", f"/api/v1/snapshots/{target}/tree")
 
 
 @router.post("/debug-sessions/{session_id}/locators/validate")
@@ -590,6 +615,18 @@ async def _template_session(session: AsyncSession, session_id: str | None) -> st
 def _prune_crop_verifications() -> None:
     now = time.monotonic()
     for token in [t for t, rec in _CROP_VERIFICATIONS.items() if rec["expires_at"] <= now]:
+        _CROP_VERIFICATIONS.pop(token, None)
+
+
+def _drop_crop_verifications(session_id: str) -> None:
+    """会话关闭即作废该会话的全部验证凭证（按 session 清，不动别的会话）。
+
+    TTL 只是兜底：会话已经关了，凭证再"没过期"也不能证明当前画面仍然成立。
+    """
+    target = str(session_id)
+    for token in [
+        t for t, rec in _CROP_VERIFICATIONS.items() if rec["session_id"] == target
+    ]:
         _CROP_VERIFICATIONS.pop(token, None)
 
 
@@ -754,10 +791,9 @@ async def validate_crop(request: Request, session_id: str | None = None,
     body = await request.json()
     region = body.get("region")
     threshold = body.get("threshold")
-    snapshot_id = body.get("snapshot_id")
+    snapshot_id = _require_snapshot_id(body.get("snapshot_id"))
     if (not isinstance(region, list) or len(region) != 4
             or any(type(v) is not int for v in region)
-            or not isinstance(snapshot_id, str) or not snapshot_id
             or type(threshold) not in (int, float) or not 0.1 <= threshold <= 1):
         raise validation_error(["需要有效 snapshot_id、四整数 region 和 0.10-1.00 threshold"])
     source = await _forward(sid, "GET", f"/api/v1/snapshots/{snapshot_id}/image")

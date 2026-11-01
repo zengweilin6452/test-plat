@@ -27,6 +27,7 @@
 | 409 | `state_conflict` | 状态迁移前置不满足（运行已被取消等） |
 | 409 | `illegal_transition` | 非法状态迁移 |
 | 409 | `lease_conflict` | 设备已被占 |
+| 409 | `crop_not_verified` | 模板登记缺少有效的框选验证凭证（缺失/复用/过期/会话、快照、框选或阈值变了） |
 | 409 | `stale_version` | `lock_version` CAS 失败（任务被他人改） |
 | 409 | `fence_mismatch` | runner token 失配 |
 | 422 | `readiness_incomplete` | 修订未就绪就运行 |
@@ -170,11 +171,12 @@ GET  /api/v1/runs/47
 
 ```http
 POST /api/v1/runs/47/cancel
-// 202 -> { "id": 47, "state": "running", "cancel_requested": true,
-//          "cancel_requested_at": "2026-10-25T12:01:00Z" }
+// 202 -> { "id": 47, "state": "cancelled", "outcome": null,
+//          "cancel_requested": true, "cancel_requested_at": "2026-10-25T12:01:00Z",
+//          "runner_terminated": true }
 ```
 
-取消语义：先受理、后收敛。受理事实写进 `test_runs.cancel_requested_at`（重复受理保留首次时间），不依赖事件流是否完整。`queued` 直接迁移 `cancelled`；执行中只受理不改状态，runner 从心跳的 `cancel` 标志感知，再由 `complete`/`fail` 或 reconciler 收敛 —— 若恰好完成，终态就是真实完成态，不伪造 `cancelled`。终态运行取消返回 409 `state_conflict`。
+取消语义：先受理、后收敛。受理事实写进 `test_runs.cancel_requested_at`（重复受理保留首次时间），不依赖事件流是否完整。`queued` 直接迁移 `cancelled`；执行中（`dispatching`/`running`/`finalizing`）由平台主动终止 runner 进程树（Windows `taskkill /T /F`，POSIX `killpg`）再按 `cancelled` 收敛——只写事实等心跳会让卡在 vendor 里的 runner 一直占着设备。`runner_terminated` 如实表示**确实杀掉了一个活进程**：taskkill 失败且没观测到进程退出、或进程表与 ack 事件里都没有 pid 时为 `false`，不谎报已终止。取消**不**改写已上报完成的运行：`finalize` 对终态短路，真实完成态保持原样。取消收敛时同样登记取消前已写出的产物（`report.json`/采集窗口），报告页不会整块丢失。终态运行取消返回 409 `state_conflict`。
 
 ```http
 GET /api/v1/runs/47/events?after=0&limit=200
@@ -201,7 +203,9 @@ GET /api/v1/runs/47/report/export
 //    内容与 GET /report 同一份快照（同一编码器逐字段一致），不含凭据或宿主存储路径。
 ```
 
-报告快照可追溯（spec §9.3、AC-REP-04）：`revision`（id/readiness/test_type）、`build`（version/build_key/source_commit/sha256）、`environmentId`、`resourceProfile`（id/name/fingerprint/spec，来自运行时绑定的不可变档案行）、`components`、`gateEvaluations`（不可变判定行，改策略不回溯）、`evidence`（id/kind/可用性/sha256；**只有 available 给 download_url**，missing/expired 不提供假入口；storage_key 不出报告）。缺失字段一律为 null，不用设备 serial 冒充档案。重跑：`POST /runs` 带 `parent_run_id` 引用原输入并形成新运行，原记录一行不改。
+报告快照可追溯（spec §9.3、AC-REP-04）：`revision`（id/readiness/test_type）、`suite`（套件版本号/source_ref/source_commit 与固定代码副本 `code_copy.{tree_sha256,file_count,root_rel}`）、`build`（version/build_key/source_commit/sha256）、`environmentId`、`resourceProfile`（id/name/fingerprint/spec，来自运行时绑定的不可变档案行）、`components`、`gateEvaluations`（不可变判定行，改策略不回溯）、`evidence`（id/kind/可用性/sha256/`unavailable_reason`；**只有 available 给 download_url**，missing/expired 不提供假入口，并给出 `file_missing`/`retention_expired`/`storage_unresolvable`；storage_key 不出报告）、`collectWindow`（joint 联合采集窗口，见下）。缺失字段一律为 null，不用设备 serial 冒充档案。重跑：`POST /runs` 带 `parent_run_id` 引用原输入并形成新运行，原记录一行不改。
+
+`collectWindow` 是 runner 写出的真实时间戳：`{collect_started_at, collect_stopped_at, ui:{started_at, ended_at, timeout_s}}`，采集窗必须包围 UI 执行窗。非 joint 运行、旧数据或被取消且没有写出窗口时为 `null`——报告页如实写「无联合采集窗口」，不编造时间。
 
 ```json
 { "runId": "RUN-47", "hostRunId": "RUN-47", "name": "首页滑动性能巡检",
@@ -275,11 +279,16 @@ POST   /api/v1/debug-sessions/{id}/snapshots
 GET    /api/v1/debug-sessions/{id}/snapshots/{nid}/image
 POST   /api/v1/locators/validate       # { snapshot_id, locator } -> matches[]
 GET    /api/v1/templates               # 复用 vendor TemplateStore 清单
-POST   /api/v1/templates               # { logical_path, png_base64, confidence }
-PUT    /api/v1/templates/{logical:path}
+POST   /api/v1/templates/validate-crop # { snapshot_id, region, threshold } -> 命中 + verification
+POST   /api/v1/templates               # { snapshot_id, region, logical, threshold, verification }
+PUT    /api/v1/templates/{logical:path} # 同上（更新也会生成新版本）
 GET    /api/v1/templates/{logical:path}/image
 POST   /api/v1/templates/validate      # IMAGE 目标验证 -> { matches[], scores[], note }
 ```
+
+**登记模板必须带验证凭证**：`POST /templates` 与 `PUT /templates/{logical}` 除 `snapshot_id/region/logical` 外，**必须**同时传 `threshold`（0.10–1.00）与 `validate-crop` 刚发放的 `verification`。凭证绑定「会话 + 验证时新捕获的快照 + 新画面里的命中框 + 阈值」，一次性、TTL 120s：缺凭证、复用、过期，或会话/快照/框选/阈值任一变化都返回 409 `crop_not_verified` 且**不触达 vendor**（前端的按钮 disabled 只是体验，服务端独立拒绝未验证登记）。凭证只证明「发凭证那一刻画面上唯一命中」，所以登记必须用验证返回的新快照与命中框，不能用框选时的旧快照。调试会话关闭（DELETE、runner 退出兜底、spawn 失败）时该会话的凭证立即作废，TTL 只是兜底。
+
+`snapshot_id` 只接受 vendor 真实 id 空间（`uuid4().hex[:16]`，16 位小写十六进制）：它会被拼进上游 `/api/v1/snapshots/{id}/image|tree`，路径穿越、查询串或任意文本一律 400 `validation_error`，不触达 vendor。
 
 模板路径校验直接复用 vendor `validate_logical_path`（`store.py:56-69`）：拒绝 `..`、绝对路径、非法字符；同名冲突 409。
 
@@ -325,9 +334,9 @@ POST   /api/v1/templates/validate      # IMAGE 目标验证 -> { matches[], scor
 | `GET /internal/runs/{id}/fence` | — | `{token}` 或 409 `fence_mismatch` |
 | `POST /internal/runs/{id}/events` | `{events:[{source_key, source_event_id, kind, payload}]}` | `{accepted: n}` |
 | `POST /internal/runs/{id}/complete` | `{outcome, components, cases, metrics, artifacts, verdicts}` | `{ok:true}` |
-| `POST /internal/runs/{id}/fail` | `{error_code, message, stage}` | `{ok:true}` |
+| `POST /internal/runs/{id}/fail` | `{error_code, message, stage, artifacts_dir?}` | `{ok:true}` |
 
-所有 `/internal/*` 幂等：`complete`/`fail` 对已终态 run 返回 200 + `{already:true}`（runner 可安全重试）。
+所有 `/internal/*` 幂等：`complete`/`fail` 对已终态 run 返回 200 + `{already:true}`（runner 可安全重试）。`complete` 与 `fail` 都接受可选的 `artifacts_dir`：失败前已经写出的产物（例如 joint UI 超时收口写下的 `report.json` 与采集窗口）按同一目录登记，报告页不会把"采集发生过"整块丢掉。
 
 ## 5. 前端调用约定
 

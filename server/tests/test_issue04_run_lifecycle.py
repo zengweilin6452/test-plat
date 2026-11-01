@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -678,3 +679,113 @@ def test_cancel_running_run_kills_process_tree_releases_lease_and_frees_device(
     assert _row(sync_engine, next_run)["state"] == "dispatching"
     assert str(_row(sync_engine, next_run)["resource_id"]) == project["resource_id"]
     assert len(_active_leases(sync_engine, next_run)) == 1
+
+
+def test_cancel_running_run_registers_artifacts_already_on_disk(
+    client, project, make_run, sync_engine, monkeypatch, tmp_path
+):
+    """取消也要登记已落盘的产物：joint 被取消时 report.json/采集窗口已经写出了。
+
+    取消路径曾漏传 artifacts_dir，导致"采集窗口确实发生过"这件事在报告页整块
+    丢失（与 spawn._finalize_after_exit 的口径不一致）。
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    artifacts_root = settings.artifacts_dir
+    run_id = make_run(
+        state="running",
+        request_key=str(uuid.uuid4()),
+        project=project,
+        config_snapshot={"requested_resource_id": project["resource_id"]},
+    )
+    _insert_lease(sync_engine, project, run_id)
+    run_dir = artifacts_root / run_id
+    run_dir.mkdir(parents=True)
+    (run_dir / "report.json").write_text(
+        json.dumps(
+            {
+                "collectWindow": {
+                    "collect_started_at": "2026-10-25T12:00:00+00:00",
+                    "collect_stopped_at": "2026-10-25T12:01:00+00:00",
+                    "ui": {
+                        "started_at": "2026-10-25T12:00:05+00:00",
+                        "ended_at": "2026-10-25T12:00:55+00:00",
+                        "timeout_s": 600,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.post(f"/api/v1/runs/{run_id}/cancel", headers=CLIENT_HEADERS)
+    assert response.status_code == 202, response.text
+    assert response.json()["state"] == "cancelled"
+
+    keys = [item["logical_key"] for item in client.get(
+        f"/api/v1/runs/{run_id}/artifacts"
+    ).json()["items"]]
+    assert "report.json" in keys, "取消也必须登记取消前已写出的产物"
+
+    report = client.get(f"/api/v1/runs/{run_id}/report").json()
+    assert report["collectWindow"]["ui"]["timeout_s"] == 600
+    assert report["collectWindow"]["collect_started_at"].startswith("2026-10-25T12:00:00")
+
+
+def test_terminate_run_process_reports_whether_a_process_was_really_killed(monkeypatch):
+    """`runner_terminated` 不能撒谎：taskkill 失败/没有 pid 都不是"杀掉了"。
+
+    Windows 分支按 taskkill 退出码判定；随后观测到进程退出也算杀掉。
+    """
+    spawn_mod = spawn
+
+    class _Completed:
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+
+    async def _pid(run_id: str) -> int:
+        return 4321
+
+    # 1) 进程表与 ack 事件里都没有 pid：没有可杀的东西
+    async def _no_pid(run_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(spawn_mod, "_pid_from_events", _no_pid)
+    spawn_mod._PROCESSES.pop("no-such-run", None)
+    assert asyncio.run(spawn_mod.terminate_run_process("no-such-run")) is False
+
+    # 2) taskkill 返回非 0（进程已消失/无权限）：不能报告成已终止
+    monkeypatch.setattr(spawn_mod, "_pid_from_events", _pid)
+    monkeypatch.setattr(
+        spawn_mod.subprocess, "run", lambda *a, **k: _Completed(returncode=128)
+    )
+    if os.name == "nt":
+        assert asyncio.run(spawn_mod.terminate_run_process("taskkill-failed")) is False
+
+    # 3) taskkill 返回 0：真的杀了
+    monkeypatch.setattr(
+        spawn_mod.subprocess, "run", lambda *a, **k: _Completed(returncode=0)
+    )
+    if os.name == "nt":
+        assert asyncio.run(spawn_mod.terminate_run_process("taskkill-ok")) is True
+
+    # 4) taskkill 说失败，但随后观测到进程退出：仍算杀掉（退出是更硬的证据）
+    class _FakeProcess:
+        pid = 4321
+        returncode = None
+
+        async def wait(self) -> int:
+            self.returncode = 1
+            return 1
+
+        def kill(self) -> None:  # pragma: no cover - Windows 分支不走
+            self.returncode = 1
+
+    fake = _FakeProcess()
+    spawn_mod._PROCESSES["observed-exit"] = fake
+    monkeypatch.setattr(
+        spawn_mod.subprocess, "run", lambda *a, **k: _Completed(returncode=128)
+    )
+    assert asyncio.run(spawn_mod.terminate_run_process("observed-exit")) is True
+    assert "observed-exit" not in spawn_mod._PROCESSES

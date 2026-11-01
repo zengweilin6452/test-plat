@@ -23,6 +23,7 @@ const {
   junitCounts,
   traceRows,
   evidenceState,
+  collectWindowRows,
 } = require('../src/components/ReportDrawer.tsx')
 const { buildTreeIndex, nodeLabel, hasNodeIdentity } = require('../src/components/DebugDrawer.tsx')
 
@@ -182,4 +183,55 @@ test('证据三态：仅 available 可下载，缺失/过期说明原因', () =>
   })
   // 后端说 available 但没给 download_url：不自己拼路径，也不当可下载
   assert.equal(evidenceState({ id: 'd', logical_key: 'x.log', availability: 'available' }).downloadable, false)
+})
+
+test('报告展示联合采集窗口（采集起止 / UI 起止 / timeout_s），缺失如实说明', () => {
+  const view = collectWindowRows({
+    collectWindow: {
+      collect_started_at: '2026-10-25T12:00:00Z',
+      collect_stopped_at: '2026-10-25T12:05:00Z',
+      ui: {
+        started_at: '2026-10-25T12:00:10Z',
+        ended_at: '2026-10-25T12:04:40Z',
+        timeout_s: 600,
+      },
+    },
+  })
+  assert.equal(view.available, true)
+  assert.equal(view.note, null)
+  const byLabel = Object.fromEntries(view.rows.map((row) => [row.label, row.value]))
+  assert.deepEqual(Object.keys(byLabel), [
+    '采集起点',
+    '采集终点',
+    'UI 执行起点',
+    'UI 执行终点',
+    'UI 超时',
+  ])
+  // 真实时间戳按本地时区渲染，不写死假时间
+  assert.match(byLabel['采集起点'], /2026/)
+  assert.match(byLabel['采集终点'], /2026/)
+  assert.match(byLabel['UI 执行起点'], /2026/)
+  assert.match(byLabel['UI 执行终点'], /2026/)
+  assert.equal(byLabel['UI 超时'], '600 秒')
+
+  // 非联合运行（或旧数据）没有窗口：如实写「无联合采集窗口」，不编造时间
+  for (const report of [undefined, {}, { collectWindow: null }]) {
+    const missing = collectWindowRows(report)
+    assert.equal(missing.available, false)
+    assert.equal(missing.note, '无联合采集窗口')
+    assert.deepEqual(missing.rows, [])
+  }
+
+  // 窗口字段残缺：缺的写破折号，不用 0 顶替
+  const broken = collectWindowRows({
+    collectWindow: {
+      collect_started_at: '2026-10-25T12:00:00Z',
+      collect_stopped_at: null,
+      ui: { started_at: '', ended_at: null, timeout_s: 0 },
+    },
+  })
+  const brokenMap = Object.fromEntries(broken.rows.map((row) => [row.label, row.value]))
+  assert.equal(brokenMap['采集终点'], '—')
+  assert.equal(brokenMap['UI 执行起点'], '—')
+  assert.equal(brokenMap['UI 超时'], '0 秒')
 })

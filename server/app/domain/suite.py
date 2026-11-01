@@ -194,10 +194,6 @@ def scenario_problems(scenario: Any) -> list[str]:
     return problems
 
 
-# 旧私有名保留为别名：改名不应让任何按私有名调用的一方悄悄失联。
-_scenario_problems = scenario_problems
-
-
 class PerfScenarioConflict(ValueError):
     """套件版本场景与修订 config.perf 两份声明不一致。"""
 

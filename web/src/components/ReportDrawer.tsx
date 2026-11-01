@@ -154,6 +154,37 @@ export function traceRows(report: RunReport | undefined): TraceRow[] {
   ]
 }
 
+export interface CollectWindowView {
+  available: boolean
+  note: string | null
+  rows: TraceRow[]
+}
+
+/**
+ * joint 联合采集窗口（真实时间戳）：采集必须包围 UI 执行窗。
+ * 后端没给窗口（非 joint / 旧数据 / 被取消）时如实写「无联合采集窗口」，
+ * 不编造时间、也不拿耗时冒充窗口。
+ */
+export function collectWindowRows(report: RunReport | undefined): CollectWindowView {
+  const collectWindow = report?.collectWindow ?? null
+  if (!collectWindow) {
+    return { available: false, note: '无联合采集窗口', rows: [] }
+  }
+  const ui = collectWindow.ui
+  const timeout = asNumber(ui?.timeout_s)
+  return {
+    available: true,
+    note: null,
+    rows: [
+      { label: '采集起点', value: fmtDateTime(collectWindow.collect_started_at) },
+      { label: '采集终点', value: fmtDateTime(collectWindow.collect_stopped_at) },
+      { label: 'UI 执行起点', value: fmtDateTime(ui?.started_at) },
+      { label: 'UI 执行终点', value: fmtDateTime(ui?.ended_at) },
+      { label: 'UI 超时', value: timeout === null ? DASH : `${fmtNumber(timeout, 0)} 秒` },
+    ],
+  }
+}
+
 const AVAILABILITY_LABELS: Record<string, string> = {
   available: '可用',
   missing: '缺失',
@@ -214,6 +245,7 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
   const report = reportQuery.data
   const metrics = Object.entries(report?.metricsSummary ?? {})
   const junit = junitCounts(report)
+  const collectWindow = collectWindowRows(report)
   const artifacts = artifactsQuery.data?.items ?? []
 
   // 重跑：POST /runs 引用原输入（同修订/同应用/同任务），parent_run_id 指回原运行；
@@ -324,6 +356,27 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
                     </Fragment>
                   ))}
                 </dl>
+              </div>
+
+              <div className="drawer-section">
+                <h3>采集窗口</h3>
+                {collectWindow.available ? (
+                  <>
+                    <dl className="summary-dl">
+                      {collectWindow.rows.map((row) => (
+                        <Fragment key={row.label}>
+                          <dt>{row.label}</dt>
+                          <dd className="mono">{row.value}</dd>
+                        </Fragment>
+                      ))}
+                    </dl>
+                    <p className="muted small">
+                      采集窗口由 runner 在真实时间上写出；UI 执行窗必须落在采集起止之间。
+                    </p>
+                  </>
+                ) : (
+                  <p className="muted small">{collectWindow.note}</p>
+                )}
               </div>
 
               <div className="drawer-section">
