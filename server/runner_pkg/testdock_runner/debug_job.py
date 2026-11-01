@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from .artifacts import collect_layout, write_report_json
 from .env import Deadline, RunnerContext, ensure_vendor_on_path, fake_enabled
 from .perf_config import scenario_problems
+from .perf_recovery import clear_stale_perf_recording
 from .protocol import emit_stage, emit_text
 from . import ui_job
 from .ui_job import UiJobOptions, UiJobResult
@@ -118,6 +119,16 @@ def run_perf_job(options: UiJobOptions, context: RunnerContext) -> UiJobResult:
         kit = PerfKit(serial=options.serial, repo_root=vendor_root / "mobile_perf",
                       runs_dir=artifacts_dir / "perf", db_path=artifacts_dir / "perf.sqlite3",
                       keep_runs=1, keep_days=36500, foreground_restore=False)
+        # 上一个 runner 被强杀时 SoloPi 录制可能仍在设备端 active；不先清理，
+        # perf-start 会直接报 "already active"（RUN-0014/0015 真机回归）。
+        # 替身 Kit 不触设备，跳过；真实 PerfKit 必有 adb_path。
+        kit_adb = getattr(kit, "adb_path", None)
+        if kit_adb is not None:
+            clear_stale_perf_recording(
+                serial=options.serial,
+                adb_path=Path(kit_adb),
+                repo_root=vendor_root / "mobile_perf",
+            )
         context.set_stage("ready", 20, stage=1)
         context.set_stage("collect", 40, stage=2)
         emit_stage("collect", 40)

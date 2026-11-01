@@ -663,3 +663,21 @@
 - 证据：`real-verify/evidence/perf-wizard-items-2026-11-01.json`。
 
 **回归**：前端 **66 passed / 0 failed**；`tsc --noEmit`、`npm run build` 通过。未改后端契约，因此未重跑后端全量。
+
+## 18. 残留性能录制兜底（2026-11-01 晚）
+
+**现场**：RUN-0015（性能测试）在 RUN-0014 之后失败：
+
+- RUN-0015：`errored / perf_collect_failed`，事件 `perf-start 失败: A performance recording is already active`。
+- RUN-0014：20:47:05 在设备上启动 SoloPi 录制（session `495161ef…`），20:47:12 后 runner 心跳中断；20:48:16 被对账判 `lease_expired`，但设备端录制没有停止。
+
+**修复**：
+- 新增 `server/runner_pkg/testdock_runner/perf_recovery.py`：启动性能采集前查询 `perf-status`；发现 active 录制时按 sessionId 执行 `perf-stop`（不拉取、不写入本次产物），停不掉或缺少 sessionId 则在启动前明确失败。
+- 独立性能 `run_perf_job` 与联动 `_start_perf_collect` 都在打开 PerfKit 采集窗口前调用；假 Kit 不触设备时跳过。
+- 状态探测失败只记录 `perf_status_failed` 并放行；真实冲突仍由后续 `perf-start` 如实报错。
+
+**真机兜底验证**（749622c9）：临时启动 SoloPi 录制 session `48fa254d…`，调用兜底后自动停止，事件 `perf_stale_recording_stopped`，随后 `perf-status` 为 `stopped / active=false`；临时录制 session 未进入平台 run 产物。
+
+**回归**：`server/tests/test_perf_recovery.py` 覆盖 inactive、active 自动停止、缺 sessionId、stop 失败、status 失败放行、独立性能接线与联动接线；定向 `test_perf_recovery + test_issue06_perf_scenario + test_issue16_joint_lifecycle` 全通过。后端全量 **588 passed / 1 skipped / 0 failed**（JUnit 589 cases，数据库 skip 0），退出码 0；全量之后仅扩展 active 状态判定并定向重跑 recovery 7 passed。
+
+**边界**：兜底只能处理下一轮启动前发现的残留；RUN-0014 的 runner 为什么在 collect 后消失仍未定位（日志在该阶段截断）。若再次出现，需要继续查 runner 退出路径。

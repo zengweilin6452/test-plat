@@ -26,6 +26,7 @@ from typing import Any
 
 from .artifacts import collect_layout, write_report_json
 from .env import RunnerContext, ensure_vendor_on_path, fake_enabled
+from .perf_recovery import clear_stale_perf_recording
 from .protocol import emit_stage, emit_text
 from . import EXIT_INFRA_ERROR
 from .ui_job import (
@@ -90,13 +91,28 @@ def _start_perf_collect(options: UiJobOptions):
     if not options.app_package:
         raise ValueError("joint 运行缺少 app_package：采集需要目标前台应用")
     runs_dir = options.artifacts_dir / "perf-runs"
+    vendor_root = (
+        Path(options.vendor_dir)
+        if options.vendor_dir
+        else Path(__file__).resolve().parents[3] / "vendor"
+    )
+    repo_root = vendor_root / "mobile_perf"
     # SQLite 必须落在本次运行产物目录：vendor 目录是只读固定副本，
     # 默认（<repo>/data/mobile_perf.db）会写穿 vendor。
     kit = PerfKit(
         serial=options.serial or None,
+        repo_root=repo_root,
         runs_dir=str(runs_dir),
         db_path=str(options.artifacts_dir / "perf.sqlite3"),
     )
+    # UI 开始前先清掉设备端残留录制，避免本作业 perf-start 撞 already active。
+    kit_adb = getattr(kit, "adb_path", None)
+    if kit_adb is not None and options.serial:
+        clear_stale_perf_recording(
+            serial=options.serial,
+            adb_path=Path(kit_adb),
+            repo_root=repo_root,
+        )
     spec = SessionSpec(
         target=str(options.app_package),
         items=items,

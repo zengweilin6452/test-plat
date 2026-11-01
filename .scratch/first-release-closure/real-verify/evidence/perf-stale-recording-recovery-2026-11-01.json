@@ -1,0 +1,75 @@
+{
+  "generatedAt": "2026-11-01T20:20:00+08:00",
+  "incident": {
+    "run15": {
+      "runId": "e7082fd6-c602-4dfa-81b2-4d7a47e46c76",
+      "displayNo": 15,
+      "state": "errored",
+      "reason": "perf_collect_failed",
+      "message": "perf-start 失败: A performance recording is already active"
+    },
+    "precedingRun14": {
+      "runId": "a0ea2c9a-75c6-4763-96aa-fa80f9496da2",
+      "displayNo": 14,
+      "state": "errored",
+      "reason": "lease_expired",
+      "lastHeartbeatAt": "2026-11-01T20:47:12.989769+08:00",
+      "reclaimedAt": "2026-11-01T20:48:16.494842+08:00"
+    },
+    "orphanRecording": {
+      "sessionId": "495161ef-85a5-4805-bad5-2d915c98ade6",
+      "startedAt": "2026-11-01T20:47:05.263+08:00",
+      "durationMs": 224844,
+      "targetPackage": "com.sinosoft.trainapp",
+      "items": [
+        "CPU",
+        "Memory",
+        "FPS",
+        "Network",
+        "Battery"
+      ],
+      "manuallyStoppedAt": "2026-11-01T20:50:50.107+08:00",
+      "stopResult": "stopped"
+    }
+  },
+  "recoveryImplementation": {
+    "module": "server/runner_pkg/testdock_runner/perf_recovery.py",
+    "wiredInto": [
+      "run_perf_job",
+      "_start_perf_collect (joint)"
+    ],
+    "behavior": [
+      "perf-status 查询 active 录制",
+      "active 时用该 sessionId 调用 perf-stop（无 --output，不污染本次产物）",
+      "无 sessionId 或 perf-stop 失败则启动前明确失败",
+      "perf-status 诊断失败只记录事件并放行，由后续 perf-start 如实报错"
+    ]
+  },
+  "realDeviceRecoveryCheck": {
+    "device": "749622c9",
+    "temporarySessionId": "48fa254d-3eaf-4bbb-bbe7-a4ae837c9b67",
+    "startedActive": true,
+    "recoveredSession": "48fa254d-3eaf-4bbb-bbe7-a4ae837c9b67",
+    "recoveredStopped": true,
+    "recoveredDurationMs": 1176,
+    "statusAfter": "stopped",
+    "activeAfter": false,
+    "event": "perf_stale_recording_stopped"
+  },
+  "tests": {
+    "focused": {
+      "command": "python -m pytest tests/test_perf_recovery.py tests/test_issue06_perf_scenario.py tests/test_issue16_joint_lifecycle.py -q",
+      "result": "all passed"
+    },
+    "fullBackend": {
+      "command": "python -m pytest -o addopts=\"\" --junitxml=.runtime/junit-recovery.xml -q",
+      "passed": 588,
+      "skipped": 1,
+      "failed": 0,
+      "exitCode": 0,
+      "junitCases": 589,
+      "junitDatabaseSkips": 0,
+      "note": "全量跑在主实现之后；随后仅把 active 判定扩展为 state=starting/recording/stopping，并用 test_perf_recovery 定向重跑（7 passed）"
+    }
+  }
+}
