@@ -83,6 +83,34 @@ _QUEUED_SQL = text(
 )
 
 
+async def _suite_ui_timeout(session, revision_id: str | None) -> int | None:
+    """joint 的 UI 执行窗来自套件版本清单（suite_versions.manifest.ui_timeout_s）。
+
+    版本快照是固定定义：生产修订 config 不带这个字段，不合订就等于恒用默认
+    600（工单 07 缺陷 3）。非 joint / 旧清单缺字段时返回 None，由 spawn 夹紧兜底。
+    """
+    if not revision_id:
+        return None
+    row = (
+        await session.execute(
+            text(
+                "SELECT tr.test_type, sv.manifest"
+                "  FROM task_revisions tr"
+                "  LEFT JOIN suite_versions sv ON sv.id = tr.suite_version_id"
+                " WHERE tr.id = CAST(:rid AS uuid)"
+            ),
+            {"rid": revision_id},
+        )
+    ).mappings().first()
+    if row is None or str(row["test_type"] or "") != "joint":
+        return None
+    manifest = row["manifest"] if isinstance(row["manifest"], dict) else {}
+    value = manifest.get("ui_timeout_s")
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
 async def _resolve_config(session, run: dict[str, Any]) -> dict[str, Any]:
     """合并 config_snapshot 与运行所需的最小上下文（应用标识、串口等）。"""
     snapshot = run.get("config_snapshot") or {}
@@ -104,6 +132,11 @@ async def _resolve_config(session, run: dict[str, Any]) -> dict[str, Any]:
     if app_row:
         merged.setdefault("application_name", app_row["name"])
         merged.setdefault("app_package", app_row["identifier"])
+    # joint：UI 执行窗以套件版本清单为准（版本快照不可变）。修订里若也声明了
+    # 不同的值，以版本为准——否则同一版本在不同修订上会跑出不同上限。
+    ui_timeout = await _suite_ui_timeout(session, str(run.get("revision_id") or ""))
+    if ui_timeout is not None:
+        merged["ui_timeout_s"] = ui_timeout
     return merged
 
 

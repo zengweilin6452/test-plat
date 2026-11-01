@@ -30,6 +30,7 @@ from . import EXIT_INFRA_ERROR
 from .ui_job import (
     SuiteCopyError,
     UiJobOptions,
+    UiJobResult,
     require_suite_copy_targets,
     run_ui_job,
 )
@@ -97,6 +98,76 @@ def _start_perf_collect(options: UiJobOptions):
     return kit.collect(spec)
 
 
+def _ui_window_timeout(options: UiJobOptions) -> int:
+    """本次 UI 执行窗上限：派发固定的 ui_timeout_s 优先，兼容旧的 perf 字段。"""
+    raw = options.ui_timeout_s
+    if raw is None:
+        raw = (options.perf or {}).get("ui_timeout_s")
+    return clamp_ui_timeout(raw)
+
+
+def _stop_collection(scope: Any) -> dict[str, Any] | None:
+    """UI 一返回（正常或超时）立即停采。
+
+    finalize 失败不吞 UI 结果：指标按缺失呈现，但采集窗口必须收口，
+    不能把采集留到进程退出（工单 07 缺陷 2）。
+    """
+    if scope is None:
+        return None
+    try:
+        return scope.finalize()
+    except Exception as exc:  # noqa: BLE001 - 停采失败不吞 UI 结果
+        emit_text("perf_collect_stop_failed", detail=str(exc)[:300])
+        return None
+
+
+def _write_joint_report(
+    options: UiJobOptions,
+    window: dict[str, Any],
+    vendor_report: dict[str, Any] | None,
+    *,
+    fake: bool,
+) -> None:
+    """写 report.json：采集窗口是平台 /report 的唯一来源。
+
+    真实路径即使 vendor 报告不可用也写：报告至少要能说明采集起止与 UI
+    执行窗，而不是"什么都没有"。
+    """
+    if fake:
+        _write_fake_perf_report(options.artifacts_dir, window)
+        return
+    report_data = {
+        "runId": str(options.run_id),
+        "mode": "original",
+        "metricsSummary": {},
+        "thresholdsAtRun": {},
+        "collectWindow": window,
+        "prototype": False,
+    }
+    if isinstance(vendor_report, dict):
+        report_data["metricsSummary"] = vendor_report.get("metricsSummary") or {}
+        report_data["thresholdsAtRun"] = vendor_report.get("thresholdsAtRun") or {}
+    write_report_json(options.artifacts_dir, report_data)
+
+
+def _ui_timeout_result(ui_result: Any) -> JointJobResult:
+    return JointJobResult(
+        exit_code=EXIT_INFRA_ERROR,
+        reason=UI_TIMEOUT,
+        message="UI 执行达到 ui_timeout_s 上限，已停止采集并收口",
+        junit=getattr(ui_result, "junit", {}) or {},
+        cases=getattr(ui_result, "cases", []) or [],
+        components=[
+            {"kind": "ui", "state": "errored", "reason_code": UI_TIMEOUT},
+            {
+                "kind": "performance",
+                "state": "cancelled",
+                "reason_code": "collect_stopped_at_ui_timeout",
+            },
+        ],
+    )
+
+
 def run_joint_job(options: UiJobOptions, context: RunnerContext) -> JointJobResult:
     """采集包围 UI：先开采集，再跑一次 UI，UI 一返回立刻停采并归档。"""
     fake = fake_enabled(options.fake)
@@ -120,6 +191,11 @@ def run_joint_job(options: UiJobOptions, context: RunnerContext) -> JointJobResu
                     },
                 ],
             )
+    # UI 执行窗上限必须同时是真实 pytest deadline（工单 07 缺陷 1）：
+    # 在这里固定成 UiJobOptions 的一部分，ui_job 与窗口描述读同一个值。
+    window_timeout = _ui_window_timeout(options)
+    options.ui_timeout_s = window_timeout
+
     emit_stage("perf_collect_start", 10, stage=1)
     collect_started_at = _now()
 
@@ -157,49 +233,20 @@ def run_joint_job(options: UiJobOptions, context: RunnerContext) -> JointJobResu
     # ponytail: 真机模式复用 run_ui_job，若 vendor 锁不可重入再拆内部函数）。
     ui_started_at = _now()
     if os.environ.get("TESTDOCK_FAKE_UI_TIMEOUT", "").strip() == "1":
-        # fake 模拟 UI 达到 ui_timeout_s：runner 在窗口边界停 UI 并收口
-        return JointJobResult(
-            exit_code=EXIT_INFRA_ERROR,
-            reason=UI_TIMEOUT,
-            message="UI 执行达到 ui_timeout_s 上限，已停止采集并收口",
-            components=[
-                {"kind": "ui", "state": "errored", "reason_code": UI_TIMEOUT},
-                {"kind": "performance", "state": "cancelled",
-                 "reason_code": "collect_stopped_at_ui_timeout"},
-            ],
+        # fake 模拟 UI 达到 ui_timeout_s：走与真实超时同一段收口逻辑
+        ui_result = UiJobResult(
+            exit_code=EXIT_INFRA_ERROR, reason=UI_TIMEOUT, timed_out=True
         )
-    ui_result = run_ui_job(options, context)
+    else:
+        ui_result = run_ui_job(options, context)
     ui_window = {
         "started_at": ui_started_at,
         "ended_at": _now(),
-        "timeout_s": clamp_ui_timeout(
-            (options.perf or {}).get("ui_timeout_s") or DEFAULT_UI_TIMEOUT_S
-        ),
+        "timeout_s": window_timeout,
     }
 
-    if ui_result.timed_out:
-        # UI 达到上限：停止采集并收口，记超时错误（不是用例失败）
-        emit_stage("perf_collect_stop", 90, stage=2)
-        return JointJobResult(
-            exit_code=EXIT_INFRA_ERROR,
-            reason=UI_TIMEOUT,
-            message="UI 执行达到 ui_timeout_s 上限，已停止采集并收口",
-            junit=ui_result.junit,
-            cases=ui_result.cases,
-            components=[
-                {"kind": "ui", "state": "errored", "reason_code": UI_TIMEOUT},
-                {"kind": "performance", "state": "cancelled", "reason_code": "collect_stopped_at_ui_timeout"},
-            ],
-        )
-
-    # UI 一返回立即停采：不等待最小样本数、不补空闲样本（D11）。
-    # 真实路径 finalize 走 vendor 归档/入库/报告全链路，报告含真实指标。
-    vendor_report = None
-    if scope is not None:
-        try:
-            vendor_report = scope.finalize()
-        except Exception as exc:  # noqa: BLE001 - 停采失败不吞 UI 结果，指标按缺失呈现
-            emit_text("perf_collect_stop_failed", detail=str(exc)[:300])
+    # UI 一返回立即停采：正常结束与超时都必须先收口（不补采、不等样本，D11）。
+    vendor_report = _stop_collection(scope)
     collect_stopped_at = _now()
     emit_stage("perf_collect_stop", 90, stage=2)
 
@@ -208,22 +255,11 @@ def run_joint_job(options: UiJobOptions, context: RunnerContext) -> JointJobResu
         "collect_stopped_at": collect_stopped_at,
         "ui": ui_window,
     }
-    metrics_summary = {}
-    if fake:
-        _write_fake_perf_report(options.artifacts_dir, window)
-        metrics_summary = {"mem_pss_mb": {"unit": "MB", "median": 268.0, "sampleCount": 12}}
-    elif isinstance(vendor_report, dict):
-        # vendor 报告字段映射到平台 report.json 契约（runtime._report_json_payload 消费）
-        report_data = {
-            "runId": str(options.run_id),
-            "mode": "original",
-            "metricsSummary": vendor_report.get("metricsSummary") or {},
-            "thresholdsAtRun": vendor_report.get("thresholdsAtRun") or {},
-            "collectWindow": window,
-            "prototype": False,
-        }
-        write_report_json(options.artifacts_dir, report_data)
-        metrics_summary = report_data["metricsSummary"]
+    _write_joint_report(options, window, vendor_report, fake=fake)
+
+    if ui_result.timed_out:
+        # UI 达到上限：停止采集并收口，记超时错误（不是用例失败）
+        return _ui_timeout_result(ui_result)
 
     components = list(ui_result.components or [])
     if not components:

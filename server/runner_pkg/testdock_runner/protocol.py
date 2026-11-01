@@ -158,6 +158,7 @@ class ControlClient:
         stage: str,
         fencing_token: int,
         components: list[Mapping[str, Any]] | None = None,
+        artifacts_dir: str | None = None,
     ) -> dict[str, Any]:
         return self._request(
             "POST",
@@ -168,6 +169,9 @@ class ControlClient:
                 "stage": stage,
                 "fencing_token": fencing_token,
                 "components": list(components or []),
+                # 失败也可能已有产物（如 joint 超时前写下的 report.json/采集窗口），
+                # 交给平台登记，报告才能说明采集确实发生过。
+                "artifacts_dir": artifacts_dir,
             },
         )
 
