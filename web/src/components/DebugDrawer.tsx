@@ -1480,13 +1480,29 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                 <div className="phone-bottom" aria-hidden="true" />
               </div>
             </div>
-            {controlEnabled ? (
-              <div className="debug-control-bar">
-                <span className="small muted">直接操控中 · 点击/拖动画面（单操作者）</span>
-                <Button size="small" onClick={() => void handleControlKey('back')}>返回键</Button>
-                <Button size="small" onClick={() => void handleControlKey('home')}>Home</Button>
-              </div>
-            ) : null}
+            <div className="debug-control-bar">
+              <span className="small muted">
+                {controlEnabled
+                  ? '直接操控中 · 点击/拖动画面（单操作者）'
+                  : '直接操控未启用 · 先在工具栏点「直接操控」'}
+              </span>
+              <Button
+                size="small"
+                disabled={!controlEnabled}
+                title={controlEnabled ? undefined : '先启用直接操控'}
+                onClick={() => void handleControlKey('back')}
+              >
+                返回键
+              </Button>
+              <Button
+                size="small"
+                disabled={!controlEnabled}
+                title={controlEnabled ? undefined : '先启用直接操控'}
+                onClick={() => void handleControlKey('home')}
+              >
+                Home
+              </Button>
+            </div>
             <div className="between small muted">
               <span>{snapshotId ? '快照 ' + snapshotId : frozen ? '快照待采集' : '设备画面未冻结'}</span>
               <span>{deviceResolution}</span>
