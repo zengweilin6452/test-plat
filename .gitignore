@@ -1,6 +1,9 @@
 # 运行时数据
 data/
 .runtime/
+server/assets/
+server/artifacts/
+.claude/worktrees/
 
 # Python
 __pycache__/
