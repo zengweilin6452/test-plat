@@ -208,6 +208,18 @@ def _evidence_plugin_preloaded() -> bool:
         return False
 
 
+def _suite_owns_mobile_session(suite_root: Path | None) -> bool:
+    """套件自带 mobile_session / --mobile-config 时，平台不再注入自己的会话插件。"""
+    if suite_root is None:
+        return False
+    conftest = Path(suite_root) / "conftest.py"
+    try:
+        text = conftest.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return "def mobile_session" in text or "--mobile-config" in text
+
+
 def build_pytest_command(
     *,
     serial: str,
@@ -215,6 +227,7 @@ def build_pytest_command(
     test_paths: list[str],
     revision_id: str | None = None,
     mobile_config: Path | None = None,
+    suite_root: Path | None = None,
 ) -> list[str]:
     """§10.2 第 4 步的命令，参数顺序与文档一致。"""
     junit = Path(artifacts_dir) / JUNIT_XML
@@ -234,9 +247,12 @@ def build_pytest_command(
         # vendor 插件的 sessionstart/sessionfinish 用这份配置定位 assets/artifacts；
         # 不传时默认按 cwd 解析（固定副本），运行会写进副本并破坏摘要。
         argv += ["--mobile-config", str(mobile_config)]
+    if not _suite_owns_mobile_session(suite_root):
+        argv += [
+            "-p",
+            "testdock_runner.pytest_plugin",
+        ]
     argv += [
-        "-p",
-        "testdock_runner.pytest_plugin",
         # 平台只读纪律：套件不能通过 pytest.ini / addopts 隐式打开
         # mobile-perf（其 perf.session 会调用 PerfKit.ensure_ready 自愈）。
         "-p",
@@ -509,6 +525,7 @@ def _run_pytest(
             if suite_root
             else None
         ),
+        suite_root=suite_root,
     )
     # 追溯：本次执行实际用的套件版本、树摘要与相对目标。
     emit_text(

@@ -213,3 +213,40 @@ def test_pytest_command_skips_explicit_plugin_when_entrypoint_autoloads(monkeypa
         serial="s", artifacts_dir=Path("."), test_paths=["tests"]
     )
     assert "mobile_auto.evidence.pytest_plugin" in argv
+
+
+def test_pytest_command_defers_to_suite_owned_mobile_session(tmp_path):
+    """客户套件自带 mobile_session / --mobile-config 时，平台插件必须让位。
+
+    Beta Academy 的 conftest 自己注册 --mobile-config 并定义 mobile_session；
+    平台插件先注册同名选项会让 pytest 在 conftest 加载时直接 ArgumentError。
+    """
+    from testdock_runner import ui_job as ui_job_mod
+
+    suite = tmp_path / "suite"
+    suite.mkdir()
+    (suite / "conftest.py").write_text(
+        "import pytest\n"
+        "def pytest_addoption(parser):\n"
+        "    parser.addoption('--mobile-config', default=None)\n"
+        "@pytest.fixture(scope='session')\n"
+        "def mobile_session():\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+    argv = ui_job_mod.build_pytest_command(
+        serial="s",
+        artifacts_dir=tmp_path,
+        test_paths=["."],
+        mobile_config=tmp_path / "mobile.toml",
+        suite_root=suite,
+    )
+    assert "testdock_runner.pytest_plugin" not in argv
+    assert "--mobile-config" in argv and str(tmp_path / "mobile.toml") in argv
+
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    plain_argv = ui_job_mod.build_pytest_command(
+        serial="s", artifacts_dir=tmp_path, test_paths=["."], suite_root=plain
+    )
+    assert "testdock_runner.pytest_plugin" in plain_argv
