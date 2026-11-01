@@ -81,6 +81,15 @@ test('节点拾取优先 resource-id，其次 text，都没有则如实为空', 
   assert.equal(preferredLocator({ index: 4 }), null)
 })
 
+test('冻结快照的节点树与图像来自同一次采集，后续实时帧不改快照含义', () => {
+  const source = fs.readFileSync(require.resolve('../src/components/DebugDrawer.tsx'), 'utf8')
+  // 一次采集返回 snapshot + tree，树必须用同一个 snapshot_id 去取
+  assert.match(source, /const captured = await captureSnapshot\(id, true\)/)
+  assert.match(source, /fetchSnapshotTree\(id, captured\.snapshot_id\)/)
+  // 冻结后丢弃实时帧，画面停在采集那一刻
+  assert.match(source, /if \(frozenRef\.current\) return/)
+})
+
 test('刷新/恢复预览清临时状态，但模板清单只来自服务端（不本地删除）', () => {
   const source = fs.readFileSync(
     require.resolve('../src/components/DebugDrawer.tsx'),
