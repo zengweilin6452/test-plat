@@ -125,10 +125,14 @@ async def _prepare_suite_copy(session, revision_id: str) -> Path:
 async def _verify_build_identity(run_id: str, *, serial: str) -> dict[str, Any]:
     """运行租约内复核构建安装身份（只读 dumpsys，不安装不修改）。
 
-    返回 {verdict: skipped|verified|mismatch|unreadable, detail}；
-    - 修订无构建、构建未学习身份（pending）→ skipped（无从复核，不冒充通过）；
-    - versionName 与固定基准一致 → verified；
-    - 不一致 → mismatch；adb 不可读/设备不在线 → unreadable。
+    返回 {verdict, detail, reason, ...}，verdict 取值与派发动作：
+    - skipped：修订未绑定构建 / 构建身份未学习（pending）/ 基准不完整
+      —— 无从复核，不阻断也不冒充通过；
+    - verified：包名、versionName（及基准里的 versionCode）与固定基准一致；
+    - mismatch：设备上的安装身份与基准不一致 —— 阻断；
+    - unreadable：adb 不可读、包未安装或 dumpsys 没有 versionName —— 阻断。
+
+    核对等级只到设备上已安装包的字段；不声称 APK 文件摘要已验证。
     """
     from ..integrations import devices as adb_integration
 
@@ -138,28 +142,68 @@ async def _verify_build_identity(run_id: str, *, serial: str) -> dict[str, Any]:
             await session.execute(
                 text(
                     """
-                    SELECT b.metadata
+                    SELECT tr.build_id, b.metadata
                       FROM test_runs r
-                      JOIN task_revisions tr ON tr.id = r.revision_id
-                      JOIN app_builds b ON b.id = tr.build_id
+                      LEFT JOIN task_revisions tr ON tr.id = r.revision_id
+                      LEFT JOIN app_builds b ON b.id = tr.build_id
                      WHERE r.id = CAST(:rid AS uuid)
                     """
                 ),
                 {"rid": run_id},
             )
-        ).scalar_one_or_none()
-    metadata = row if isinstance(row, dict) else {}
+        ).mappings().first()
+    if row is None or row["build_id"] is None:
+        return {
+            "verdict": "skipped",
+            "reason": "no_build",
+            "detail": "修订未绑定构建，运行前无从复核安装身份",
+        }
+    metadata = row["metadata"] if isinstance(row["metadata"], dict) else {}
     identity = metadata.get("identity") if isinstance(metadata, dict) else None
     # 基准在 confirm 时固定到 identity.baseline（工单 04）；state != confirmed
     # 视为"身份未学习"——不冒充通过，也不阻断（无从复核）。
     if not isinstance(identity, dict) or identity.get("state") != "confirmed":
-        return {"verdict": "skipped", "detail": "构建身份未学习（pending），运行前无从复核"}
+        return {
+            "verdict": "skipped",
+            "reason": "build_identity_pending",
+            "detail": "构建身份尚未确认，运行前无从复核设备安装版本",
+        }
     declared = identity.get("baseline")
     if not isinstance(declared, dict) or not declared.get("package_name"):
-        return {"verdict": "skipped", "detail": "构建身份缺少固定基准，运行前无从复核"}
+        return {
+            "verdict": "skipped",
+            "reason": "baseline_missing",
+            "detail": "构建身份缺少固定基准（包名），运行前无从复核",
+        }
 
     package = str(declared["package_name"])
-    expected = str(declared.get("version_name") or "")
+    # 包名进的是 `adb shell "<命令>"` 的单个参数：必须先按包名白名单校验，
+    # 否则基准里被写入的 `; reboot` 之类会被设备端 shell 解释执行（只读边界）。
+    from ..services.builds import PACKAGE_NAME_RE
+
+    if PACKAGE_NAME_RE.match(package) is None:
+        return {
+            "verdict": "unreadable",
+            "reason": "package_name_invalid",
+            "detail": f"固定基准里的包名 {package!r} 不是合法 Android 包名，拒绝拼入只读命令",
+            "package_name": package,
+            "serial": serial,
+        }
+    expected = str(declared.get("version_name") or "").strip()
+    expected_code = declared.get("version_code")
+    if not expected:
+        return {
+            "verdict": "skipped",
+            "reason": "baseline_incomplete",
+            "detail": "固定基准缺少 versionName，运行前无从复核",
+            "package_name": package,
+        }
+    result: dict[str, Any] = {
+        "package_name": package,
+        "expected_version_name": expected,
+        "expected_version_code": expected_code,
+        "serial": serial,
+    }
     try:
         adb_path = adb_integration.resolve_adb_path()
         raw = await asyncio.to_thread(
@@ -169,17 +213,118 @@ async def _verify_build_identity(run_id: str, *, serial: str) -> dict[str, Any]:
             timeout_s=15,
         )
     except Exception as exc:  # noqa: BLE001 - 不可读阻断
-        return {"verdict": "unreadable", "detail": f"adb 读取失败：{exc}"}
+        return {
+            **result,
+            "verdict": "unreadable",
+            "reason": "adb_read_failed",
+            "detail": f"无法读取设备 {serial} 的安装身份：{exc}",
+        }
+    if re.search(rf"Package \[{re.escape(package)}\]", raw or "") is None:
+        return {
+            **result,
+            "verdict": "unreadable",
+            "reason": "package_not_installed",
+            "detail": f"设备 {serial} 上没有安装 {package}（dumpsys 未列出该包）",
+        }
     match = re.search(r"versionName=(\S+)", raw or "")
     if match is None:
-        return {"verdict": "unreadable", "detail": "dumpsys 输出里没有 versionName"}
-    observed = match.group(1)
-    if expected and observed != expected:
         return {
-            "verdict": "mismatch",
-            "detail": f"expected versionName={expected}, observed={observed}",
+            **result,
+            "verdict": "unreadable",
+            "reason": "version_name_unreadable",
+            "detail": f"dumpsys package {package} 的输出里没有 versionName，无法核对",
         }
-    return {"verdict": "verified", "detail": f"versionName={observed}"}
+    observed = match.group(1).strip().strip('"')
+    result["observed_version_name"] = observed
+    code_match = re.search(r"\bversionCode=(\d+)\b", raw or "")
+    observed_code = int(code_match.group(1)) if code_match else None
+    result["observed_version_code"] = observed_code
+    if observed != expected:
+        return {
+            **result,
+            "verdict": "mismatch",
+            "reason": "version_name_mismatch",
+            "detail": f"versionName 不一致：固定基准 {expected}，设备 {serial} 实际 {observed}",
+        }
+    if expected_code is not None and observed_code is None:
+        # 基准固定了 versionCode，但这次读不到：不能把"没读到"写成"已验证"。
+        return {
+            **result,
+            "verdict": "unreadable",
+            "reason": "version_code_unreadable",
+            "detail": (
+                f"dumpsys package {package} 的输出里没有 versionCode，"
+                f"无法核对固定基准 {expected_code}"
+            ),
+        }
+    if expected_code is not None and observed_code is not None and int(expected_code) != observed_code:
+        return {
+            **result,
+            "verdict": "mismatch",
+            "reason": "version_code_mismatch",
+            "detail": (
+                f"versionCode 不一致：固定基准 {expected_code}，设备 {serial} 实际 {observed_code}"
+                f"（versionName 相同）"
+            ),
+        }
+    return {
+        **result,
+        "verdict": "verified",
+        "reason": "identity_match",
+        "detail": f"versionName={observed} 与固定基准一致（仅核对安装包字段，未验证 APK 摘要）",
+    }
+
+
+#: 身份复核结论 -> 事件类型（事件时间线直接可读，不把未复核写成已验证）。
+_IDENTITY_EVENT_TYPES = {
+    "verified": "identity_verified",
+    "mismatch": "identity_mismatch",
+    "unreadable": "identity_unreadable",
+    "skipped": "identity_unverified",
+}
+
+
+async def _record_identity_result(
+    run_id: str, *, project_id: str, result: dict[str, Any]
+) -> None:
+    """把运行前的身份复核结论写成事件（pending/skipped 明确标记为未复核）。"""
+    verdict = str(result.get("verdict"))
+    verified = verdict == "verified"
+    payload = {
+        "stage": "identity",
+        "verdict": verdict,
+        "reason": result.get("reason"),
+        "detail": result.get("detail"),
+        "serial": result.get("serial"),
+        "package_name": result.get("package_name"),
+        "expected_version_name": result.get("expected_version_name"),
+        "observed_version_name": result.get("observed_version_name"),
+        "expected_version_code": result.get("expected_version_code"),
+        "observed_version_code": result.get("observed_version_code"),
+        "execution_allowed": verified,
+        "verification_level": (
+            "package_identity_observed" if verdict in ("verified", "mismatch") else "none"
+        ),
+        "apk_digest_verified": False,
+        "note": (
+            "已核对设备上已安装包的包名/versionName/versionCode；未验证 APK 文件摘要"
+            if verified
+            else "本次运行未完成安装身份复核，不能声称已核对设备安装版本"
+        ),
+    }
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        async with session.begin():
+            await events_mod.append_event(
+                session,
+                project_id=project_id,
+                run_id=run_id,
+                source_key=events_mod.SOURCE_DISPATCHER,
+                source_event_id=events_mod.event_id_for("identity", run_id, verdict),
+                event_type=_IDENTITY_EVENT_TYPES.get(verdict, "identity_unverified"),
+                payload=payload,
+            )
+
 
 
 async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome:
@@ -325,17 +470,21 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
 
     # 工单 24：运行租约内的构建身份复核（只读 adb，不申请第二把租约——
     # leases_one_live_resource 不允许两条活动租约并存）。冲突/不可读阻断，
-    # 身份未学习（pending）不阻断但记录事件。
+    # 身份未学习（pending）不阻断，但事件里明确写成「未复核」。
     identity_result = await _verify_build_identity(
         rid, serial=str(lease_details.get("serial") or "")
     )
-    if identity_result["verdict"] == "mismatch":
+    await _record_identity_result(rid, project_id=project_id, result=identity_result)
+    if identity_result["verdict"] in ("mismatch", "unreadable"):
+        reason = "identity_" + str(identity_result["verdict"])
         await mark_spawn_failed(
             rid,
-            error="identity_mismatch: " + str(identity_result.get("detail"))[:400],
+            error=reason + ": " + str(identity_result.get("detail"))[:400],
             lease=lease_details,
+            reason=reason,
+            stage="identity",
         )
-        return DispatchOutcome(run_id=rid, ok=False, reason="identity_mismatch")
+        return DispatchOutcome(run_id=rid, ok=False, reason=reason)
 
     # 工单 25：执行锁定模板版本——修订 config.image_templates 声明的
     # logical/version_id/sha256 与共享模板库当前版本逐条核对；缺失或不符
@@ -369,9 +518,19 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
 
 
 async def mark_spawn_failed(
-    run_id: str | uuid.UUID, *, error: str, lease: dict[str, Any] | None
+    run_id: str | uuid.UUID,
+    *,
+    error: str,
+    lease: dict[str, Any] | None,
+    reason: str = "runner_spawn_failed",
+    stage: str = "spawn",
 ) -> None:
-    """spawn 失败：释放租约 + run=errored。必须两步都做，否则设备被永久占用。"""
+    """派发阶段失败：释放租约 + run=errored。必须两步都做，否则设备被永久占用。
+
+    reason 同时写入 test_runs.reason_code 与事件 payload，页面「原因」才显示
+    真实原因（identity_mismatch / identity_unreadable），而不是笼统的
+    runner_spawn_failed。
+    """
     sessionmaker = get_sessionmaker()
     rid = str(run_id)
     async with sessionmaker() as session:
@@ -384,14 +543,14 @@ async def mark_spawn_failed(
             ).mappings().first()
             if row is None:
                 return
-            await leases_mod.release_lease(session, run_id=rid, reason="runner_spawn_failed")
+            await leases_mod.release_lease(session, run_id=rid, reason=reason)
             if row["state"] in (runs_mod.STATE_DISPATCHING, runs_mod.STATE_QUEUED):
                 await runs_mod.transition(
                     session,
                     rid,
                     (runs_mod.STATE_DISPATCHING, runs_mod.STATE_QUEUED),
                     runs_mod.STATE_ERRORED,
-                    reason="runner_spawn_failed",
+                    reason=reason,
                     actor="dispatcher",
                 )
                 await events_mod.append_event(
@@ -402,8 +561,8 @@ async def mark_spawn_failed(
                     source_event_id=events_mod.event_id_for("spawn_failed", rid),
                     event_type="error",
                     payload={
-                        "stage": "spawn",
-                        "reason": "runner_spawn_failed",
+                        "stage": stage,
+                        "reason": reason,
                         "message": error[:2000],
                         "lease": lease,
                     },
