@@ -300,3 +300,64 @@ def test_joint_blocks_out_of_bounds_target_before_collecting(fixed_copy, tmp_pat
     assert result.exit_code == 3
     assert result.reason == "suite_path_out_of_bounds"
     assert started == [], "目标不可用时不应先启动性能采集"
+
+
+# --------------------------------------------------------------------------- #
+# 执行不污染副本（工单 01 的副作用约束）
+# --------------------------------------------------------------------------- #
+def _tree_snapshot(root: Path) -> dict[str, str]:
+    import hashlib
+
+    snapshot: dict[str, str] = {}
+    for path in sorted(root.rglob("*")):
+        if path.is_file():
+            snapshot[path.relative_to(root).as_posix()] = hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+    return snapshot
+
+
+def test_execution_leaves_copy_tree_unchanged(fixed_copy, tmp_path):
+    """跑完 pytest 后副本仍是发布时那份：产物/缓存/字节码都不落进副本。"""
+    before = _tree_snapshot(fixed_copy.copy_root)
+    artifacts = tmp_path / "artifacts"
+    result = ui_job.run_ui_job(_options(fixed_copy.copy_root, artifacts), _context(artifacts))
+    assert result.outcome == "passed", (result.reason, result.message)
+    after = _tree_snapshot(fixed_copy.copy_root)
+    assert after == before, (
+        "新增/变化文件: " + str(sorted(set(after) - set(before))),
+        "摘要变化: " + str(sorted(k for k in before if k in after and after[k] != before[k])),
+    )
+
+
+def test_pytest_env_forbids_bytecode_in_copy():
+    env = ui_job.build_pytest_env({})
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+
+
+def test_platform_session_resolves_assets_outside_copy(tmp_path, monkeypatch):
+    """platform 的 mobile_session 不依赖 cwd：assets 固定到共享模板根。"""
+    from mobile_auto.core import session as session_mod
+
+    captured: list[object] = []
+
+    class _Session:
+        def __init__(self, config):
+            captured.append(config)
+
+        def start(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(session_mod, "DeviceSession", _Session)
+    artifacts = tmp_path / "artifacts"
+    options = _options(tmp_path / "copy", artifacts)
+    ui_job._open_session("fake-serial", artifacts, options)
+
+    assert len(captured) == 1
+    config = captured[0]
+    assert Path(config.assets_dir).is_absolute()
+    assert Path(config.assets_dir) == ui_job.shared_assets_dir()
+    assert Path(config.artifacts_dir) == artifacts.resolve()

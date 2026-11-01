@@ -211,6 +211,7 @@ def build_pytest_command(
     artifacts_dir: Path,
     test_paths: list[str],
     revision_id: str | None = None,
+    mobile_config: Path | None = None,
 ) -> list[str]:
     """§10.2 第 4 步的命令，参数顺序与文档一致。"""
     junit = Path(artifacts_dir) / JUNIT_XML
@@ -225,6 +226,12 @@ def build_pytest_command(
         "--mobile-evidence",
         "--mobile-devices",
         serial or "fake-serial",
+    ]
+    if mobile_config is not None:
+        # vendor 插件的 sessionstart/sessionfinish 用这份配置定位 assets/artifacts；
+        # 不传时默认按 cwd 解析（固定副本），运行会写进副本并破坏摘要。
+        argv += ["--mobile-config", str(mobile_config)]
+    argv += [
         "-p",
         "testdock_runner.pytest_plugin",
         # 平台只读纪律：套件不能通过 pytest.ini / addopts 隐式打开
@@ -249,12 +256,39 @@ def build_pytest_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
     PYTEST_ADDOPTS 会在命令行参数之前生效，套件或宿主可以借此重新打开
     --mobile-perf；PYTEST_PLUGINS 则会隐式加载插件。两者都从环境中移除，
     插件阻断由 build_pytest_command 的 `-p no:mobile-perf` 兜底。
+    禁止写字节码：pytest 的 cwd 是固定副本，缓存文件不该落进副本目录。
     """
     env = dict(base if base is not None else os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     env.pop("PYTEST_ADDOPTS", None)
     env.pop("PYTEST_PLUGINS", None)
     return env
+
+
+def shared_assets_dir() -> Path:
+    """共享模板资产根（server/assets），与 runner 的进程 cwd 无关。
+
+    MobileConfig 的 assets_dir 默认值是相对路径；pytest 子进程的 cwd 是固定
+    副本，沿用默认值会把模板资产解析到副本里并在执行后污染副本摘要。
+    """
+    return (Path(__file__).resolve().parents[2] / "assets").resolve()
+
+
+def write_mobile_config(artifacts_dir: Path) -> Path:
+    """为 pytest 子进程生成 mobile-auto 配置：assets/artifacts 都用绝对路径。
+
+    vendor 插件的 `load_config(None)` 会按 cwd 解析相对目录；不显式给配置时，
+    sessionstart 的 `artifacts/runs` 会写进固定副本。配置放在本次运行的
+    artifacts 根下，随产物一起归档。
+    """
+    path = Path(artifacts_dir).resolve() / "mobile-config.toml"
+    path.write_text(
+        f'assets_dir = "{shared_assets_dir().as_posix()}"\n'
+        f'artifacts_dir = "{Path(artifacts_dir).resolve().as_posix()}"\n',
+        encoding="utf-8",
+    )
+    return path
 
 
 def _lock_dir() -> Path:
@@ -371,7 +405,8 @@ def _open_session(serial: str, artifacts_dir: Path, options: UiJobOptions) -> An
     from mobile_auto.config import MobileConfig
 
     session = DeviceSession(MobileConfig(
-        device_serial=serial, artifacts_dir=artifacts_dir,
+        device_serial=serial, artifacts_dir=Path(artifacts_dir).resolve(),
+        assets_dir=shared_assets_dir(),
         app_package=options.app_package or None, app_activity=options.app_activity or None,
     ))
     session.start()
@@ -428,6 +463,7 @@ def _run_pytest(
         artifacts_dir=artifacts_dir,
         test_paths=targets,
         revision_id=options.revision_id,
+        mobile_config=write_mobile_config(artifacts_dir) if suite_root else None,
     )
     # 追溯：本次执行实际用的套件版本、树摘要与相对目标。
     emit_text(
@@ -571,4 +607,6 @@ __all__ = [
     "resolve_suite_root",
     "resolve_test_paths",
     "run_ui_job",
+    "shared_assets_dir",
+    "write_mobile_config",
 ]

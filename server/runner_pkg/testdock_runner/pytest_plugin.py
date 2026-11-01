@@ -8,6 +8,26 @@ from .ui_job import UiJobOptions, _open_session
 from pathlib import Path
 
 
+def pytest_addoption(parser):
+    """注册 vendor 插件读取的 `--mobile-config`（平台生成的绝对路径配置）。
+
+    vendor 用 `_optional_getoption` 读取它；未注册时传参会报 unrecognized
+    arguments，而不传又会按 cwd（固定副本）解析 assets/artifacts。
+    """
+    group = parser.getgroup("testdock")
+    try:
+        group.addoption(
+            "--mobile-config",
+            action="store",
+            default=None,
+            metavar="PATH",
+            help="平台生成的 mobile-auto 配置（assets_dir/artifacts_dir 为绝对路径）",
+        )
+    except ValueError:
+        # 套件自己在 conftest 里注册了同名选项：以套件为准，不重复注册。
+        pass
+
+
 @pytest.fixture(scope="session")
 def mobile_session():
     config = json.loads(os.environ.get("TESTDOCK_JOB_CONFIG", "{}"))
