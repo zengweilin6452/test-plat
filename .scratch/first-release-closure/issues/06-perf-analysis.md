@@ -44,6 +44,7 @@ D:\python312\python.exe -m pytest tests/test_issue12_analysis_selection.py tests
 - `run_perf_job`（`server/runner_pkg/testdock_runner/debug_job.py:96-102`）只校验 `duration>0`，没有 10–3600 约束；任务修订 readiness（`server/app/domain/task.py:92-168`）也没有校验，与声明式清单规则不一致。
 - 执行只读修订 `config_snapshot.perf`（`runs.py:441-508`、`dispatcher._resolve_config:84-105`），不合并 `suite_versions.manifest.scenario`；两处声明可能漂移。
 - 成功采集返回 `not_tested/gate_policy_missing` 是「判定交给平台」的设计，不要改成 runner 直接出结论。
+- 派发侧对所有运行统一要求 `code_copy`（`dispatcher._prepare_suite_copy`），而 performance 版本按设计没有代码副本，导致独立性能运行被误判为 `errored(execution_copy_missing)`。工单 06 需按 `test_type` 区分：performance 不要求副本；joint 仍必须有 UI 副本。
 - 详细笔记：`C:\Users\williamzeng\AppData\Local\Temp\testdock-frc-notes\06-perf.md`
 
 ## 约束
