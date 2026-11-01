@@ -51,3 +51,6 @@
 - 2026-11-01 真机验收（用户连接 749622c9 后补做）：独立 HEAD 后端 `:8010` + 隔离库 `testdock_real`，宿主配置受控验收套件（非客户套件）。完成 UI v1/v2（passed）、UI v3 故意失败（real screenshot/ui-tree/junit）、独立性能（7 类真实指标，`gate_policy_missing`）、联动（修复后 7 类指标 + collectWindow 覆盖 UI）、取消（`cancelled`/`runner_terminated=true`/租约 0）、调试会话（快照+树同源、新画面唯一命中 score 1.0、凭证登记模板、关闭释放）。
 - 真机新发现并修复 3 个缺陷：joint 采集作用域未 `__enter__`（`2295877`）、run 级 report.json 被嵌套报告挤掉（`837e671`）、`/resources/sync` 指定 node_id 500（`4adf7ca`）。修复后全量 562 项（561 passed / 1 skipped / 0 failed，退出码 0）。
 - 验收记录新增 §8（执行记录、状态更新、边界）。US1/4/9/10/13/14/16/18/22/24/25/26/28 获得真机或受控来源证据；客户真实套件、1440×900 像素核对、页面↔HEAD 同版数据仍未执行。
+- 2026-11-01 客户真实套件 + 1440×900（补充）：Beta Academy 客户套件（客户仓库 HEAD `f0d2ce0`，副本见 `.scratch/first-release-closure/beta-academy-suite`，仅新增 `pytest.ini`）经 TestDock 真机执行 RUN-0011：12 用例 7 passed / 3 skipped / 2 failed。失败 1 为平台 vendor 快照 `24a1daa` 缺少 `UpstreamChannel.touch_down`（客户 HEAD 已有，需同步 vendor），失败 2 为套件点击后立即断言 WebView 的时序问题；均未记为客户套件通过。
+- 集成修复：`976b8d5`（mobile-config 写入设备/应用身份）、`6941ab2`（套件自带 mobile_session 时平台插件让位，修复 RUN-0010 的 pytest_error）。
+- 1440×900：九页实现与九页原型同尺寸截图（Edge headless + CDP 设备度量），实测无横向溢出、侧栏 218px、越界元素 0；有意差异见 §9.2。验收记录新增 §9，原像素核对与“页面↔HEAD 同版数据”两项关闭；客户套件全绿仍需 vendor 同步。

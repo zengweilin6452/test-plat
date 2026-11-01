@@ -13,6 +13,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 RUNTIME = REPO / ".runtime" / "real-verify"
 SUITE = REPO / ".scratch" / "first-release-closure" / "real-suite"
+BETA_SUITE = REPO / ".scratch" / "first-release-closure" / "beta-academy-suite"
 
 os.environ.update(
     {
@@ -29,7 +30,13 @@ os.environ.update(
                     "name": "真机验收受控套件（计算器）",
                     "path": SUITE.as_posix(),
                     "test_types": ["ui", "joint"],
-                }
+                },
+                {
+                    "id": "beta-academy",
+                    "name": "Beta Academy 客户套件（真机导航）",
+                    "path": BETA_SUITE.as_posix(),
+                    "test_types": ["ui"],
+                },
             ],
             ensure_ascii=False,
         ),

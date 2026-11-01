@@ -64,3 +64,4 @@ npm run build
 - 九页浏览器核查（2026-11-01，`http://localhost:5173`，真实 8000 API）：Overview/Apps/Ui/Perf/Devices/Tasks/Reports/Integration/Database 均返回真实数据或真实空态；22 个 XHR 全部 200，无 console error；DOM/可访问树证据存于 `.scratch/first-release-closure/evidence/01-overview.txt`、`02-apps.json` … `09-database.json`。
 - 未执行：1440×900 视口下的像素级截图核对——内置浏览器 `visibility=hidden`、viewport 0×0，截图接口报 `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`；`agent-browser` 启动挂起。该项在 10 中记为「已实现待验」，不宣称已视觉对齐。
 - 有意保留差异：iOS/Web 目标端仍按 `planned` 展示「规划中」而非空态（规格驱动）；Reports 的筛选无结果单独成文案。
+- 2026-11-01 1440×900 像素核对（补充）：用 Edge headless + CDP `Emulation.setDeviceMetricsOverride(1440×900,DPR=1)` 对九页各截一张实现图与一张原型图（原型 sha256 `576d5402…ed4d5f`，180445 bytes）。九页实测 `innerWidth=1440 / scrollWidth=1440 / 侧栏 218px / 越界元素 0`，无裁切或横向滚动；设计令牌与骨架一致。与原型的信息架构差异（概览结构、UI 页版本列、设备页同步入口等）按已批准规格记录为有意差异，不宣称逐像素相同。证据：`.scratch/first-release-closure/real-verify/evidence/visual-1440/` 与 `layout-metrics.json`；验收记录 §9.2。

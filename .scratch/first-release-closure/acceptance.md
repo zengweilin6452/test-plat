@@ -278,3 +278,77 @@
 - 前端本轮未改动，§7 的 `tsc --noEmit` / `npm test` 48 passed / `npm run build` 结果仍适用。
 - 本轮代码提交：`2295877`（joint 采集作用域）、`4adf7ca`（node_id 同步）、`837e671`（run 级报告优先）；验收记录与证据随本节提交。
 - 证据文件：`.scratch/first-release-closure/real-verify/evidence/real-device-2026-11-01.json`（9 次运行与调试会话摘要）、`evidence/failure-frame.png`（真实失败截图）、`crop_validation.json`、`snapshot_tree.json`；运行产物在 `.runtime/real-verify/data/artifacts/<run_id>/`。
+
+## 9. 客户真实套件与 1440×900 像素核对（2026-11-01 下午）
+
+本节补做首期验收中最后两项未执行项：客户真实套件、1440×900 像素级核对。两者都使用 HEAD 的独立实例（`:8010` + 隔离库 `testdock_real`），未动 `:8000` / `:5173`。
+
+### 9.1 客户真实套件（Beta Academy）
+
+| 项 | 值 |
+| --- | --- |
+| 客户仓库 | `D:/workspace/claudecode-test/moblie-auto`，HEAD `f0d2ce0c37b6434f519b87ce7fc6c48e436753bc` |
+| 套件来源 | `examples/beta_academy`（Beta Academy 1.9.77 真机导航套件，5 个测试文件 / 12 用例） |
+| 宿主副本 | `.scratch/first-release-closure/beta-academy-suite`：7 个 `.py` 逐字复制（SHA256 见 `FILES.sha256`），**仅新增** `pytest.ini`（`asyncio_mode = auto`，原配置在客户仓库 `pyproject.toml`）；未复制 `local.toml`，设备/应用身份由平台生成的 mobile-config 注入 |
+| 被测应用 | `com.sinosoft.trainapp`，versionName `1.9.77-20261020`，versionCode `416`（设备已安装；未安装/升级/推送任何 APK） |
+| 身份核对 | 真机 `dumpsys`：package/versionName match、versionCode 观测为 416，显式确认后 baseline 固定 |
+| 套件版本 | `00701632-374c-4687-814f-7dfd8f3d7d7d`（v1），固定副本树摘要 `d21f438c9027b97c…`，12 用例 |
+
+**集成过程中发现并修复的平台缺陷**：
+
+| # | 缺陷 | 修复 |
+| --- | --- | --- |
+| 1 | 平台生成的 `mobile-config.toml` 只有 assets/artifacts；套件自带 `mobile_session` 时 `load_config(--mobile-config)` 丢掉设备 serial 与应用身份，无法冷启动 | `976b8d5`：配置写入 `device_serial/app_package/app_activity`，并加回归 |
+| 2 | 平台插件与套件 conftest 都注册 `--mobile-config`，pytest 加载 conftest 时 `ArgumentError`（RUN-0010 → errored/pytest_error） | `6941ab2`：检测到套件自带 `mobile_session` / `--mobile-config` 时不再注入平台会话插件；普通套件行为不变 |
+
+**执行结果**（RUN-0010 → 修复 → RUN-0011）：
+
+| 运行 | 终态 | 结果 |
+| --- | --- | --- |
+| RUN-0010 | errored / `pytest_error` | 选项冲突，未执行任何用例（集成缺陷，已修复） |
+| RUN-0011 | completed / `failed` | **12 用例：7 passed / 3 skipped / 2 failed**；junit 与两份失败证据齐全 |
+
+- 7 passed：冷启动直达首页、我的页学习统计、课程与动态端点、页签往返、知识库入口计数、平台身份注入、Android 驱动截图。
+- 3 skipped：2 个 web 专属用例（本示例环境无 browser 驱动）+ 1 个"当前会话有效直达首页"分支（登录页判据不适用）。
+- 2 failed（均为真实失败，不是平台执行链故障）：
+  1. `test_kb_list_scroll_keeps_items`：`AttributeError: 'UpstreamChannel' object has no attribute 'touch_down'`。平台 vendor 快照记录 `mobile_auto@24a1daa`，其 `UpstreamChannel` 只有 `touch()`；客户仓库 HEAD `f0d2ce0` 已提供 `touch_down`。滑动手势在旧 vendor 上不可用。**需先同步 vendor 才能全绿**；本轮按约束不改 `vendor/`。
+  2. `test_feedback_opens_webview`：点击"问题反馈"后立即断言 WebView，真机失败截图仍是加载中 spinner（无 WebView 节点）——套件缺少等待，属套件自身时序问题。
+- 证据：`evidence/beta-junit.xml`、`evidence/beta-evidence_4cbdd5f1…_failure-frame.png`（知识库页）、`evidence/beta-evidence_e41ce612…_failure-frame.png`（问题反馈加载中）、运行产物 `.runtime/real-verify/data/artifacts/0b3f0bf9-…/`。
+- 结论：客户套件已经通过 TestDock 的固定副本、身份基准、证据与报告链路**真实执行**；但**不能记为客户套件全绿**——2 个失败分别指向 vendor 快照版本落后与套件自身时序。
+
+### 9.2 1440×900 像素核对
+
+| 项 | 值 |
+| --- | --- |
+| 参考版本 | `docs/platform-prototype/index.html`，sha256 `576d5402238a198ef6a64ae3e92f8f76e7cbe883f91712643d57e90134ed4d5f`，180445 bytes（与 §1 一致） |
+| 页面环境 | HEAD 后端 `:8010`（隔离库 `testdock_real`，真实数据）；Vite 验收实例 `:5174` 反代 `:8010`；默认 `:5173 → :8000` 未动 |
+| 截图通道 | Edge headless + CDP `Emulation.setDeviceMetricsOverride(1440×900, deviceScaleFactor=1)`；Page.captureScreenshot |
+| 采集 | 九页实现截图 + 九页原型截图，均为 1440×900 PNG；每页同时记录布局指标 |
+| 证据 | `evidence/visual-1440/`（18 张 PNG）+ `evidence/visual-1440/layout-metrics.json` |
+
+布局指标（九页一致）：
+
+| 指标 | 实测 |
+| --- | --- |
+| CSS 视口 | `innerWidth=1440`、`innerHeight=900` |
+| 文档宽度 | `documentElement.scrollWidth=1440`、`body.scrollWidth=1440`（无横向溢出） |
+| 固定侧栏 | 218 px（内容区左边界 218 px） |
+| 越界元素 | 九页均为 0（`right > 1440+1` 的元素计数） |
+
+逐页核对（实现 vs 原型）：
+
+- **一致的骨架**：左侧固定导航（218px）+ 顶栏（面包屑/状态/日期）+ 页面标题与说明 + 目标端上下文条 + 卡片/表格网格 + 相同的设计令牌（主色 `#4263eb`、圆角、间距、字号、状态色与徽标）。
+- **概览**：实现为「目标端卡片 + 4 指标卡 + 运行列表」；原型为「指标卡 + 两大能力卡 + 任务/设备两列」。属已批准规格的页面结构差异。
+- **UI 页**：实现表格增加「应用/目标端/最新版本/最近发现」与「查看执行记录」；原型的「覆盖范围」列不适用于真实发现数据。
+- **设备页**：实现增加平台字段、设备池统计与「同步设备池」；不可用设备按状态禁用「打开调试」。
+- **报告页**：实现展示真实运行与真实原因（未通过/未判定），与 §2 判定口径一致。
+- **工作空间与日期**：实现使用「星河工作空间 / 2026-11-01」，原型为演示项目与演示日期。
+- 未发现裁切、错位、横向滚动条或状态色误用；九页在 1440×900 下均完整呈现。
+
+结论：1440×900 九页按参考版本完成像素级视觉核对，无布局缺陷；实现与原型的信息架构差异均为已批准的数据/规格调整，**不宣称与原型逐像素相同**。原 §5 第 4 条与 §8.5 第 2、3 条（页面 ↔ HEAD 后端同版数据）已由本节关闭。
+
+### 9.3 仍未执行 / 边界
+
+1. **客户套件全绿**：需同步 vendor 到客户兼容版本（`UpstreamChannel.touch_down`）并修复套件自身的 WebView 等待；本轮不改 `vendor/`、不改客户套件代码。
+2. **逐像素 diff 百分比**：实现与原型存在已批准的信息架构差异，本轮以「同尺寸截图 + 布局指标 + 逐页核对」为准，不输出无意义的 diff 比例。
+3. 其余真机/来源边界见 §3.1、§5、§8.5；客户真实来源的“客户生产套件”内容仍以本节 Beta Academy 为准（客户仓库示例套件）。

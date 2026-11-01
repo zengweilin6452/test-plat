@@ -1,0 +1,83 @@
+[
+ {
+  "vw": 1440,
+  "vh": 900,
+  "scrollWidth": 1440,
+  "bodyScrollWidth": 1440,
+  "sidebarWidth": 218,
+  "offenders": [],
+  "route": "impl:overview"
+ },
+ {
+  "vw": 1440,
+  "vh": 900,
+  "scrollWidth": 1440,
+  "bodyScrollWidth": 1440,
+  "sidebarWidth": 218,
+  "offenders": [],
+  "route": "impl:apps"
+ },
+ {
+  "vw": 1440,
+  "vh": 900,
+  "scrollWidth": 1440,
+  "bodyScrollWidth": 1440,
+  "sidebarWidth": 218,
+  "offenders": [],
+  "route": "impl:ui"
+ },
+ {
+  "vw": 1440,
+  "vh": 900,
+  "scrollWidth": 1440,
+  "bodyScrollWidth": 1440,
+  "sidebarWidth": 218,
+  "offenders": [],
+  "route": "impl:perf"
+ },
+ {
+  "vw": 1440,
+  "vh": 900,
+  "scrollWidth": 1440,
+  "bodyScrollWidth": 1440,
+  "sidebarWidth": 218,
+  "offenders": [],
+  "route": "impl:devices"
+ },
+ {
+  "vw": 1440,
+  "vh": 900,
+  "scrollWidth": 1440,
+  "bodyScrollWidth": 1440,
+  "sidebarWidth": 218,
+  "offenders": [],
+  "route": "impl:tasks"
+ },
+ {
+  "vw": 1440,
+  "vh": 900,
+  "scrollWidth": 1440,
+  "bodyScrollWidth": 1440,
+  "sidebarWidth": 218,
+  "offenders": [],
+  "route": "impl:reports"
+ },
+ {
+  "vw": 1440,
+  "vh": 900,
+  "scrollWidth": 1440,
+  "bodyScrollWidth": 1440,
+  "sidebarWidth": 218,
+  "offenders": [],
+  "route": "impl:integration"
+ },
+ {
+  "vw": 1440,
+  "vh": 900,
+  "scrollWidth": 1440,
+  "bodyScrollWidth": 1440,
+  "sidebarWidth": 218,
+  "offenders": [],
+  "route": "impl:database"
+ }
+]

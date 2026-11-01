@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="3" tests="12" time="24.666" timestamp="2026-11-01T15:30:36.546601+08:00" hostname="williamzeng-pc"><testcase classname="test_coldstart_landing" name="test_coldstart_lands_on_home_when_session_valid" time="3.490" /><testcase classname="test_coldstart_landing" name="test_login_landing_is_classifiable_not_error" time="1.269"><skipped type="pytest.skip" message="当前会话有效,直达首页;登录页判据见 coldstart_recovery 记录">D:\workspace\claudecode-test\testplat-auto\.runtime\real-verify\data\code-copies\9e1af489bdf64cfaa6146e6b5d9c70d7\test_coldstart_landing.py:31: 当前会话有效,直达首页;登录页判据见 coldstart_recovery 记录</skipped></testcase><testcase classname="test_home_navigation" name="test_mine_tab_shows_profile_stats" time="2.405" /><testcase classname="test_home_navigation" name="test_course_and_dynamic_tabs_reachable" time="3.702" /><testcase classname="test_home_navigation" name="test_tab_roundtrip_returns_home" time="3.388" /><testcase classname="test_knowledge_base" name="test_kb_entry_lists_counted_items" time="1.806" /><testcase classname="test_knowledge_base" name="test_kb_list_scroll_keeps_items" time="2.390"><failure message="AttributeError: 'UpstreamChannel' object has no attribute 'touch_down'">app = &lt;mobile_auto.core.adapter.MobileAdapter object at 0x00000276C93BFFB0&gt;
+
+    async def test_kb_list_scroll_keeps_items(app):
+        await app.click(KB_ENTRY)
+&gt;       await app.scroll("down", 900)
+
+test_knowledge_base.py:31: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\..\..\vendor\mobile_auto\src\mobile_auto\core\adapter.py:393: in scroll
+    await self._call(operation)
+..\..\..\..\..\vendor\mobile_auto\src\mobile_auto\core\adapter.py:137: in _call
+    return await asyncio.wrap_future(future)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\python312\Lib\concurrent\futures\thread.py:59: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\..\vendor\mobile_auto\src\mobile_auto\core\session.py:467: in wrapped
+    return operation(worker_backend)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\..\vendor\mobile_auto\src\mobile_auto\core\adapter.py:389: in operation
+    self._session.inject_swipe(
+..\..\..\..\..\vendor\mobile_auto\src\mobile_auto\core\session.py:360: in inject_swipe
+    self.inject_gesture(
+..\..\..\..\..\vendor\mobile_auto\src\mobile_auto\core\session.py:330: in inject_gesture
+    scrcpy_gesture(channel)
+..\..\..\..\..\vendor\mobile_auto\src\mobile_auto\core\session.py:363: in &lt;lambda&gt;
+    lambda ch: swipe_gesture(ch, backend, sx, sy, ex, ey, duration),
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+channel = &lt;mobile_auto.stream.upstream.UpstreamChannel object at 0x00000276C93D9F10&gt;
+backend = &lt;mobile_auto.core.backend.U2Backend object at 0x00000276C93923C0&gt;
+x0 = 540, y0 = 1650, x1 = 540, y1 = 750, duration_s = 0.3
+
+    def swipe_gesture(
+        channel, backend, x0: int, y0: int, x1: int, y1: int, duration_s: float
+    ) -&gt; None:
+        """直线滑动手势:DOWN → 等距 MOVE → UP;插值主机侧(5px 步)。"""
+        try:
+&gt;           channel.touch_down(x0, y0)
+            ^^^^^^^^^^^^^^^^^^
+E           AttributeError: 'UpstreamChannel' object has no attribute 'touch_down'
+
+..\..\..\..\..\vendor\mobile_auto\src\mobile_auto\core\device_ops.py:89: AttributeError</failure></testcase><testcase classname="test_platform_injection" name="test_platform_identity_injected" time="0.001" /><testcase classname="test_platform_injection" name="test_android_driver_works" time="0.010" /><testcase classname="test_platform_injection" name="test_web_only_case_needs_browser" time="0.001"><skipped type="pytest.skip" message="web 端驱动由内网 browser-harness 注入;单端示例环境跳过">D:\workspace\claudecode-test\testplat-auto\.runtime\real-verify\data\code-copies\9e1af489bdf64cfaa6146e6b5d9c70d7\test_platform_injection.py:34: web 端驱动由内网 browser-harness 注入;单端示例环境跳过</skipped></testcase><testcase classname="test_platform_injection" name="test_shared_case_runs_on_both_ends" time="0.001"><skipped type="pytest.skip" message="web 端驱动由内网 browser-harness 注入;单端示例环境跳过">D:\workspace\claudecode-test\testplat-auto\.runtime\real-verify\data\code-copies\9e1af489bdf64cfaa6146e6b5d9c70d7\test_platform_injection.py:44: web 端驱动由内网 browser-harness 注入;单端示例环境跳过</skipped></testcase><testcase classname="test_settings_webview" name="test_feedback_opens_webview" time="5.225"><failure message="AssertionError: 问题反馈应打开 android.webkit.WebView 容器&#10;assert 0 &gt;= 1&#10; +  where 0 = len([])">app = &lt;mobile_auto.core.adapter.MobileAdapter object at 0x00000276E826E090&gt;
+
+    async def test_feedback_opens_webview(app):
+        landing = await goto_home(app)
+        if landing == "login":
+            pytest.skip("会话过期落在登录页:人工登录后重跑")
+    
+        assert await open_tab(app, TAB_MINE), "「我的」页签不可见"
+        assert await app.wait_for(MINE_SETTINGS, timeout=5), "「我的」缺设置齿轮(desc)"
+        await app.click(MINE_SETTINGS)
+        assert await app.wait_for(SETTINGS_FEEDBACK, timeout=6), "设置页缺问题反馈入口"
+        await app.click(SETTINGS_FEEDBACK)
+    
+        webviews = await app.find_elements(WEBVIEW_NODE)
+&gt;       assert len(webviews) &gt;= 1, "问题反馈应打开 android.webkit.WebView 容器"
+E       AssertionError: 问题反馈应打开 android.webkit.WebView 容器
+E       assert 0 &gt;= 1
+E        +  where 0 = len([])
+
+test_settings_webview.py:35: AssertionError</failure></testcase></testsuite></testsuites>
