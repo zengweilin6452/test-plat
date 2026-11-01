@@ -15,11 +15,21 @@
 3. **代理端点不解析业务**：/debug-sessions/{id}/snapshots 等只做"会话必须 active
    + 拼上游 URL + 原样转发"，json 与二进制都不改写。上游不可达返回 503。
 
-4. **模板端点不伪造**：模板按调试会话隔离（vendor TemplateStore 绑定
-   session.assets_dir），必须显式传 session_id（缺失 400 validation_error、
-   非活动 409、上游不可达 503），绝不在 API 进程里伪造一份模板数据。
+4. **模板端点不伪造、存储是共享根**：必须显式传 session_id（缺失 400
+   validation_error、非活动 409、上游不可达 503）——但那只是用来选「转发到哪个
+   viewer」，不是存储隔离：debug runner 的 cwd 固定为 server/，vendor MobileConfig
+   不覆盖 assets_dir 且其默认值是不带配置文件的相对路径 "assets"，所以每个调试会话
+   的 TemplateStore 都落在**同一个** server/assets（= domain.templates.
+   template_assets_root()）。模板因此跨会话可见、不随会话关闭消失（见
+   GLOSSARY「模板库」）。API 进程里不伪造模板数据。
 
-5. **WS 双向透传**：/ws/debug/{id} 仅在会话 active 时接受（否则 close 4403/4404），
+5. **登记必须先有验证凭证**：`POST /templates` 与 `PUT /templates/{logical}` 只
+   接受 `validate-crop` 刚发放的一次性凭证（绑定 session + 新快照 + 命中框 +
+   阈值，TTL 见 CROP_VERIFICATION_TTL_SECONDS）。凭证缺失/复用/过期/任何一项
+   变化都 409 crop_not_verified 且不触达 vendor —— 前端的按钮 disabled 只是体验，
+   服务端自己能独立拒绝未验证登记。
+
+6. **WS 双向透传**：/ws/debug/{id} 仅在会话 active 时接受（否则 close 4403/4404），
    与 vendor /api/v1/preview 之间做字节级双向转发（json 帧与 binary 帧都不改），
    每会话最多 4 个客户端，会话关闭即 close(1000)。
 """
@@ -31,8 +41,10 @@ import base64
 import subprocess
 import contextlib
 import json
+import secrets
 import sys
 import logging
+import time
 import uuid as uuid_mod
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -71,6 +83,13 @@ MAX_WS_CLIENTS_PER_SESSION = 4
 _WS_CLIENTS: dict[str, int] = {}
 #: 进程内 viewer 端口表：{session_id: port}，ready 上报时写入，关闭时删除。
 _READY_PORTS: dict[str, int] = {}
+
+#: 框选验证凭证有效期（秒）。验证只证明「发凭证那一刻画面上唯一命中」，
+#: 窗口内必须完成登记，否则重新验证（阈值/框选/画面都可能已经变了）。
+CROP_VERIFICATION_TTL_SECONDS = 120.0
+#: 进程内验证凭证：token -> {session_id, snapshot_id, region, threshold, expires_at}。
+#: 单进程 uvicorn 下与 _READY_PORTS 同口径：多 worker 部署要换成共享存储。
+_CROP_VERIFICATIONS: dict[str, dict[str, Any]] = {}
 
 
 # --------------------------------------------------------------------------- #
@@ -544,11 +563,16 @@ async def proxy_locators_validate(
 
 
 # --------------------------------------------------------------------------- #
-# 模板端点（session_id 必填：模板按调试会话隔离，无兜底）
+# 模板端点（session_id 必填：用来选转发目标 viewer；存储是共享根）
 # --------------------------------------------------------------------------- #
 async def _template_session(session: AsyncSession, session_id: str | None) -> str:
-    """模板代理的目标会话。vendor 的 TemplateStore 绑定 session.assets_dir——
-    模板数据本身就是按调试会话隔离的，所以会话 id 必须显式给出。
+    """模板代理的目标会话（仅用于转发，不是存储范围）。
+
+    vendor 的 TemplateStore 挂在 `session.config.assets_dir` 上，而 debug runner 的
+    cwd 固定为 server/、assets_dir 用默认相对路径 "assets" —— 所有调试会话的
+    TemplateStore 都指向同一个 `server/assets`（= domain.templates.
+    template_assets_root()）。所以「跨会话可查」由共享根保证，会话 id 只是告诉
+    平台把请求转到哪个活动 viewer。
 
     曾经的"无 session_id 时挑最新活动会话"兜底是跨项目泄漏点（A 项目的请求
     会落到 B 项目的 viewer 上），已删除；缺失 session_id 走项目统一的
@@ -556,11 +580,100 @@ async def _template_session(session: AsyncSession, session_id: str | None) -> st
     """
     if not session_id:
         raise validation_error(
-            ["session_id 必填：模板按调试会话隔离，请传入调试会话 id"
+            ["session_id 必填：请传入活动调试会话 id 以选择转发目标"
              "（POST /api/v1/debug-sessions 创建后取得）"]
         )
     row = await _active_row(session, session_id)
     return str(row["id"])
+
+
+def _prune_crop_verifications() -> None:
+    now = time.monotonic()
+    for token in [t for t, rec in _CROP_VERIFICATIONS.items() if rec["expires_at"] <= now]:
+        _CROP_VERIFICATIONS.pop(token, None)
+
+
+def _issue_crop_verification(
+    *, session_id: str, snapshot_id: str, region: list[int], threshold: float
+) -> str:
+    """发放一次性登记凭证：绑定验证时的会话、新快照、命中框与阈值。"""
+    _prune_crop_verifications()
+    token = secrets.token_urlsafe(24)
+    _CROP_VERIFICATIONS[token] = {
+        "session_id": str(session_id),
+        "snapshot_id": str(snapshot_id),
+        "region": [int(value) for value in region],
+        "threshold": float(threshold),
+        "expires_at": time.monotonic() + CROP_VERIFICATION_TTL_SECONDS,
+    }
+    return token
+
+
+def _reject_unverified(reason: str, **extra: Any) -> ApiError:
+    return conflict(
+        "crop_not_verified",
+        "框选尚未验证通过，不能登记模板：" + reason + "。请用当前画面重新验证框选。",
+        extra,
+    )
+
+
+def _consume_crop_verification(
+    *, token: Any, session_id: str, snapshot_id: str, region: list[int], threshold: float
+) -> None:
+    """校验并消费凭证：只有「刚刚用新画面唯一命中」的那次验证能解锁登记。
+
+    任何一项不一致（会话 / 快照 / 框选 / 阈值）都按未验证处理，且**不消费**
+    凭证，让客户端带着正确参数重试；命中后立即作废（一次性）。
+    """
+    _prune_crop_verifications()
+    if not isinstance(token, str) or not token:
+        raise _reject_unverified("缺少验证凭证")
+    record = _CROP_VERIFICATIONS.get(token)
+    if record is None:
+        raise _reject_unverified("验证凭证已失效（已使用或已过期）")
+    if record["session_id"] != str(session_id):
+        raise _reject_unverified("验证凭证属于另一个调试会话")
+    if record["snapshot_id"] != str(snapshot_id):
+        raise _reject_unverified("快照与验证时不同（验证基于最新捕获的画面）")
+    if record["region"] != [int(value) for value in region]:
+        raise _reject_unverified("框选区域与验证时不同")
+    if abs(record["threshold"] - float(threshold)) > 1e-9:
+        raise _reject_unverified("阈值与验证时不同")
+    _CROP_VERIFICATIONS.pop(token, None)
+
+
+def _registration_payload(body: Any) -> dict[str, Any]:
+    """登记请求的形状校验：快照 / 四整数框 / 逻辑名 / 阈值齐全才算合法。
+
+    阈值必填：验证凭证正是按阈值发放的，缺了它就无法判断「阈值改变后旧验证失效」。
+    """
+    if not isinstance(body, dict):
+        raise validation_error(["登记请求必须是 JSON 对象"])
+    problems: list[str] = []
+    snapshot_id = body.get("snapshot_id")
+    region = body.get("region")
+    logical = body.get("logical")
+    threshold = body.get("threshold")
+    if not isinstance(snapshot_id, str) or not snapshot_id:
+        problems.append("需要有效的 snapshot_id（验证返回的新快照）")
+    if (not isinstance(region, list) or len(region) != 4
+            or any(type(value) is not int for value in region)):
+        problems.append("region 必须是四个整数")
+    if not isinstance(logical, str) or not logical.strip():
+        problems.append("模板逻辑名不能为空")
+    if type(threshold) not in (int, float) or not 0.10 <= threshold <= 1.00:
+        problems.append("threshold 必须在 0.10-1.00 之间")
+    if problems:
+        raise validation_error(problems)
+    payload: dict[str, Any] = {
+        "snapshot_id": snapshot_id,
+        "region": region,
+        "logical": logical.strip(),
+        "threshold": float(threshold),
+    }
+    if isinstance(body.get("note"), str) and body["note"].strip():
+        payload["note"] = body["note"].strip()
+    return payload
 
 
 @router.get("/template-library")
@@ -583,8 +696,25 @@ async def list_templates(session_id: str | None = None, session: AsyncSession = 
 @router.post("/templates")
 async def create_template(request: Request, session_id: str | None = None,
                           session: AsyncSession = Depends(get_session)) -> Response:
+    """从验证通过的新快照登记模板版本（服务端强制，不依赖前端 disabled）。"""
     sid = await _template_session(session, session_id)
-    return await _forward(sid, "POST", "/api/v1/templates", json_body=await request.json())
+    body = await request.json()
+    payload = _registration_payload(body)
+    _consume_crop_verification(
+        token=body.get("verification"),
+        session_id=sid,
+        snapshot_id=payload["snapshot_id"],
+        region=payload["region"],
+        threshold=payload["threshold"],
+    )
+    return await _forward(
+        sid,
+        "POST",
+        "/api/v1/templates",
+        json_body={
+            key: payload[key] for key in ("snapshot_id", "region", "logical", "note") if key in payload
+        },
+    )
 
 
 async def _match_crop(source: bytes, current: bytes, region: list[int], threshold: float) -> dict:
@@ -613,6 +743,13 @@ async def _match_crop(source: bytes, current: bytes, region: list[int], threshol
 @router.post("/templates/validate-crop")
 async def validate_crop(request: Request, session_id: str | None = None,
                         session: AsyncSession = Depends(get_session)) -> Response:
+    """用**新捕获的画面**验证框选：唯一命中才发放一次性登记凭证。
+
+    响应在匹配结果之外带 `snapshot_id`（这次真实匹配用的新快照）与
+    `source_snapshot_id`（框选来源的冻结快照），`region` 是新画面里的命中框，
+    `verification` 是登记要带的凭证。新快照/命中框就是登记依据，客户端不应
+    再拿旧快照去登记。
+    """
     sid = await _template_session(session, session_id)
     body = await request.json()
     region = body.get("region")
@@ -629,14 +766,32 @@ async def validate_crop(request: Request, session_id: str | None = None,
     capture = await _forward(sid, "POST", "/api/v1/snapshots", json_body={})
     if capture.status_code >= 300:
         return capture
-    new_id = json.loads(capture.body)["snapshot_id"]
+    captured = json.loads(capture.body)
+    new_id = captured["snapshot_id"]
     current = await _forward(sid, "GET", f"/api/v1/snapshots/{new_id}/image")
     if current.status_code >= 300:
         return current
     result = await _match_crop(source.body, current.body, region, threshold)
-    return Response(json.dumps({**result, "snapshot_id": new_id,
-                               "source_snapshot_id": snapshot_id}),
-                    media_type="application/json")
+    payload: dict[str, Any] = {
+        **result,
+        "snapshot_id": new_id,
+        "source_snapshot_id": snapshot_id,
+        # 命中框/凭证只在唯一命中时给出：零匹配或多匹配都不能登记
+        "region": None,
+        "verification": None,
+    }
+    for key in ("width", "height", "captured_at"):
+        if key in captured:
+            payload[key] = captured[key]
+    if result.get("count") == 1:
+        match = (result.get("matches") or [{}])[0]
+        matched = [match.get(k) for k in ("x", "y", "width", "height")]
+        if all(type(value) is int and value >= 0 for value in matched) and matched[2] > 0 and matched[3] > 0:
+            payload["region"] = matched
+            payload["verification"] = _issue_crop_verification(
+                session_id=sid, snapshot_id=new_id, region=matched, threshold=float(threshold)
+            )
+    return Response(json.dumps(payload), media_type="application/json")
 
 
 @router.post("/templates/validate")
@@ -674,9 +829,23 @@ async def validate_template(request: Request, session_id: str | None = None,
 @router.put("/templates/{logical:path}")
 async def update_template(logical: str, request: Request, session_id: str | None = None,
                           session: AsyncSession = Depends(get_session)) -> Response:
+    """确认更新同名模板：同样必须先拿到框选验证凭证（更新也会生成新版本）。"""
     from urllib.parse import quote
     sid = await _template_session(session, session_id)
-    return await _forward(sid, "PUT", "/api/v1/templates/" + quote(logical, safe="/"), json_body=await request.json())
+    body = await request.json()
+    payload = _registration_payload({**body, "logical": logical} if isinstance(body, dict) else body)
+    _consume_crop_verification(
+        token=body.get("verification"),
+        session_id=sid,
+        snapshot_id=payload["snapshot_id"],
+        region=payload["region"],
+        threshold=payload["threshold"],
+    )
+    forwarded = {
+        key: value for key, value in body.items() if key != "verification"
+    }
+    forwarded["logical"] = logical
+    return await _forward(sid, "PUT", "/api/v1/templates/" + quote(logical, safe="/"), json_body=forwarded)
 
 
 # --------------------------------------------------------------------------- #

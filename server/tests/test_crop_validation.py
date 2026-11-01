@@ -34,10 +34,12 @@ async def test_crop_validation_captures_again_and_never_registers(monkeypatch):
         return {"type": "http.request", "body": payload}
 
     response = await debug.validate_crop(Request({"type": "http"}, receive), "session", None)
-    assert json.loads(response.body) == {
-        "count": 0, "matches": [], "scores": [],
-        "snapshot_id": "fresh", "source_snapshot_id": "old",
-    }
+    body = json.loads(response.body)
+    assert body["count"] == 0
+    assert body["matches"] == [] and body["scores"] == []
+    assert body["snapshot_id"] == "fresh" and body["source_snapshot_id"] == "old"
+    # 零匹配不发放登记凭证（工单 08：验证失败不得登记）
+    assert body["region"] is None and body["verification"] is None
     assert calls == [("GET", "/api/v1/snapshots/old/image"),
                      ("POST", "/api/v1/snapshots"),
                      ("GET", "/api/v1/snapshots/fresh/image")]

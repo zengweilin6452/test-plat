@@ -517,10 +517,14 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
     # 一律 errored，绝不静默改用别的版本。
     pin_result = verify_template_pins(pinned_templates(config))
     if pin_result["verdict"] in ("mismatch", "missing"):
+        # reason 必须与 outcome 一致：否则 runs.reason_code 会被默认成
+        # runner_spawn_failed，把「模板锁定不符」误报成「runner 起不来」。
         await mark_spawn_failed(
             rid,
             error="template_pin_mismatch: " + str(pin_result.get("detail"))[:400],
             lease=lease_details,
+            reason="template_pin_mismatch",
+            stage="templates",
         )
         return DispatchOutcome(run_id=rid, ok=False, reason="template_pin_mismatch")
 
