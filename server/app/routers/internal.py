@@ -304,14 +304,21 @@ async def fail_run(
             raise fence_mismatch(str(run_id), fence.get("expected"), fence.get("provided"))
     await session.commit()
 
+    from pathlib import Path
+
     from .. import runtime as runtime_mod
 
+    # 失败前也可能已有产物（joint UI 超时收口写下的 report.json / 采集窗口）；
+    # 不登记的话报告页会把"采集发生过"这件事整个丢掉。
+    raw_dir = body.get("artifacts_dir")
+    artifacts_path = Path(str(raw_dir)) if raw_dir else None
     result = await runtime_mod.finalize_run(
         run_id=str(run_id),
         state=target,
         outcome=None,
         reason=code,
         project_id=str(row["project_id"]),
+        artifacts_dir=artifacts_path,
         release_lease_reason="run_failed",
         extra_event={
             "error_code": code,

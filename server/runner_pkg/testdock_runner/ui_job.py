@@ -70,6 +70,8 @@ class UiJobOptions:
     app_package: str = ""
     app_activity: str = ""
     perf: dict[str, Any] = field(default_factory=dict)
+    #: joint 的 UI 执行窗上限（秒）：设为真实 pytest deadline，而不是装饰性描述
+    ui_timeout_s: int | None = None
     #: 固定代码副本根（派发时由 dispatcher 复验后写进 spawn 配置）
     suite_root: Path | None = None
     suite_version_id: str | None = None
@@ -352,6 +354,18 @@ def _terminate_process_tree(process: subprocess.Popen) -> None:
         _quiet(process.kill)
 
 
+def resolve_execution_deadline(options: UiJobOptions) -> float:
+    """pytest 子进程的真实 deadline。
+
+    joint 的 UI 执行窗（`ui_timeout_s`）就是这次执行的硬上限：窗口上限不进
+    deadline 的话，"UI 到点停止"只是描述（工单 07 缺陷 1）。普通 ui 运行没有
+    该字段，仍用总超时。
+    """
+    if options.ui_timeout_s is not None and options.ui_timeout_s > 0:
+        return float(options.ui_timeout_s)
+    return float(options.timeout)
+
+
 def run_ui_job(options: UiJobOptions, context: RunnerContext) -> UiJobResult:
     """执行一次 UI 作业。**总是**在返回前释放本地锁。"""
     artifacts_dir = Path(options.artifacts_dir)
@@ -437,6 +451,9 @@ def _run_fake(
         junit=summary["junit"],
         cases=summary["cases"],
         layout=layout,
+        # 用例结论必须随结果一起返回：joint 的组件事实直接引用它，
+        # 缺了会让"断言失败"在组件行上退化成 not_tested。
+        outcome=outcome,
     )
 
 
@@ -481,7 +498,7 @@ def _run_pytest(
         emit_text("plugin_unavailable", detail=problems)
         return UiJobResult(exit_code=3, reason="plugin_unavailable", message=problems)
     context.set_stage("pytest", 40, stage=2)
-    deadline = Deadline(options.timeout)
+    deadline = Deadline(resolve_execution_deadline(options))
     env = build_pytest_env()
     import json
     env["TESTDOCK_JOB_CONFIG"] = json.dumps({
@@ -604,6 +621,7 @@ __all__ = [
     "build_pytest_command",
     "build_pytest_env",
     "require_suite_copy_targets",
+    "resolve_execution_deadline",
     "resolve_suite_root",
     "resolve_test_paths",
     "run_ui_job",

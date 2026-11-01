@@ -1157,6 +1157,9 @@ async def _report_view(session: AsyncSession, run_id: str) -> dict:
         "durationS": view["duration_s"],
         "metricsSummary": source.get("metricsSummary") or {},
         "thresholdsAtRun": source.get("thresholdsAtRun") or {},
+        # joint 的采集窗口（真实时间戳）：窗口必须覆盖 UI 执行窗，
+        # 报告页据此说明"采集确实包围了这次 UI 执行"。
+        "collectWindow": source.get("collectWindow"),
         "reason": view["reason_code"],
         "reasonText": view["not_tested_reason"] or view["reason_code"],
         "evaluatedAt": view["ended_at"],

@@ -189,6 +189,15 @@ export interface RunReport {
   durationS?: number | null
   /** vendor metricsSummary 原样透传：{metric_key: {unit, median, sampleCount, ...}} */
   metricsSummary?: Record<string, Record<string, unknown>> | null
+  /**
+   * joint 采集窗口（真实时间戳）：collect_* 包围 ui.* 执行窗。
+   * null 表示该运行没有联合采集窗口，不编造。
+   */
+  collectWindow?: {
+    collect_started_at: string
+    collect_stopped_at: string
+    ui: { started_at: string; ended_at: string; timeout_s: number }
+  } | null
   thresholdsAtRun?: Record<string, unknown> | null
   reason?: string | null
   reasonText?: string | null

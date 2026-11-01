@@ -166,6 +166,9 @@ def _report_fail(
             stage=stage,
             fencing_token=int(args.fencing_token or 0),
             components=components,
+            # 失败前可能已经产出（joint 超时收口的 report.json 就是唯一采集窗口
+            # 证据）；登记后 /report 才看得到，而不是让证据只留在磁盘上。
+            artifacts_dir=str(Path(args.artifacts_dir).resolve()),
         )
     except ControlError as exc:
         emit_text("fail_report_failed", detail=str(exc)[:500])
@@ -207,7 +210,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "joint":
             from .joint_job import run_joint_job
 
-            options.perf = {**(options.perf or {}), "ui_timeout_s": int(args.ui_timeout or 0)}
+            # 执行窗上限走 UiJobOptions 的显式字段：joint_job 与 ui_job 读同一个
+            # 值（真实 pytest deadline），不再只放在 perf 描述里。
+            options.ui_timeout_s = int(args.ui_timeout) if args.ui_timeout else None
             result = run_joint_job(options, context)
         else:
             from .ui_job import run_ui_job
