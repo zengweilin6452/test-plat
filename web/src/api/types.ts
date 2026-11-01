@@ -96,12 +96,16 @@ export interface TemplatesResponse {
 
 /** POST /api/v1/templates 的请求体（vendor 契约：服务端从保留快照裁剪，不收浏览器图片） */
 export interface CreateTemplateRequest {
-  /** POST /debug-sessions/{id}/snapshots 返回的快照 id */
+  /** POST /debug-sessions/{id}/snapshots 返回的快照 id（验证时的新快照） */
   snapshot_id: string
-  /** 裁剪区域 [x, y, width, height]，必须是四个整数 */
+  /** 裁剪区域 [x, y, width, height]，必须是四个整数（验证返回的命中框） */
   region: [number, number, number, number]
   /** 模板逻辑名，必须以 .png 结尾的 POSIX 相对路径 */
   logical: string
+  /** 验证时使用的阈值：凭证按阈值发放，必须与验证时一致 */
+  threshold: number
+  /** POST /templates/validate-crop 返回的一次性验证凭证（未验证不可登记） */
+  verification: string
   note?: string
 }
 
