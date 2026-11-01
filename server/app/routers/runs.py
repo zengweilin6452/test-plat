@@ -363,6 +363,53 @@ async def _resolve_revision(
 #: `/runs/import` 里自己写 source=import，不接受浏览器传 source。
 _FIXED_INPUT_FIELDS = ("overrides", "source_dir", "test_paths", "fake_outcome", "source")
 
+#: 声明式性能场景适用的测试类型（工单 06）：UI 运行没有性能场景可合订。
+_SCENARIO_TEST_TYPES = ("performance", "joint")
+
+
+async def _resolve_execution_scenario(
+    session: AsyncSession, *, revision: Mapping, revision_config: Mapping
+) -> tuple[dict | None, str | None]:
+    """把修订 config.perf 与套件版本场景合订成一份执行输入（工单 06）。
+
+    「谁的场景算数」只在这里定义（domain.suite.resolve_scenario）：
+      - 两份一致 -> 用套件版本快照，来源 suite_manifest；
+      - 只有一份 -> 用它，来源写明是 suite_manifest 还是 revision；
+      - 两份不一致 -> 400 拒绝（validation_error），绝不用其中一份静默覆盖另一份；
+      - 都没有 -> 不合订任何值（performance 采集入口会因缺场景而拒绝）。
+
+    合订结果与来源随 config_snapshot 冻结进运行，派发不再重新解析——执行
+    依据在提交时就固定了。
+    """
+    from ..domain import suite as suite_domain
+
+    test_type = str(revision.get("test_type") or "")
+    if test_type not in _SCENARIO_TEST_TYPES:
+        return None, None
+    manifest: dict = {}
+    suite_version_id = revision.get("suite_version_id")
+    if suite_version_id:
+        raw = (
+            await session.execute(
+                text("SELECT manifest FROM suite_versions WHERE id = :sid"),
+                {"sid": str(suite_version_id)},
+            )
+        ).scalar_one_or_none()
+        manifest = raw if isinstance(raw, dict) else {}
+    try:
+        scenario, source = suite_domain.resolve_scenario(
+            test_type=test_type,
+            manifest=manifest,
+            revision_perf=revision_config.get("perf"),
+        )
+    except suite_domain.PerfScenarioConflict as exc:
+        raise validation_error([f"perf: {exc}"]) from exc
+    if scenario is not None:
+        problems = suite_domain.scenario_problems(scenario)
+        if problems:
+            raise validation_error([f"perf: {problem}" for problem in problems])
+    return scenario, source
+
 
 async def _insert_run(session: AsyncSession, body: Mapping, *, internal: bool = False) -> dict:
     """插入 queued run；request_key 重复则返回既有 run（created=False）。
@@ -440,11 +487,20 @@ async def _insert_run(session: AsyncSession, body: Mapping, *, internal: bool = 
 
     revision = (
         await session.execute(
-            text("SELECT config, test_type FROM task_revisions WHERE id = :id"),
+            text("SELECT config, test_type, suite_version_id FROM task_revisions WHERE id = :id"),
             {"id": revision_id},
         )
     ).mappings().one()
     revision_config = dict(revision["config"] or {})
+    # 声明式场景：修订配置与套件版本清单是两份声明，提交时合订成一份并写明
+    # 来源（工单 06）。导入通道补录历史产物、不再执行，不做合订。
+    scenario, scenario_source = (
+        (None, None)
+        if internal
+        else await _resolve_execution_scenario(
+            session, revision=revision, revision_config=revision_config
+        )
+    )
     # device 是显式选择（§6.2 允许），不属于"改写固定输入"；其余执行输入一律
     # 取自修订，请求体里出现就会被 _FIXED_INPUT_FIELDS 拒绝。
     device = body.get("device") if "device" in body else revision_config.get("device")
@@ -502,6 +558,13 @@ async def _insert_run(session: AsyncSession, body: Mapping, *, internal: bool = 
         "platform": platform,
         "application_id": application_id,
         "module": "perf" if revision["test_type"] == "performance" else revision["test_type"],
+        # 合订后的声明式场景与来源（仅 performance/joint；来源是审计事实，
+        # 不是给前端猜的：suite_manifest / revision）。
+        **(
+            {"perf": scenario, "perf_source": scenario_source}
+            if scenario is not None
+            else {}
+        ),
         "requested_resource_id": resource_id,
         "source": "import" if internal else "api",
         "submitted_at": datetime.now(timezone.utc).isoformat(),

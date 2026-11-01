@@ -107,25 +107,37 @@ async def _resolve_config(session, run: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-async def _prepare_suite_copy(session, revision_id: str) -> ExecutionCopy:
+async def _prepare_suite_copy(session, revision_id: str) -> ExecutionCopy | None:
     """解析修订引用的套件版本并复验固定代码副本，返回 ExecutionCopy。
 
     返回结构里带 suite_version_id 与 tree_sha256，避免调用方二次查询或自己
     重算摘要（摘要真源只有 discover 一处）。
+
+    performance 是声明式场景（工单 06）：套件版本按设计没有代码副本，也没有
+    用例要跑，所以返回 None——不伪造副本根，也不把"没有副本"当成故障。
+    ui / joint 仍必须有固定副本：缺了照旧抛错，由调用方收敛成
+    errored(execution_copy_missing)。
     """
     if not revision_id:
         raise ValueError("修订缺失，无法定位套件版本")
     row = (
         await session.execute(
-            text("SELECT suite_version_id FROM task_revisions WHERE id = CAST(:rid AS uuid)"),
+            text(
+                "SELECT suite_version_id, test_type FROM task_revisions"
+                " WHERE id = CAST(:rid AS uuid)"
+            ),
             {"rid": revision_id},
         )
-    ).scalar_one_or_none()
+    ).mappings().first()
     if row is None:
         raise ValueError(f"修订 {revision_id} 不存在")
+    if str(row["test_type"] or "") == "performance":
+        return None
     from ..services import suites as suite_service
 
-    return await suite_service.prepare_execution_copy(session, str(row))
+    if row["suite_version_id"] is None:
+        raise ValueError("修订未绑定套件版本")
+    return await suite_service.prepare_execution_copy(session, str(row["suite_version_id"]))
 
 
 async def _verify_build_identity(run_id: str, *, serial: str) -> dict[str, Any]:
@@ -450,9 +462,12 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
                 )
                 logger.warning("run %s 固定副本不可用 -> errored(execution_copy_missing)", rid)
                 return DispatchOutcome(run_id=rid, ok=False, reason="execution_copy_missing")
-            config["suite_root"] = str(execution_copy.root)
-            config["suite_version_id"] = execution_copy.suite_version_id
-            config["suite_sha256"] = execution_copy.tree_sha256
+            # performance 返回 None：声明式场景没有代码副本（工单 06），
+            # 不传 suite_root，execution_copy_missing 只针对 ui / joint。
+            if execution_copy is not None:
+                config["suite_root"] = str(execution_copy.root)
+                config["suite_version_id"] = execution_copy.suite_version_id
+                config["suite_sha256"] = execution_copy.tree_sha256
             lease_details = lease.as_details()
             # acquire_lease 已在同一事务内绑定资源，随后迁移状态。
             await runs_mod.transition(

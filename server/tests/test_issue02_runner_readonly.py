@@ -25,6 +25,7 @@ from testdock_runner.env import RunnerContext  # noqa: E402
 def test_perf_job_never_calls_vendor_ensure_ready(tmp_path, monkeypatch):
     import mobile_perf
 
+    from testdock_runner import debug_job
     from testdock_runner.debug_job import run_perf_job
 
     calls: list[tuple[str, dict]] = []
@@ -48,6 +49,18 @@ def test_perf_job_never_calls_vendor_ensure_ready(tmp_path, monkeypatch):
             calls.append(("collect", kwargs))
             return Scope()
 
+    class FastClock:
+        """工单 06：采集窗 10 秒起步，用它把窗口在毫秒内走完。"""
+
+        def __init__(self):
+            self.now = 0.0
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.now += max(seconds, 1.0)
+
     monkeypatch.setattr(mobile_perf, "PerfKit", Kit)
     monkeypatch.setattr(
         ui_job,
@@ -57,11 +70,12 @@ def test_perf_job_never_calls_vendor_ensure_ready(tmp_path, monkeypatch):
             SimpleNamespace(release=lambda: calls.append(("release", {}))),
         ),
     )
+    monkeypatch.setattr(debug_job, "time", FastClock())
     options = ui_job.UiJobOptions(
         run_id="perf-test", artifacts_dir=tmp_path, serial="test-only"
     )
     options.app_package = "com.example.perf"
-    options.perf = {"duration_s": 0.01, "items": ["CPU"]}
+    options.perf = {"duration_s": 60, "items": ["CPU"]}
     context = RunnerContext(run_id="perf-test", fencing_token=1, artifacts_dir=tmp_path)
 
     result = run_perf_job(options, context)
