@@ -160,6 +160,43 @@ def check_readiness(
     if not revision.get("build_id"):
         missing.append("build_id")
 
+    # 声明式性能场景（工单 06）：performance/joint 的执行时长与采集项必须在
+    # 修订 readiness 就锁死在 10–3600 秒整数、items 非空——与套件发布口
+    # （suite.validate_manifest）同一份规则，且与套件版本场景不一致时拒绝，
+    # 而不是把非法场景留到 runner 才发现。
+    # 套件版本尚不存在时不做场景判定：那时"还没有场景"是 suite_version_id
+    # 缺失的后果，提前报 config.perf 会把向导指到错误的步骤。
+    if effective_type in ("performance", "joint") and suite_version is not None:
+        from . import suite as suite_domain
+
+        manifest = (
+            suite_version.get("manifest")
+            if isinstance(suite_version, dict)
+            and isinstance(suite_version.get("manifest"), dict)
+            else {}
+        )
+        revision_config = revision.get("config") or {}
+        revision_perf = revision_config.get("perf")
+        scenario_problems_list: list[str] = []
+        try:
+            scenario, _source = suite_domain.resolve_scenario(
+                test_type=effective_type, manifest=manifest, revision_perf=revision_perf
+            )
+        except suite_domain.PerfScenarioConflict as exc:
+            scenario_problems_list.append(str(exc))
+        else:
+            scenario_problems_list.extend(suite_domain.scenario_problems(scenario))
+            # 「写了 perf 键但内容空」也是一种声明：不能因为合并时被当成缺省而放过。
+            if "perf" in revision_config:
+                scenario_problems_list.extend(
+                    problem
+                    for problem in suite_domain.scenario_problems(revision_perf)
+                    if problem not in scenario_problems_list
+                )
+        invalid.extend(
+            f"config.perf: {problem}" for problem in scenario_problems_list
+        )
+
     if application_platform is None:
         invalid.append("application_id: 应用不存在")
     elif platform != application_platform:

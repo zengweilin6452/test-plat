@@ -154,12 +154,12 @@ def validate_manifest(manifest: Any, *, test_type: str) -> list[str]:
     elif test_type == "performance":
         if cases > 0 or manifest.get("cases"):
             problems.append("性能场景不应包含 pytest 用例（不能用占位用例冒充执行）")
-        problems.extend(_scenario_problems(manifest.get("scenario")))
+        problems.extend(scenario_problems(manifest.get("scenario")))
     elif test_type == "joint":
         if cases <= 0:
             problems.append("joint 清单缺少 UI 用例")
         problems.extend(
-            [f"joint {item}" for item in _scenario_problems(manifest.get("performance"))]
+            [f"joint {item}" for item in scenario_problems(manifest.get("performance"))]
         )
         ui_timeout = manifest.get("ui_timeout_s")
         if not isinstance(ui_timeout, int) or ui_timeout <= 0:
@@ -169,8 +169,13 @@ def validate_manifest(manifest: Any, *, test_type: str) -> list[str]:
     return problems
 
 
-def _scenario_problems(scenario: Any) -> list[str]:
-    """声明式场景的必需字段：duration_s（10–3600 整数）与 items（非空字符串列表）。"""
+def scenario_problems(scenario: Any) -> list[str]:
+    """声明式场景的必需字段：duration_s（10–3600 整数）与 items（非空字符串列表）。
+
+    套件发布、修订 readiness、派发合并都用这一份规则；runner 侧
+    ``testdock_runner.perf_config`` 是同一口径的镜像（跨进程不共享模块，
+    由 tests/test_issue06_perf_scenario.py 的边界用例锁死不漂移）。
+    """
     if not isinstance(scenario, dict) or not scenario:
         return ["缺少声明式性能场景（duration_s 与采集项）"]
     problems: list[str] = []
@@ -187,3 +192,59 @@ def _scenario_problems(scenario: Any) -> list[str]:
     ):
         problems.append("性能场景采集项 items 必须是非空字符串列表")
     return problems
+
+
+# 旧私有名保留为别名：改名不应让任何按私有名调用的一方悄悄失联。
+_scenario_problems = scenario_problems
+
+
+class PerfScenarioConflict(ValueError):
+    """套件版本场景与修订 config.perf 两份声明不一致。"""
+
+
+def _scenario_signature(scenario: dict[str, Any]) -> tuple[Any, tuple[str, ...]]:
+    items = scenario.get("items")
+    item_tuple = tuple(items) if isinstance(items, list) else ()
+    return (scenario.get("duration_s"), item_tuple)
+
+
+def resolve_scenario(
+    *,
+    test_type: str,
+    manifest: Any,
+    revision_perf: Any,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """合订「套件版本场景」与「修订 config.perf」，返回 (场景, 来源)。
+
+    优先级是显式规则，不是"后写覆盖先写"：
+      1. 两份都有且一致 -> 用套件版本的值（版本快照是固定定义），来源 suite_manifest；
+      2. 只有一份 -> 用它，来源写明是 suite_manifest 还是 revision；
+      3. 两份都有但不一致 -> 抛 PerfScenarioConflict，交由调用方拒绝派发/提交，
+         绝不静默用其中一份冒充另一份；
+      4. 都没有 -> (None, None)，由调用方决定怎么处理：修订 readiness 与
+         runner 采集入口都会拒绝，不会静默套用默认时长。
+
+    performance 读 ``manifest.scenario``，joint 读 ``manifest.performance``。
+    """
+    declared: Any = None
+    if isinstance(manifest, dict):
+        declared = manifest.get("scenario" if test_type == "performance" else "performance")
+    declared_perf = declared if isinstance(declared, dict) and declared else None
+    revision_scenario = (
+        revision_perf if isinstance(revision_perf, dict) and revision_perf else None
+    )
+    if declared_perf and revision_scenario:
+        if _scenario_signature(declared_perf) != _scenario_signature(revision_scenario):
+            raise PerfScenarioConflict(
+                "修订 config.perf 与套件版本场景不一致："
+                f"版本 duration_s={declared_perf.get('duration_s')!r}"
+                f"/items={declared_perf.get('items')!r}，"
+                f"修订 duration_s={revision_scenario.get('duration_s')!r}"
+                f"/items={revision_scenario.get('items')!r}"
+            )
+        return dict(declared_perf), "suite_manifest"
+    if declared_perf:
+        return dict(declared_perf), "suite_manifest"
+    if revision_scenario:
+        return dict(revision_scenario), "revision"
+    return None, None

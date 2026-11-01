@@ -1,7 +1,6 @@
 """调试 viewer 生命周期与 PerfKit 性能采集。"""
 from __future__ import annotations
 
-import math
 import socket
 import time
 from pathlib import Path
@@ -9,6 +8,7 @@ from urllib.parse import urlparse
 
 from .artifacts import collect_layout, write_report_json
 from .env import Deadline, RunnerContext, ensure_vendor_on_path, fake_enabled
+from .perf_config import scenario_problems
 from .protocol import emit_stage, emit_text
 from . import ui_job
 from .ui_job import UiJobOptions, UiJobResult
@@ -89,15 +89,18 @@ def run_perf_job(options: UiJobOptions, context: RunnerContext) -> UiJobResult:
                                         "outcome": "not_tested", "reason_code": "gate_policy_missing"}],
                            layout=collect_layout(artifacts_dir))
     try:
-        duration = float(options.perf.get("duration_s", 60))
-        items = options.perf.get("items", ["CPU", "Memory", "FPS"])
+        perf = options.perf or {}
+        # 与平台 domain（套件发布 / 修订 readiness）同一口径：duration_s 10–3600
+        # 整数秒、items 非空字符串列表。越界拒绝（invalid_perf_config），不夹紧、
+        # 不回落默认值——否则"平台拒绝、runner 悄悄改写"两边各说各话。
+        problems = scenario_problems(perf)
+        if problems:
+            raise ValueError("；".join(problems))
+        duration = int(perf["duration_s"])
+        items = list(perf["items"])
         if not options.serial or not options.app_package:
             raise ValueError("性能采集需要 serial 和 app_package")
-        if not math.isfinite(duration) or duration <= 0:
-            raise ValueError("duration_s 必须是正有限数")
-        if not isinstance(items, list) or not items or any(not isinstance(i, str) for i in items):
-            raise ValueError("items 必须是非空字符串数组")
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, KeyError) as exc:
         return UiJobResult(3, "invalid_perf_config", message=str(exc))
 
     vendor_lease = lock = None
