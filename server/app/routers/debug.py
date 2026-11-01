@@ -97,6 +97,8 @@ _CROP_VERIFICATIONS: dict[str, dict[str, Any]] = {}
 _CONTROL_TOKENS: dict[str, str] = {}
 #: 每会话最多一条手势 WS（vendor 侧每设备同时只允许一个手势）。
 _GESTURE_CLIENTS: dict[str, int] = {}
+#: 每会话最多一条 H.264 视频 WS（vendor 每设备预览客户端上限 4，平台只占一条）。
+_VIDEO_CLIENTS: dict[str, int] = {}
 #: vendor /input/key 允许的按键；与 mobile_auto 有限键表一致。
 _CONTROL_KEYS = frozenset({"back", "home", "enter", "search", "delete", "recent"})
 
@@ -1172,6 +1174,103 @@ async def debug_socket(websocket: WebSocket, session_id: str) -> None:
         if upstream_ws is not None:
             with contextlib.suppress(Exception):
                 await upstream_ws.close()
+        with contextlib.suppress(Exception):
+            await websocket.close(code=1000)
+
+
+@router.websocket("/ws/debug/{session_id}/video")
+async def debug_video_socket(websocket: WebSocket, session_id: str) -> None:
+    """H.264 下行透传：浏览器 <-> vendor /api/v1/preview/video。
+
+    vendor 对视频信道同样要求严格 Origin 与 {"proto":1} hello；浏览器消息
+    一律忽略（信道只下行）。失败由前端回退 JPEG，不在平台重连。
+    """
+    import websockets
+
+    from ..db import get_sessionmaker
+
+    with contextlib.suppress(Exception):
+        await websocket.accept()
+    sid = str(session_id)
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT ds.state, er.resource_key
+                      FROM debug_sessions ds
+                      JOIN execution_resources er
+                        ON er.project_id = ds.project_id AND er.id = ds.resource_id
+                     WHERE ds.id = CAST(:sid AS uuid)
+                    """
+                ),
+                {"sid": sid},
+            )
+        ).mappings().first()
+        await session.rollback()
+    if row is None:
+        with contextlib.suppress(Exception):
+            await websocket.close(code=4404)
+        return
+    port = _READY_PORTS.get(sid)
+    if row["state"] != "active" or port is None:
+        with contextlib.suppress(Exception):
+            await websocket.close(code=4403)
+        return
+    if _VIDEO_CLIENTS.get(sid, 0) >= 1:
+        with contextlib.suppress(Exception):
+            await websocket.close(code=4429)
+        return
+    _VIDEO_CLIENTS[sid] = _VIDEO_CLIENTS.get(sid, 0) + 1
+
+    upstream = None
+    try:
+        upstream = await websockets.connect(
+            f"ws://127.0.0.1:{port}{_viewer_device_path('/api/v1/preview/video', str(row['resource_key']))}",
+            max_size=None,
+            origin=f"http://127.0.0.1:{port}",
+        )
+        await upstream.send(json.dumps({"proto": 1}))
+
+        async def to_client() -> None:
+            while True:
+                frame = await upstream.recv()
+                if isinstance(frame, (bytes, bytearray)):
+                    await websocket.send_bytes(bytes(frame))
+                else:
+                    await websocket.send_text(str(frame))
+
+        async def watch_client() -> None:
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    raise WebSocketDisconnect(message.get("code") or 1000)
+                # 视频信道只下行：忽略浏览器发来的任何消息
+
+        done, pending = await asyncio.wait(
+            [asyncio.create_task(to_client()), asyncio.create_task(watch_client())],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        for task in done:
+            exc = task.exception()
+            if exc is not None and not isinstance(
+                exc, (WebSocketDisconnect, websockets.ConnectionClosed)
+            ):
+                logger.debug("video ws pump error: %s", exc)
+    except Exception:  # noqa: BLE001 - 上游/浏览器断开都按会话结束收口
+        logger.debug("video ws 透传失败: session=%s", sid)
+    finally:
+        remaining = _VIDEO_CLIENTS.get(sid, 1) - 1
+        if remaining > 0:
+            _VIDEO_CLIENTS[sid] = remaining
+        else:
+            _VIDEO_CLIENTS.pop(sid, None)
+        if upstream is not None:
+            with contextlib.suppress(Exception):
+                await upstream.close()
         with contextlib.suppress(Exception):
             await websocket.close(code=1000)
 

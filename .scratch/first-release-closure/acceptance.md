@@ -454,3 +454,43 @@
 - 定向：控制 + P5 调试 + 模板/框选 + 契约 **66 passed**；前端 `tsc --noEmit`、`npm test` **52 passed**、`npm run build` 成功。
 - 真机验收见 §11.3；收尾时活动租约 0、活动调试会话 0、无 runner 进程。
 - 分支：`feat/debug-direct-control`，提交 `5aad752`；按计划合并回集成分支后进入 Phase 2（H.264）。
+
+
+## 12. Phase 2 H.264 预览交付记录（2026-11-01 晚）
+
+在调试页增加 H.264 优先预览，JPEG 保留为回退。分支 `feat/debug-h264-preview`，未 push。
+
+### 12.1 实现
+
+| 层 | 内容 |
+| --- | --- |
+| 平台代理 | `WS /api/v1/ws/debug/{id}/video`：严格 `Origin: http://127.0.0.1:<viewer_port>` + `{"proto":1}` hello；只下行转发 ready/error 与 27 字节头二进制帧；浏览器消息忽略；每会话最多一条 |
+| 前端播放器 | `web/src/lib/h264Preview.ts`：27 字节头/SPS→codec 解析、VideoDecoder、config+首关键帧合并、积压丢 delta、8s 无画面失败、canvas 绘制；冻结时暂停绘制 |
+| DebugDrawer | 预览模式 `h264 | jpeg`；页头显示 `H.264 · Nfps` 或 `JPEG 回退`；回退原因 Notice；冻结/恢复、控制覆盖层、坐标归一化不变；无 WebCodecs 时直接回退 |
+| 文档 | api-design 增加 video WS 与回退语义；无新依赖、无迁移 |
+
+### 12.2 自动化验证
+
+- 后端：`test_debug_preview_video.py` **3 passed**（Origin/hello/ready/二进制透传；未知 4404；非 active 4403）；控制 + 契约定向 **27 passed**。
+- 前端：`tsc --noEmit` 通过；`npm test` **57 passed**（新增包头解析、SPS→codec、积压丢帧、传输选择）；`npm run build` 成功。
+- 全量回归结果见 §12.4。
+
+### 12.3 真机验证（749622c9）
+
+| 项 | 结果 |
+| --- | --- |
+| H.264 | 调试页显示 `H.264 · 25fps`，canvas 486×1080（vendor 码流分辨率），WS `/video` accepted |
+| 冻结/恢复 | 采集检查后冻结，恢复预览后 H.264 继续出帧（2.5s 窗口 11fps） |
+| 回退 | 隐藏 `window.VideoDecoder` 后重新打开调试：页面显示「预览已回退 JPEG / 浏览器不支持 WebCodecs，已回退 JPEG」，JPEG 链路正常 |
+| 控制 | 预览切换不影响「直接操控」按钮与 Phase 1 控制链路 |
+| 收尾 | 关闭会话后 active leases 0、active debug sessions 0、无 runner 进程 |
+
+### 12.4 边界与结论
+
+1. **码流分辨率低于设备**：H.264 实测 486×1080；精确节点拾取、框选与模板仍以 1080×2400 快照为准，不影响 Phase 1 精度。
+2. **回退粘性**：一旦本会话回退 JPEG，不反复重试 H.264；重开调试会话再尝试。
+3. **不并行**：同一会话只开一条预览流（video 或 JPEG），避免 vendor 客户端上限与双重解码开销。
+4. **依赖**：需 WebCodecs 与 vendor `stream_backend=upstream`（默认）；否则如实回退并显示原因。
+5. **不改变控制**：Phase 1 的控制权/手势 WS 与坐标归一化不受预览传输影响。
+
+全量回归（`testdock_frc10`，迁移 `0008`）：**577 项，576 passed / 1 skipped / 0 failed，退出码 0**（新增 3 项视频代理测试；计数方式同 §3 #1）。分支 `feat/debug-h264-preview`，提交 `b48a9e6`；按计划合并回集成分支。

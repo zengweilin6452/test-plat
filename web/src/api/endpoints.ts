@@ -214,6 +214,11 @@ export function sendDebugKey(sessionId: string | number, name: string) {
   )
 }
 
+/** H.264 预览 WS 路径（Phase 2；失败时前端回退 JPEG） */
+export function debugVideoWsPath(sessionId: string | number): string {
+  return '/api/v1/ws/debug/' + encodeURIComponent(String(sessionId)) + '/video'
+}
+
 /** 手势 WS 路径（与预览同一 Vite/平台代理；协议由 vendor 定义） */
 export function debugGestureWsPath(sessionId: string | number): string {
   return '/api/v1/ws/debug/' + encodeURIComponent(String(sessionId)) + '/gesture'
