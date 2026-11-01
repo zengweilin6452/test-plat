@@ -68,7 +68,8 @@ if args and args[0] == "-s":
         else:
             print("Packages:")
             print("  Package [" + package + "] (abc):")
-            print("    versionCode=" + str(entry.get("versionCode", 42)) + " minSdk=24")
+            if not entry.get("omit_version_code"):
+                print("    versionCode=" + str(entry.get("versionCode", 42)) + " minSdk=24")
             if entry.get("versionName"):
                 print("    versionName=" + entry["versionName"])
 sys.exit(0)
@@ -199,7 +200,18 @@ def test_identity_mismatch_blocks_dispatch(client, project, make_run, sync_engin
             text("SELECT state FROM test_runs WHERE id = CAST(:id AS uuid)"),
             {"id": outcome.run_id},
         ).scalar_one()
+        reason_code = conn.execute(
+            text("SELECT reason_code FROM test_runs WHERE id = CAST(:id AS uuid)"),
+            {"id": outcome.run_id},
+        ).scalar_one()
     assert state == "errored"
+    # 页面「原因」显示真实原因，而不是笼统的 runner_spawn_failed。
+    assert reason_code == "identity_mismatch"
+    events = _identity_events(sync_engine, outcome.run_id)
+    mismatch = next(e for e in events if e["event_type"] == "identity_mismatch")
+    assert mismatch["payload"]["verdict"] == "mismatch"
+    assert mismatch["payload"]["execution_allowed"] is False
+    assert mismatch["payload"]["apk_digest_verified"] is False
     # 租约必须释放：设备不能被失败运行占死（限定本测试项目，避免共享库串扰）
     with sync_engine.connect() as conn:
         live = conn.execute(
@@ -227,5 +239,167 @@ def test_identity_pending_does_not_block_dispatch(client, project, make_run, syn
     run_id = make_run(state="queued", request_key=str(uuid.uuid4()))
     outcome = asyncio.run(dispatch_one(run_id=run_id))
     assert outcome.ok is True, outcome.reason
+    # 不阻断，但事件必须明确写成「未复核」，不能冒充已验证。
+    unverified = [
+        event for event in _identity_events(sync_engine, run_id)
+        if event["event_type"] == "identity_unverified"
+    ]
+    assert unverified, "pending 身份必须留下未复核事件"
+    payload = unverified[0]["payload"]
+    assert payload["verdict"] == "skipped"
+    assert payload["execution_allowed"] is False
+    assert payload["apk_digest_verified"] is False
+    assert "未" in str(payload["note"]) and "复核" in str(payload["note"])
+
+
+def _run_identity_state(engine, run_id: str) -> tuple[str, str | None]:
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT state, reason_code FROM test_runs WHERE id = CAST(:id AS uuid)"
+            ),
+            {"id": run_id},
+        ).mappings().one()
+    return row["state"], row["reason_code"]
+
+
+def _identity_events(engine, run_id: str) -> list[dict]:
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT event_type, payload FROM run_events"
+                " WHERE run_id = CAST(:id AS uuid) ORDER BY sequence"
+            ),
+            {"id": run_id},
+        ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def test_identity_unreadable_blocks_dispatch_with_readable_reason(
+    client, project, make_run, sync_engine, spawns, fake_adb
+):
+    """设备上包存在但读不到 versionName：必须阻断运行并说明原因，不冒充通过。"""
+    _learn_identity(sync_engine, project, "1.0.0")
+    fake_adb.configure(
+        devices=[{"serial": project["resources"][0]["serial"]}],
+        # 包已安装但没有 versionName：只读读取结果不可用。
+        packages={f"com.example.p3{project['suffix']}": {"versionCode": 42}},
+    )
+    import asyncio
+
+    from app.scheduler.dispatcher import dispatch_one
+
+    run_id = make_run(state="queued", request_key=str(uuid.uuid4()))
+    outcome = asyncio.run(dispatch_one(run_id=run_id))
+    assert outcome.ok is False
+    assert outcome.reason == "identity_unreadable"
+    assert spawns == [], "身份不可读时不得拉起执行进程"
+    state, reason_code = _run_identity_state(sync_engine, run_id)
+    assert state == "errored"
+    assert reason_code == "identity_unreadable"
+    # 原因必须可读（指名缺失的字段/包），不能只给一个错误码。
+    errored = [
+        event for event in _identity_events(sync_engine, run_id)
+        if event["event_type"] in ("identity_unreadable", "error")
+    ]
+    messages = " ".join(str(event["payload"].get("message") or event["payload"].get("detail") or "")
+                        for event in errored)
+    assert "versionName" in messages or "version_name" in messages, messages
+    with sync_engine.connect() as conn:
+        live = conn.execute(
+            text(
+                "SELECT count(*) FROM resource_leases"
+                " WHERE released_at IS NULL AND project_id = CAST(:pid AS uuid)"
+            ),
+            {"pid": project["project_id"]},
+        ).scalar_one()
+    assert live == 0, "阻断后必须释放设备租约"
+
+
+def test_identity_baseline_package_name_is_validated_before_device_access(
+    client, project, make_run, sync_engine, spawns, fake_adb
+):
+    """基准包名不合法时不得拼进 shell 命令，也不得访问设备。"""
+    injected = "com.example.p3" + project["suffix"] + "; reboot"
+    with sync_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE app_builds SET metadata = CAST(:meta AS jsonb)"
+                " WHERE id = CAST(:bid AS uuid)"
+            ),
+            {
+                "bid": project["build_id"],
+                "meta": json.dumps(
+                    {
+                        "identity": {
+                            "state": "confirmed",
+                            "baseline": {"package_name": injected, "version_name": "1.0.0"},
+                        }
+                    }
+                ),
+            },
+        )
+    fake_adb.configure(devices=[{"serial": project["resources"][0]["serial"]}], packages={})
+    import asyncio
+
+    from app.scheduler.dispatcher import dispatch_one
+
+    run_id = make_run(state="queued", request_key=str(uuid.uuid4()))
+    outcome = asyncio.run(dispatch_one(run_id=run_id))
+    assert outcome.ok is False
+    assert outcome.reason == "identity_unreadable"
+    assert fake_adb.calls() == [], "非法包名不得触达 adb"
+    state, reason_code = _run_identity_state(sync_engine, run_id)
+    assert (state, reason_code) == ("errored", "identity_unreadable")
+
+
+def test_identity_version_code_unreadable_blocks_instead_of_claiming_verified(
+    client, project, make_run, sync_engine, spawns, fake_adb
+):
+    """基准固定了 versionCode，但设备读不到该字段：不能写成已验证。"""
+    package = f"com.example.p3{project['suffix']}"
+    with sync_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE app_builds SET metadata = CAST(:meta AS jsonb)"
+                " WHERE id = CAST(:bid AS uuid)"
+            ),
+            {
+                "bid": project["build_id"],
+                "meta": json.dumps(
+                    {
+                        "identity": {
+                            "state": "confirmed",
+                            "baseline": {
+                                "package_name": package,
+                                "version_name": "1.0.0",
+                                "version_code": 42,
+                            },
+                        }
+                    }
+                ),
+            },
+        )
+    fake_adb.configure(
+        devices=[{"serial": project["resources"][0]["serial"]}],
+        packages={package: {"versionName": "1.0.0", "omit_version_code": True}},
+    )
+    import asyncio
+
+    from app.scheduler.dispatcher import dispatch_one
+
+    run_id = make_run(state="queued", request_key=str(uuid.uuid4()))
+    outcome = asyncio.run(dispatch_one(run_id=run_id))
+    assert outcome.ok is False
+    assert outcome.reason == "identity_unreadable"
+    assert spawns == [], "关键字段不可读时不得冒充已验证"
+    state, reason_code = _run_identity_state(sync_engine, run_id)
+    assert (state, reason_code) == ("errored", "identity_unreadable")
+    unreadable = next(
+        event for event in _identity_events(sync_engine, run_id)
+        if event["event_type"] == "identity_unreadable"
+    )
+    assert "versionCode" in str(unreadable["payload"]["detail"])
+    assert unreadable["payload"]["execution_allowed"] is False
 
 

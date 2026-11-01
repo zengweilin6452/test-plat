@@ -18,7 +18,7 @@ for (const extension of ['.ts', '.tsx']) {
 const { INITIAL_FORM, buildCreateTaskRequest, validateStep1, validateStep2, isDeviceSelectable } =
   require('../src/components/TaskWizard.tsx')
 const { createTask } = require('../src/api/endpoints.ts')
-const { canConfirmIdentity } = require('../src/components/InputRegistration.tsx')
+const { canConfirmIdentity, describeIdentityBlocking } = require('../src/components/InputRegistration.tsx')
 const applicationId = '11111111-1111-4111-8111-111111111111'
 const resourceId = '22222222-2222-4222-8222-222222222222'
 const buildId = '33333333-3333-4333-8333-333333333333'
@@ -67,6 +67,28 @@ test('only an unblocked matching pending identity can be explicitly confirmed', 
   for (const result of ['conflict', 'unknown']) assert.equal(canConfirmIdentity({ ...check, result }), false)
   assert.equal(canConfirmIdentity({ ...check, blocking: [{ reason: 'missing' }] }), false)
   assert.equal(canConfirmIdentity({ ...check, identity_state: 'confirmed' }), false)
+})
+
+test('identity blocking reasons are shown in readable text so the user can fix and retry', () => {
+  assert.deepEqual(
+    describeIdentityBlocking([
+      { check: 'version_name', reason: 'version_name_mismatch' },
+      { check: 'version_name', reason: 'identity_unreadable' },
+      { check: 'package_name', reason: 'package_not_installed' },
+      { check: 'version_code', reason: 'version_code_mismatch' },
+    ]),
+    [
+      '设备上的 versionName 与构建声明的版本不一致',
+      '读取不到安装包的版本信息（dumpsys 未返回 versionName/versionCode）',
+      '设备上没有安装该应用（包名与构建声明不符）',
+      '设备上的 versionCode 与已固定基准不一致',
+    ],
+  )
+  assert.deepEqual(describeIdentityBlocking([]), [])
+  // 未知原因码保留原文，不能吞掉后端给的信息。
+  assert.deepEqual(describeIdentityBlocking([{ check: 'x', reason: 'brand_new_reason' }]), [
+    'x：brand_new_reason',
+  ])
 })
 
 test('wizard carries only selected immutable image template pins', () => {
