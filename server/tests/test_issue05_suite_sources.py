@@ -284,7 +284,11 @@ def test_legacy_version_without_copy_is_marked_and_blocked(api_client, seed, sou
 
     # performance 声明式场景不需要代码副本（旧清单没有类型标记）
     allowed = check_readiness(
-        revision={**revision, "test_type": "performance"},
+        revision={
+            **revision,
+            "test_type": "performance",
+            "config": {"perf": {"duration_s": 60, "items": ["CPU"]}},
+        },
         platform="android",
         application_platform="android",
         suite_version={"manifest": {"schema_version": 1, "cases": []}},
