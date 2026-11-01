@@ -32,6 +32,9 @@ OpenCV 共存验证步骤。GLOSSARY"参考契约/绑定层"为术语依据。
 `ElementHandle`(click/get_text/input_text/get_attribute + 重校验)、
 `MobileConfig`、13 类错误(`mobile_auto.errors`)。
 
+`Target.index` 是**树遍历序**(uiautomator 层级顺序),不是视觉位置序;
+列表顺序与阅读顺序不一致时以层级顺序为准(实现见 `core/selectors.py`)。
+
 **契约外平台扩展面(2026-10-25,绑定层不映射)**:`adapter.device.*`
 提供坐标手势原语 `tap(x, y)` / `swipe(x0, y0, x1, y1, duration_s)` /
 `long_press(x, y, hold_s)`,可选 `source="auto"|"scrcpy"|"u2"` 钉死注入
@@ -108,6 +111,19 @@ pytest tests/contract -q          # 本地参考契约核对
 | OperationOutcomeUnknown | 已发送后取消 | 结果未知类(不得重试) |
 | SessionFaulted | 会话故障/关闭后 | 会话故障类 |
 
+**坐标基准(契约外观测,2026-10-26)**:失败证据 `meta.device.coordinate_spaces`
+记录最近一次注入前的通道/后端两组尺寸与刷新结果。键集以实际实现为准:
+
+- 必有:`channel`、`backend`、`refreshed`、`refreshable`、`consistent`、
+  `checked_at`(UTC 毫秒);
+- 可选:`refresh_error`(刷新失败时的异常类名)、`reason`(显式 u2 且无可用
+  视频通道时,说明为何未校验)。
+
+`channel` 为通道缓存尺寸,无法判定时为 `null`(如显式 `u2` 且未启动视频通道)。
+未发生注入(或确无基准可记)时 `coordinate_spaces` 为 `null`;不属于错误类型,
+绑定层无需映射,原样透传即可。注入前基准校验与刷新由本包内部完成(节流 1s,
+见 `docs/validation.md`),契约方法签名不变。
+
 ## 5. 契约版本记录
 
 | 日期 | 契约内容 | 依据 |
@@ -115,6 +131,8 @@ pytest tests/contract -q          # 本地参考契约核对
 | 2026-10-24 | 15 方法 + platform;13 类错误;六种 Locator;语义以 plan 5.2/5.3 为准 | 工单 01–11 交付 |
 | 2026-10-25 | `goto` 新增可选 `package`/`activity` 显式覆盖(缺省沿用配置,行为向后兼容);`activity` 必须与 `package` 同时给出 | 同一会话切换被启动 App 的需要 |
 | 2026-10-25 | 新增可选配置 `dialog_guard`(契约外行为,默认关闭):预算耗尽时按白名单清理一次系统弹窗,命中才重试一次 | MIUI 权限弹窗随机挡住锚点等待(见 §10) |
+| 2026-10-26 | 坐标基准生命周期(契约外):注入前校验缓存尺寸 vs 实时 `wm size` 并刷新(1s 节流);证据新增 `meta.device.coordinate_spaces` | 旋转/折叠后按旧基准点击(工单 04) |
+| 2026-10-26 | 契约外新增 `wait_gone`/`click_until_gone`(15 方法签名与语义不变;绑定层按需转发,见 §12) | 工单 05:消失等待原语 |
 
 内网接入完成后追加:真实 Port 枚举值 ↔ 本地 Locator 映射表、行为差异
 (如 marker 默认值)、绑定层版本号。
@@ -197,6 +215,92 @@ value = '{"packageName":"com.lbe.security.miui","text":"拒绝"}'
   不出现;守卫只作为不可预授权弹窗的兜底。
 
 回滚:删除 `dialog_guard` 配置即恢复原行为,无数据迁移。
+
+## 11. 动作流水(契约外观测,2026-10-26)
+
+每次公共调用一行 JSONL,作为 flake 定位、每步耗时归因与 viewer 回放的数据源。
+记录点在 `MobileAdapter` 公共方法与 `adapter.device` 手势面(装饰器),
+不在设备队列内部:一次 `wait_for` 只一行,含完整轮询耗时。
+
+- **落盘**:pytest 侧跟随 `--mobile-evidence`,与失败证据同源——
+  `<artifacts>/xdist-<worker>/actions.jsonl`,非 xdist 为
+  `<artifacts>/actions.jsonl`;viewer 侧始终写
+  `<artifacts>/viewer/<serial>/actions.jsonl`(按设备分层)。viewer 的 serial
+  目录名做清洗:只保留 `[0-9A-Za-z._-]`,其余字符替换为 `_`(含 `:` 的 TCP
+  serial 不能直接做目录名,如 `192.168.1.5:5555` → `192.168.1.5_5555`)。
+  目录不可写或写入失败时自动禁用并一次性告警,不改变操作结果。单文件上限
+  32 MiB,超限追加 `{"op":"journal","outcome":"truncated"}` 后停止写入。
+- **字段**:`ts`(UTC 毫秒)/`session`(会话 8 位随机 id)/`op`/
+  `duration_ms`/`outcome`(`ok`/`not_found`/`error`/`unknown`;`unknown` 仅用于
+  **已进入发送阶段**的取消——发送前取消记 `error` + `error_type="CancelledError"`)/
+  `error_type`(异常类名,不含消息)/`channel`(仅注入类操作,取注入后实际使用的
+  通道;读不到则省略,不写死)/`target`(只含 `by`/`value`/`index`/`confidence`/
+  `region`)/`coordinate_basis`(注入前基准,见 §4)。
+- **操作与专属字段**:
+  - 契约方法:`wait_for`/`wait_gone`/`click_until_gone` 预算耗尽成功返回
+    `False` 时记 `outcome="not_found"`;
+  - `adapter.device`: `device.tap`/`device.long_press` 记 `point` + `normalized`,
+    `device.swipe` 记 `from`/`to` + `normalized`(坐标面均为设备像素,
+    `normalized=false`);
+  - viewer 注入:`viewer.tap`(`point`/`normalized`)、`viewer.swipe`
+    (`from`/`to`/`normalized`)、`viewer.press_key`(`key`)、`viewer.wake`
+    (无专属字段),均写 `coordinate_basis`(tap/swipe)与实际 `channel`。
+- **不记 `channel` 的注入路径**:原生 `click`/`press_key` 等契约方法经 u2 后端
+  直连(不经 `inject_gesture`),没有可观测的通道切换;这些行不带 `channel`
+  字段——这是既定取舍:链路确实没经过视频通道时,不臆造 "u2"。
+- **脱敏**:`input_text` 只记 `text_length`,不记原文;`get_text` 不记返回值;
+  `goto` 只记 `scheme` 或 `"cold_start"`;读取类不带 `channel`。
+- **消费者**:失败证据 `meta.json` 的 `journal_summary`(步数/总耗时/首个失败步);
+  viewer 证据面板「动作流水」页签(端点
+  `/api/v1/evidence/{id}/journal`,按证据同 worker 目录反查,不走
+  `/files/{name}` 白名单)。
+- **前提**:动作流水假设设备访问都经 `MobileAdapter`;绑定层直接调用
+  `DeviceSession`/`DeviceBackend` 会漏记。绑定层应委托适配器公共方法。
+- **日志器命名约定**:按功能命名,`mobile_auto.dialog_guard`(弹窗守卫)与
+  `mobile_auto.journal`(动作流水)是仅有的两个;只经模块级 logger 输出
+  `warning`/`info`,不自建 handler,观测失败不得影响操作结果。
+
+回滚:删除装饰器与 `evidence/journal.py` 即可,无数据迁移。
+
+## 12. 契约外便捷方法(建议绑定层转发,2026-10-26)
+
+以下方法**不在 15 方法契约内**(签名与语义均未改动),但属适配器公共面。
+内网要在线用例里用上,绑定层必须显式加转发(每个方法一行委托);不加转发
+则内网 Port 上根本看不到这些方法,契约核对也不受影响。
+
+| 方法 | 签名 | 语义 |
+| :--- | :--- | :--- |
+| `adapter.device.tap` | `(x, y, *, source="auto")` | 坐标点击;返回实际注入通道 |
+| `adapter.device.swipe` | `(x0, y0, x1, y1, duration_s=0.3, *, source="auto")` | 坐标滑动;返回通道 |
+| `adapter.device.long_press` | `(x, y, hold_s=0.8, *, source="auto")` | 坐标长按;返回通道 |
+| `adapter.wait_gone` | `(target, timeout=None) -> bool` | 轮询到目标**不可见**即 True;预算耗尽 False |
+| `adapter.click_until_gone` | `(target, timeout=None, interval=0.5) -> bool` | 反复点击到目标消失;预算耗尽 False |
+
+```python
+# 绑定层转发示例(内网仓库;不改 15 方法契约)
+async def wait_gone(self, target, timeout=None):
+    return await self._adapter.wait_gone(target, timeout=timeout)
+
+async def click_until_gone(self, target, timeout=None, interval=0.5):
+    return await self._adapter.click_until_gone(
+        target, timeout=timeout, interval=interval
+    )
+```
+
+- `wait_gone` 与 `wait_for` 对称:默认 `wait_timeout`、按 `poll_interval`
+  轮询,`timeout=0` 只查询一次,负数/非有限值报 `ValueError`,设备错误原样
+  抛出;预算耗尽时动作流水记 `outcome="not_found"`。不触发弹窗守卫。
+- `click_until_gone` **仅用于点击后自身消失的控件**(弹窗关闭、提示确认)。
+  点击会跳转页面时目标不再出现,会连点到预算耗尽。原生目标每轮一个队列
+  任务(查找→唯一定位→取消检查点→点击),`AmbiguousTarget` 直接抛不猜;
+  IMAGE 目标每轮一次完整点击事务,不做"先查询再事务"的双重采集。轮间
+  `sleep(min(interval, 剩余预算))`,`interval` 必须为有限正数;预算耗尽
+  同样在动作流水记 `outcome="not_found"`。
+- **决策**:不提供 `raise_on_timeout` 开关;需要断言消失就写
+  `assert await adapter.wait_gone(...)`——`False` 已是明确返回值,再加开关
+  只会分裂两条失败语义。
+- `tests/contract/test_contract.py` 的"契约面封闭"断言显式白名单了这两个
+  方法(`EXTRA_PUBLIC_METHODS`);新增同类方法须同步更新白名单与本节。
 
 ## 并行执行与 CI 投屏接入(P2,2026-10-25)
 

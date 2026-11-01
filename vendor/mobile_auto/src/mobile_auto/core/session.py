@@ -18,8 +18,10 @@ from __future__ import annotations
 import enum
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import UTC, datetime
 from typing import TypeVar
 
 from ..config import MobileConfig
@@ -36,6 +38,66 @@ T = TypeVar("T")
 _CLOSE_DRAIN_TIMEOUT_SECONDS = 10.0
 _SCRCPY_FAIL_LIMIT = 3  # 连续失败次数达到后降级 u2(plan P1 工单 03)
 _SCRCPY_DEGRADE_SECONDS = 60.0  # 降级持续时长,到期再试一次以探测恢复
+# 坐标基准校验间隔:注入前对比缓存尺寸与实时 wm size 并刷新的最小周期
+_COORDINATE_BASIS_INTERVAL_SECONDS = 1.0
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _safe_screen_size(source) -> tuple[int, int] | None:
+    """读取尺寸;通道/后端不可用时返回 None(保鲜不得新增注入失败点)。"""
+    getter = getattr(source, "screen_size", None)
+    if getter is None:
+        return None
+    try:
+        width, height = getter()
+    except Exception:
+        return None
+    return int(width), int(height)
+
+
+def _can_refresh(channel) -> bool:
+    """通道是否真的能重探基准;未声明时以是否实现刷新方法为准。"""
+    flag = getattr(channel, "can_refresh_screen_size", None)
+    if flag is not None:
+        return bool(flag)
+    return callable(getattr(channel, "refresh_screen_size", None))
+
+
+def _same_aspect(first: tuple[int, int], second: tuple[int, int]) -> bool:
+    """宽高比一致(容忍 1% 取整误差):视频缩放后的同一显示区。"""
+    aw, ah = first
+    bw, bh = second
+    if not ah or not bh:
+        return False
+    left = aw * bh
+    right = bw * ah
+    return abs(left - right) <= 0.01 * max(left, right, 1)
+
+
+def _basis_matches(
+    channel_size: tuple[int, int],
+    backend_size: tuple[int, int],
+    refreshable: bool,
+) -> bool:
+    """通道基准是否可用于本次注入。
+
+    可刷新通道要求数值一致(wm size 同源);不可刷新通道允许视频缩放,
+    只要求宽高比一致。
+    """
+    if channel_size == backend_size:
+        return True
+    return not refreshable and _same_aspect(channel_size, backend_size)
+
+
+def _copy_basis(basis: dict) -> dict:
+    copied = dict(basis)
+    for key in ("channel", "backend"):
+        value = copied.get(key)
+        copied[key] = list(value) if value else None
+    return copied
 
 
 class SessionState(enum.StrEnum):
@@ -125,6 +187,9 @@ class DeviceSession:
         self._serial: str | None = None
         self._backend: DeviceBackend | None = None
         self._lease = None
+        # 设备密度(工单 02):会话内缓存,`wm density` 为权威来源
+        self._density: int | None = None
+        self._density_loaded = False
         self._pending = 0  # 已提交未完成(排队+运行)的操作数
         self._op_states: dict[Future, _OpState] = {}
         self._outcomes: dict[Future, str] = {}  # 完成操作的固化结局
@@ -138,6 +203,19 @@ class DeviceSession:
         # 只读快照对外暴露,写入用独立锁(读取方来自 pytest 线程)
         self._dialog_guard_lock = threading.Lock()
         self._dialog_guard_stats = {"attempts": 0, "dismissed": [], "last_at": None}
+        # 动作流水(工单 01):会话标识、注入通道快照与 Journal 句柄。
+        # 适配器装饰器每次公共调用前 begin_operation() 清空通道,调用后读取,
+        # 避免把上一步的通道记到这一步(读取方来自 pytest/事件循环线程)。
+        self._session_id = uuid.uuid4().hex[:8]
+        self._injection_lock = threading.Lock()
+        self._last_injection_channel: str | None = None
+        self._last_coordinate_basis: dict | None = None
+        self._last_cancel_after_send: bool | None = None
+        self._journal = None
+        # 坐标基准保鲜(工单 04):缓存按通道对象失效,仅在设备队列线程读写
+        self._basis_channel = None
+        self._basis_checked_at = 0.0
+        self._basis_cached: dict | None = None
 
     @property
     def config(self) -> MobileConfig:
@@ -150,6 +228,37 @@ class DeviceSession:
     @property
     def serial(self) -> str | None:
         return self._serial
+
+    # ── 设备密度(工单 02)──────────────────────────────────────
+
+    def density(self, backend: DeviceBackend) -> int | None:
+        """取会话缓存的设备密度;尚未读取时读一次 `wm density`。
+
+        必须在设备队列线程内调用(会访问后端)。读取失败返回 None 且不
+        缓存,下一次调用重试。会话内缓存的依据:一次匹配事务内密度不会
+        变化;设备密度被 `wm density` 覆盖后由调用方显式 refresh_density。
+        """
+        with self._lock:
+            if self._density_loaded:
+                return self._density
+        return self.refresh_density(backend)
+
+    def refresh_density(self, backend: DeviceBackend) -> int | None:
+        """重读 `wm density` 并刷新缓存;viewer 每次采集都调用(真实调用点)。
+
+        失败返回 None 并保留上一次成功值(不清空已知密度);本次匹配由
+        调用方退化为旧路径。清理时机:会话关闭后缓存随会话丢弃。
+        """
+        try:
+            value = backend.screen_density()
+        except Exception:  # 密度是可选加速信息:失败不报错,退化为旧行为
+            return None
+        if value is None:
+            return None
+        with self._lock:
+            self._density = value
+            self._density_loaded = True
+        return value
 
     @property
     def dialog_guard_stats(self) -> dict:
@@ -168,6 +277,120 @@ class DeviceSession:
             self._dialog_guard_stats["attempts"] += 1
             self._dialog_guard_stats["dismissed"].extend(dismissed)
             self._dialog_guard_stats["last_at"] = time.time()
+
+    @property
+    def session_id(self) -> str:
+        """构造时生成的 8 位随机标识,动作流水按它归属同一次会话。"""
+        return self._session_id
+
+    @property
+    def journal(self):
+        """动作流水句柄;未挂接(未开启证据)时为 None,适配器零开销。"""
+        return self._journal
+
+    def set_journal(self, journal) -> None:
+        """挂接动作流水;生命周期归调用方(关闭由挂接方负责)。"""
+        self._journal = journal
+
+    def begin_operation(self) -> None:
+        """公共操作开始:清空上一次的注入通道、坐标基准与取消阶段快照。"""
+        with self._injection_lock:
+            self._last_injection_channel = None
+            self._last_coordinate_basis = None
+            self._last_cancel_after_send = None
+
+    @property
+    def last_cancel_after_send(self) -> bool | None:
+        """最近一次等待方取消是否发生在发送阶段;未登记取消为 None。"""
+        with self._injection_lock:
+            return self._last_cancel_after_send
+
+    @property
+    def last_injection_channel(self) -> str | None:
+        """最近一次成功后实际使用的注入通道("scrcpy"/"u2");加锁只读快照。"""
+        with self._injection_lock:
+            return self._last_injection_channel
+
+    @property
+    def last_coordinate_basis(self) -> dict | None:
+        """最近一次注入前的坐标基准快照;未注入过(或 u2 路径)为 None。"""
+        with self._injection_lock:
+            basis = self._last_coordinate_basis
+        return None if basis is None else _copy_basis(basis)
+
+    def _note_injection_channel(self, channel: str) -> str:
+        with self._injection_lock:
+            self._last_injection_channel = channel
+        return channel
+
+    def _note_coordinate_basis(self, basis: dict) -> None:
+        with self._injection_lock:
+            self._last_coordinate_basis = basis
+
+    def ensure_coordinate_basis(self, backend, channel) -> dict:
+        """注入前校验并保鲜坐标基准;必须在设备队列线程内调用。
+
+        比较通道缓存的屏幕尺寸与后端实时尺寸(u2 ``window_size`` 即
+        ``wm size``)。不一致且通道可刷新时调用 ``refresh_screen_size()``
+        并重读,返回本次实际使用的基准;同会话同通道对象 1 秒内最多
+        校验一次(含一次 ``wm size`` 往返),通道对象变化(监督器重建)
+        立即重校验。
+
+        上游通道(``stream_backend="upstream"``)的 ``refresh_screen_size``
+        是空实现,且 ``screen_size`` 来自视频会话元包(可能被 max_size
+        缩放、旋转时由泵线程自动更新)。因此对不可刷新通道只比较宽高比:
+        比例一致视为同一显示区的视频缩放;比例不一致如实记录
+        ``refreshed=False, refreshable=False, consistent=False``,不调用
+        空实现伪装刷新成功,也不改道注入通道。
+
+        只观测与保鲜:通道/后端读尺寸失败分别记 None,不抛出新的失败;
+        刷新失败在基准里记 ``refresh_error`` 后继续注入。
+        """
+        now = time.monotonic()
+        cached = self._basis_cached
+        if (
+            cached is not None
+            and self._basis_channel is channel
+            and now - self._basis_checked_at < _COORDINATE_BASIS_INTERVAL_SECONDS
+        ):
+            self._note_coordinate_basis(cached)
+            return _copy_basis(cached)
+
+        channel_size = _safe_screen_size(channel)
+        backend_size = _safe_screen_size(backend)
+        refreshable = _can_refresh(channel)
+        refreshed = False
+        refresh_error = None
+        consistent: bool | None = None
+        if channel_size is not None and backend_size is not None:
+            consistent = _basis_matches(channel_size, backend_size, refreshable)
+            if not consistent and refreshable:
+                try:
+                    channel.refresh_screen_size()
+                except Exception as exc:  # 刷新失败不阻断注入,基准如实降级
+                    refresh_error = type(exc).__name__
+                else:
+                    new_size = _safe_screen_size(channel)
+                    if new_size is not None:
+                        refreshed = new_size != channel_size
+                        channel_size = new_size
+                consistent = _basis_matches(channel_size, backend_size, refreshable)
+
+        basis = {
+            "channel": list(channel_size) if channel_size else None,
+            "backend": list(backend_size) if backend_size else None,
+            "refreshed": refreshed,
+            "refreshable": refreshable,
+            "consistent": consistent,
+            "checked_at": _utc_now(),
+        }
+        if refresh_error is not None:
+            basis["refresh_error"] = refresh_error
+        self._basis_channel = channel
+        self._basis_checked_at = now
+        self._basis_cached = basis
+        self._note_coordinate_basis(basis)
+        return _copy_basis(basis)
 
     # ── 生命周期 ─────────────────────────────────────────────
 
@@ -295,6 +518,30 @@ class DeviceSession:
             return None
         return supervisor.peek_healthy()
 
+    def _record_u2_basis(self, backend) -> None:
+        """显式 u2 注入的坐标基准观测(工单 04 §04a)。
+
+        通道已存在时与 scrcpy 路径同样校验尺寸并记录基准;没有可用通道时
+        **不为校验而启动通道**,如实记 ``channel=null``/``refreshable=false``/
+        ``consistent=false`` 与原因。注入通道本身绝不因此改道。
+        """
+        channel = self.healthy_channel()
+        if channel is not None:
+            self.ensure_coordinate_basis(backend, channel)
+            return
+        backend_size = _safe_screen_size(backend)
+        self._note_coordinate_basis(
+            {
+                "channel": None,
+                "backend": list(backend_size) if backend_size else None,
+                "refreshed": False,
+                "refreshable": False,
+                "consistent": False,
+                "checked_at": _utc_now(),
+                "reason": "显式 u2 注入;无可用视频通道,不启动通道校验基准",
+            }
+        )
+
     # ── 注入双通道(scroll/图像点击发送/press_key 与 adapter.device 共用)──
 
     def inject_gesture(self, backend, source, scrcpy_gesture, u2_gesture) -> str:
@@ -308,16 +555,26 @@ class DeviceSession:
         手势安全由手势闭包保证(device_ops.gesture 实现):首写(DOWN)
         前失败报 _CleanFallback → 整体回退 u2;DOWN 后失败闭包内已抬指
         收尾,此处如实传播不重放(避免双注入)。
+
+        坐标基准:实际走 scrcpy 通道(含显式 ``source="scrcpy"``)时,首写
+        之前调用 :meth:`ensure_coordinate_basis` 校验/刷新并记录基准;显式
+        scrcpy 只校验不改道。显式 ``source="u2"``:已有可用通道时同样校验并
+        记录;没有通道时只记录 ``channel=null``/``refreshable=false`` 与原因,
+        不为校验而启动通道,也绝不改道。降级窗口内直接走 u2 的路径不探测
+        通道(降级原因即通道不可用)。
         """
         from .device_ops import _CleanFallback
 
         resolved = source if source != "auto" else self._config.injection_source
         if resolved == "u2":
+            self._record_u2_basis(backend)
+            self.send_checkpoint()  # 首写前最后取消检查(与契约注入同语义)
             u2_gesture()
-            return "u2"
+            return self._note_injection_channel("u2")
         if resolved == "auto" and self._scrcpy_degraded_until > time.monotonic():
+            self.send_checkpoint()
             u2_gesture()
-            return "u2"
+            return self._note_injection_channel("u2")
         try:
             channel = self.get_or_start_channel()
         except Exception:
@@ -325,20 +582,23 @@ class DeviceSession:
             if resolved == "scrcpy":
                 raise
             u2_gesture()
-            return "u2"
+            return self._note_injection_channel("u2")
+        self.ensure_coordinate_basis(backend, channel)
+        self.send_checkpoint()  # 首写(DOWN)前最后取消检查
         try:
             scrcpy_gesture(channel)
         except _CleanFallback as failure:
             self._note_channel_failure()
             if resolved == "scrcpy":
                 raise failure.original from None
+            self.send_checkpoint()  # DOWN 未发出,回退 u2 前再检查一次
             u2_gesture()  # DOWN 未发出:整体回退
-            return "u2"
+            return self._note_injection_channel("u2")
         except Exception:
             self._note_channel_failure()
             raise  # DOWN 后失败:手势已抬指收尾,不重放
         self._note_channel_success()
-        return "scrcpy"
+        return self._note_injection_channel("scrcpy")
 
     def inject_tap(self, backend, x: int, y: int) -> None:
         """坐标单击(图像点击事务的发送路径);通道按配置 injection_source。"""
@@ -370,6 +630,7 @@ class DeviceSession:
         from .device_ops import press_gesture
 
         if name not in ("back", "home"):
+            self.send_checkpoint()  # 直接 u2 按键同样在发送前检查取消
             backend.press_key(name)
             return
         self.inject_gesture(
@@ -492,9 +753,11 @@ class DeviceSession:
                 return "finished"  # 已完成,无需记录
             op_state.cancelled = True
         future.cancel()  # 未开始则取消;已开始无效果
+        with self._injection_lock:
+            self._last_cancel_after_send = op_state.entered_send
         if op_state.entered_send:
             return "unknown"  # 已进入发送阶段:设备侧结果未知
-        return "cancelled-before-send" if future.cancelled() else "unknown"
+        return "cancelled-before-send"  # 未进入发送:检查点保证不会发送
 
     def operation_outcome(self, future: Future) -> str:
         """查询操作结局:cancelled-queued / cancelled-before-send / unknown /

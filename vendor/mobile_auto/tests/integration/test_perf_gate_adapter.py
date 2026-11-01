@@ -7,11 +7,14 @@
 """
 
 import pytest
-from mobile_perf.gate import GateBusyError
 
-from mobile_auto._perf_gate import PerfDeviceGate
-from mobile_auto.core.lease import DeviceLease
-from mobile_auto.errors import DeviceBusy
+pytest.importorskip("mobile_perf")  # 未安装 mobile_perf:整模块跳过,不阻断收集
+
+from mobile_perf.gate import GateBusyError  # noqa: E402
+
+from mobile_auto._perf_gate import PerfDeviceGate  # noqa: E402
+from mobile_auto.core.lease import DeviceLease  # noqa: E402
+from mobile_auto.errors import DeviceBusy  # noqa: E402
 
 
 def test_borrow_acquires_and_releases_short_transaction(tmp_path):
