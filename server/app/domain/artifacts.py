@@ -313,7 +313,6 @@ def effective_availability(
     row: dict[str, Any],
     *,
     artifacts_root: Path | str | None = None,
-    now: datetime | None = None,
 ) -> tuple[str, str | None]:
     """计算证据的**当前**可用性（三态）与不可用原因。
 
@@ -337,10 +336,9 @@ def effective_availability(
 
     expires_at = row.get("expires_at")
     if isinstance(expires_at, datetime):
-        moment = now or datetime.now(UTC)
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=UTC)
-        if moment >= expires_at:
+        if datetime.now(UTC) >= expires_at:
             return "expired", "retention_expired"
 
     storage_key = str(row.get("storage_key") or "")

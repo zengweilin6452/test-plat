@@ -903,6 +903,10 @@ async def cancel_run(run_id: str, session: AsyncSession = Depends(get_session)) 
             outcome=None,
             reason="cancel_requested",
             project_id=project_id,
+            # 取消前 runner 可能已经写出 report.json / 采集窗口：不登记产物，
+            # 报告页就会把"采集确实发生过"整块丢掉（与 spawn._finalize_after_exit
+            # 同一口径：只有 errored 才不认这些产物）。
+            artifacts_dir=spawn_mod.artifacts_dir_for(str(run_id)),
             release_lease_reason="cancel_requested",
             extra_event={"cancel_requested_by": "web", "runner_terminated": killed},
             actor="web",

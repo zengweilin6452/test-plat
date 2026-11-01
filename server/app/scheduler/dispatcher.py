@@ -563,6 +563,15 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
 
     # 事务已提交：此时镜像里一定有"租约 + dispatching"。spawn 放在事务外，
     # 因为拉起子进程是不可回滚的副作用，绝不能让它发生在一个还会回滚的事务里。
+    #
+    # 提交到 spawn 之间是一个真实窗口（身份复核/模板核对都要时间）：取消可能
+    # 正好在这段时间被受理，此时租约/终态由取消处理路径收敛，这里只负责不
+    # 拉起一个已经没人要的 runner。不复查的话会 spawn 出一个"幽灵进程"，
+    # taskkill 也未必追得上。
+    if await _cancelled_after_dispatch(rid):
+        logger.info("run %s 在派发窗口内被取消，不再 spawn", rid)
+        return DispatchOutcome(run_id=rid, ok=False, reason="cancel_requested")
+
     try:
         pid = await dispatch_runner.spawn(
             run_id=rid,
@@ -578,6 +587,26 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
     return DispatchOutcome(
         run_id=rid, ok=True, reason="spawned", lease=lease_details
     )
+
+
+async def _cancelled_after_dispatch(run_id: str) -> bool:
+    """派发事务已提交后复查：取消已受理或状态已不是 dispatching 时不要 spawn。
+
+    只读复查，不写任何终态/租约：queued->cancelled 与 dispatching->cancelled
+    都是 cancel 处理路径的职责，派发侧再写一次会和它抢同一行（并且把"用户取消"
+    写成 errored）。
+    """
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        row = (
+            await session.execute(
+                text("SELECT state, cancel_requested_at FROM test_runs WHERE id = :id"),
+                {"id": str(run_id)},
+            )
+        ).mappings().first()
+    if row is None:
+        return True
+    return row["cancel_requested_at"] is not None or str(row["state"]) != runs_mod.STATE_DISPATCHING
 
 
 async def mark_spawn_failed(

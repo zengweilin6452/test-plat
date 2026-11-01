@@ -487,10 +487,14 @@ def running_run_ids() -> list[str]:
 
 
 async def terminate_run_process(run_id: str, *, force: bool = True) -> bool:
-    """kill runner 进程树。返回是否真的杀了一个活进程。
+    """kill runner 进程树。返回是否**确实**杀掉了一个活进程。
 
     Windows 上必须 taskkill /T /F：runner 会再起 pytest / adb，只 TERMINATE 父
     进程会留下孤儿继续占设备（development-plan.md §10.1）。
+
+    返回值进的是 cancel 事件的 `runner_terminated` 与取消响应：不能无条件写
+    True。taskkill 返回非 0（进程已消失 / 无权限）且随后也没观测到退出时，
+    如实返回 False —— 否则"已终止"是个谎，排查会被带偏。
     """
     process = get_process(run_id)
     pid = process.pid if process is not None else None
@@ -499,29 +503,36 @@ async def terminate_run_process(run_id: str, *, force: bool = True) -> bool:
         pid = await _pid_from_events(run_id)
     if pid is None:
         return False
+    killed = False
     if os.name == "nt":
         try:
-            await asyncio.to_thread(
+            completed = await asyncio.to_thread(
                 subprocess.run, ["taskkill", "/T", "/F", "/PID", str(pid)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10,
             )
+            killed = getattr(completed, "returncode", 1) == 0
         except Exception:  # noqa: BLE001
             logger.exception("taskkill %s 失败", pid)
     else:
         try:
             os.killpg(os.getpgid(pid), signal.SIGKILL)
+            killed = True
         except Exception:  # noqa: BLE001
             try:
                 process.kill()
+                killed = True
             except Exception:  # noqa: BLE001
-                pass
+                killed = False
     if process is not None:
+        # 进程退出是比 taskkill 退出码更硬的证据（例如 taskkill 与进程退出的
+        # 竞态：taskkill 报 "not found" 时进程恰好已经死了）。
         try:
             await asyncio.wait_for(process.wait(), 10)
+            killed = True
         except asyncio.TimeoutError:
             logger.warning("runner %s 未在 10s 内退出", pid)
     _PROCESSES.pop(run_id, None)
-    return True
+    return killed
 
 
 async def wait_for_exit(run_id: str, timeout: float = EXIT_TIMEOUT_SECONDS) -> int | None:
