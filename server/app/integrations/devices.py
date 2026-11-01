@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -95,6 +96,12 @@ def _run(adb: Path, args: list[str], *, timeout_s: float) -> str:
     if not adb.is_file():
         raise AdbUnavailableError(str(adb))
     try:
+        env = None
+        if sys.platform == 'win32':
+            # ADB writes adb.log under TEMP when starting its server.
+            temp_dir = settings.repo_root / '.runtime' / 'adb-tmp'
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            env = {**os.environ, 'TEMP': str(temp_dir), 'TMP': str(temp_dir)}
         completed = subprocess.run(  # noqa: S603 - 参数固定，无用户可控 shell
             [str(adb), *args],
             capture_output=True,
@@ -102,6 +109,7 @@ def _run(adb: Path, args: list[str], *, timeout_s: float) -> str:
             encoding="utf-8",
             errors="replace",
             timeout=timeout_s,
+            env=env,
         )
     except subprocess.TimeoutExpired as exc:
         raise AdbProbeError(f"adb 超时（>{timeout_s}s）: {' '.join(args)}") from exc
