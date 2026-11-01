@@ -92,6 +92,14 @@ CROP_VERIFICATION_TTL_SECONDS = 120.0
 #: 单进程 uvicorn 下与 _READY_PORTS 同口径：多 worker 部署要换成共享存储。
 _CROP_VERIFICATIONS: dict[str, dict[str, Any]] = {}
 
+#: 直接操控：平台代浏览器持有 vendor 控制权 token；浏览器永远拿不到 token。
+#: 与 _READY_PORTS/_CROP_VERIFICATIONS 同口径，多 worker 部署需换共享存储。
+_CONTROL_TOKENS: dict[str, str] = {}
+#: 每会话最多一条手势 WS（vendor 侧每设备同时只允许一个手势）。
+_GESTURE_CLIENTS: dict[str, int] = {}
+#: vendor /input/key 允许的按键；与 mobile_auto 有限键表一致。
+_CONTROL_KEYS = frozenset({"back", "home", "enter", "search", "delete", "recent"})
+
 #: vendor viewer 的快照 id 是 `uuid4().hex[:16]`
 #: （vendor/mobile_auto/src/mobile_auto/viewer/store.py:43），不是带连字符的 UUID。
 #: 客户端传来的 snapshot_id 会被原样拼进上游 path，所以只放行这个 id 空间内的
@@ -245,6 +253,7 @@ async def _forward(
     path: str,
     *,
     json_body: Any = None,
+    headers: dict[str, str] | None = None,
 ) -> Response:
     """把请求原样转发到 127.0.0.1:<viewer_port>。上游不可达 -> 503。"""
     port = _READY_PORTS.get(str(session_id))
@@ -257,7 +266,7 @@ async def _forward(
     url = f"http://127.0.0.1:{port}{path}"
     try:
         async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
-            upstream = await client.request(method, url, json=json_body)
+            upstream = await client.request(method, url, json=json_body, headers=headers)
     except (httpx.HTTPError, OSError) as exc:
         raise ApiError(
             503,
@@ -265,11 +274,187 @@ async def _forward(
             f"viewer 上游不可达：{exc.__class__.__name__}",
             {"session_id": str(session_id)},
         ) from exc
-    headers: dict[str, str] = {}
+    out_headers: dict[str, str] = {}
     ctype = upstream.headers.get("content-type")
     if ctype:
-        headers["content-type"] = ctype
-    return Response(content=upstream.content, status_code=upstream.status_code, headers=headers)
+        out_headers["content-type"] = ctype
+    return Response(content=upstream.content, status_code=upstream.status_code, headers=out_headers)
+
+
+# --------------------------------------------------------------------------- #
+# 直接操控：平台代持 vendor 控制权（token 不出服务端）+ 手势 WS 透传
+# --------------------------------------------------------------------------- #
+def _viewer_device_path(path: str, serial: str) -> str:
+    from urllib.parse import quote
+
+    return f"{path}?device={quote(serial, safe='')}"
+
+
+def _json_body(payload: dict[str, Any]) -> Response:
+    return Response(
+        json.dumps(payload, ensure_ascii=False),
+        media_type="application/json",
+    )
+
+
+def _control_view(response: Response) -> dict[str, Any]:
+    try:
+        data = json.loads(response.body)
+    except (TypeError, ValueError):
+        data = {}
+    ttl = data.get("ttl_seconds") if isinstance(data, dict) else None
+    return {
+        "enabled": True,
+        "ttl_seconds": int(ttl) if isinstance(ttl, (int, float)) else 5,
+        "note": data.get("note") if isinstance(data, dict) else None,
+    }
+
+
+async def _release_control(session_id: str) -> None:
+    """尽力释放 vendor 控制权并清掉本地 token；会话关闭/清理共用。"""
+    sid = str(session_id)
+    token = _CONTROL_TOKENS.pop(sid, None)
+    _GESTURE_CLIENTS.pop(sid, None)
+    if not token:
+        return
+    with contextlib.suppress(Exception):
+        await _forward(
+            sid,
+            "POST",
+            "/api/v1/control",
+            headers={"X-Viewer-Control": token},
+            json_body={"enabled": False},
+        )
+
+
+def _control_token_or_409(session_id: str) -> str:
+    token = _CONTROL_TOKENS.get(str(session_id))
+    if not token:
+        raise conflict(
+            "control_not_enabled",
+            "尚未启用直接操控：先 POST /debug-sessions/{id}/control 领取控制权",
+            {"session_id": str(session_id)},
+        )
+    return token
+
+
+@router.post("/debug-sessions/{session_id}/control")
+async def control_debug_session(
+    session_id: str,
+    request: Request,
+    _client: str = Depends(require_client_header),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """领取/释放真机控制权；token 只存服务端，响应里永不返回。"""
+    row = await _active_row(session, session_id)
+    sid = str(session_id)
+    body = await request.json() if await request.body() else {}
+    enabled = bool(body.get("enabled"))
+    serial = str(row["resource_key"])
+    path = _viewer_device_path("/api/v1/control", serial)
+
+    if not enabled:
+        await _release_control(sid)
+        return _json_body({"enabled": False})
+
+    token = _CONTROL_TOKENS.get(sid)
+    if token:
+        refreshed = await _forward(
+            sid,
+            "POST",
+            path,
+            headers={"X-Viewer-Control": token},
+            json_body={"enabled": True},
+        )
+        if refreshed.status_code < 300:
+            return _json_body(_control_view(refreshed))
+        if refreshed.status_code not in (400, 403):
+            return refreshed
+        # token 已被 vendor 撤掉（TTL/重启）：丢掉本地凭据，按首次领取处理。
+        _CONTROL_TOKENS.pop(sid, None)
+
+    claimed = await _forward(sid, "POST", path, json_body={"enabled": True})
+    if claimed.status_code >= 300:
+        return claimed
+    data = json.loads(claimed.body) if claimed.body else {}
+    new_token = data.get("token") if isinstance(data, dict) else None
+    if not isinstance(new_token, str) or not new_token:
+        raise ApiError(
+            502,
+            "viewer_bad_response",
+            "vendor viewer 未返回控制权凭据",
+            {"session_id": sid},
+        )
+    _CONTROL_TOKENS[sid] = new_token
+    return _json_body(_control_view(claimed))
+
+
+@router.post("/debug-sessions/{session_id}/control/heartbeat")
+async def heartbeat_debug_control(
+    session_id: str,
+    _client: str = Depends(require_client_header),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """续期控制权；vendor 说失效就丢 token 并明确返回 control_expired。"""
+    row = await _active_row(session, session_id)
+    sid = str(session_id)
+    token = _control_token_or_409(sid)
+    response = await _forward(
+        sid,
+        "POST",
+        _viewer_device_path("/api/v1/control/heartbeat", str(row["resource_key"])),
+        headers={"X-Viewer-Control": token},
+        json_body={},
+    )
+    if response.status_code in (400, 403):
+        _CONTROL_TOKENS.pop(sid, None)
+        raise conflict(
+            "control_expired",
+            "直接操控控制权已失效，请重新启用",
+            {"session_id": sid},
+        )
+    if response.status_code >= 300:
+        return response
+    return _json_body(_control_view(response))
+
+
+@router.post("/debug-sessions/{session_id}/input/key")
+async def debug_input_key(
+    session_id: str,
+    request: Request,
+    _client: str = Depends(require_client_header),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """直接操控的按键（back/home 等）；必须持有控制权。"""
+    row = await _active_row(session, session_id)
+    sid = str(session_id)
+    token = _control_token_or_409(sid)
+    body = await request.json() if await request.body() else {}
+    name = body.get("name") if isinstance(body, dict) else None
+    if not isinstance(name, str) or name not in _CONTROL_KEYS:
+        raise validation_error([f"name 只支持 {', '.join(sorted(_CONTROL_KEYS))}"])
+    response = await _forward(
+        sid,
+        "POST",
+        _viewer_device_path("/api/v1/input/key", str(row["resource_key"])),
+        headers={"X-Viewer-Control": token},
+        json_body={"name": name},
+    )
+    expired = response.status_code == 403
+    if response.status_code == 400:
+        try:
+            detail = json.loads(response.body)
+        except (TypeError, ValueError):
+            detail = {}
+        expired = isinstance(detail, dict) and detail.get("code") == "control-disabled"
+    if expired:
+        _CONTROL_TOKENS.pop(sid, None)
+        raise conflict(
+            "control_expired",
+            "直接操控控制权已失效，请重新启用",
+            {"session_id": sid},
+        )
+    return response
 
 
 def register_viewer_port(session_id: str, port: int) -> None:
@@ -459,6 +644,8 @@ async def _close_session(session_id: str, *, reason: str) -> dict[str, Any] | No
     from ..db import get_sessionmaker
 
     _drop_crop_verifications(str(session_id))
+    # 控制权先尽力还给 vendor：token 在本地也一并清掉，token 不随会话残留。
+    await _release_control(str(session_id))
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session:
         async with session.begin():
@@ -985,6 +1172,111 @@ async def debug_socket(websocket: WebSocket, session_id: str) -> None:
         if upstream_ws is not None:
             with contextlib.suppress(Exception):
                 await upstream_ws.close()
+        with contextlib.suppress(Exception):
+            await websocket.close(code=1000)
+
+
+@router.websocket("/ws/debug/{session_id}/gesture")
+async def debug_gesture_socket(websocket: WebSocket, session_id: str) -> None:
+    """直接操控手势透传：浏览器 <-> vendor /api/v1/input/gesture。
+
+    平台先替浏览器把 token hello 发给 vendor（vendor 要求严格 Origin），
+    之后双向透传 start/move/end；每会话最多一条手势连接。
+    """
+    import websockets
+
+    from ..db import get_sessionmaker
+
+    with contextlib.suppress(Exception):
+        await websocket.accept()
+    sid = str(session_id)
+    token = _CONTROL_TOKENS.get(sid)
+    if not token:
+        with contextlib.suppress(Exception):
+            await websocket.close(code=4403)
+        return
+
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT ds.state, er.resource_key
+                      FROM debug_sessions ds
+                      JOIN execution_resources er
+                        ON er.project_id = ds.project_id AND er.id = ds.resource_id
+                     WHERE ds.id = CAST(:sid AS uuid)
+                    """
+                ),
+                {"sid": sid},
+            )
+        ).mappings().first()
+        await session.rollback()
+    if row is None:
+        with contextlib.suppress(Exception):
+            await websocket.close(code=4404)
+        return
+    port = _READY_PORTS.get(sid)
+    if row["state"] != "active" or port is None:
+        with contextlib.suppress(Exception):
+            await websocket.close(code=4403)
+        return
+    if _GESTURE_CLIENTS.get(sid, 0) >= 1:
+        with contextlib.suppress(Exception):
+            await websocket.close(code=4429)
+        return
+    _GESTURE_CLIENTS[sid] = _GESTURE_CLIENTS.get(sid, 0) + 1
+
+    upstream = None
+    try:
+        upstream = await websockets.connect(
+            f"ws://127.0.0.1:{port}{_viewer_device_path('/api/v1/input/gesture', str(row['resource_key']))}",
+            max_size=None,
+            origin=f"http://127.0.0.1:{port}",
+        )
+        await upstream.send(json.dumps({"token": token}))
+
+        async def to_client() -> None:
+            while True:
+                frame = await upstream.recv()
+                if isinstance(frame, (bytes, bytearray)):
+                    await websocket.send_bytes(bytes(frame))
+                else:
+                    await websocket.send_text(str(frame))
+
+        async def to_upstream() -> None:
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    raise WebSocketDisconnect(message.get("code") or 1000)
+                text_val = message.get("text")
+                if text_val is not None:
+                    await upstream.send(text_val)
+
+        done, pending = await asyncio.wait(
+            [asyncio.create_task(to_client()), asyncio.create_task(to_upstream())],
+            return_when=asyncio.FIRST_EXCEPTION,
+        )
+        for task in pending:
+            task.cancel()
+        for task in done:
+            exc = task.exception()
+            if exc is not None and not isinstance(
+                exc, (WebSocketDisconnect, websockets.ConnectionClosed)
+            ):
+                logger.debug("gesture ws pump error: %s", exc)
+    except Exception:  # noqa: BLE001 - 上游/浏览器断开都按会话结束收口
+        logger.debug("gesture ws 透传失败: session=%s", sid)
+    finally:
+        remaining = _GESTURE_CLIENTS.get(sid, 1) - 1
+        if remaining > 0:
+            _GESTURE_CLIENTS[sid] = remaining
+        else:
+            _GESTURE_CLIENTS.pop(sid, None)
+        if upstream is not None:
+            with contextlib.suppress(Exception):
+                await upstream.close()
         with contextlib.suppress(Exception):
             await websocket.close(code=1000)
 

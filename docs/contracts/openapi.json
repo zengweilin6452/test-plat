@@ -478,6 +478,102 @@
         }
       }
     },
+    "/api/v1/debug-sessions/{session_id}/control": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/debug-sessions/{session_id}/control/heartbeat": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/debug-sessions/{session_id}/input/key": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
     "/api/v1/debug-sessions/{session_id}/locators/validate": {
       "post": {
         "parameters": [

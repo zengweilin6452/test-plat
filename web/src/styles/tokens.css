@@ -720,3 +720,8 @@ dialog.drawer { margin: 0 0 0 auto; width: min(570px, 100vw); height: 100dvh; ma
 .phone-stage .debug-frame { width: 100%; }
 .phone-stage .debug-stage-empty { aspect-ratio: 214 / 558; max-height: 74vh; display: grid; place-items: center; background: #0b0f14; color: #9daec8; padding: 10px; text-align: center; font-size: 11px; }
 .phone-stage .phone-bottom { height: 4px; width: 62px; background: #29364b; border-radius: 4px; margin: 8px auto; }
+
+/* 直接操控（vendor 手势 WS）：触点与操控态 */
+.debug-stage.control-mode { cursor: crosshair; touch-action: none; outline: 2px solid rgba(66, 99, 235, .45); outline-offset: -2px; }
+.debug-touch-dot { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: rgba(66, 99, 235, .82); border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(66, 99, 235, .35); pointer-events: none; z-index: 3; }
+.debug-control-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }

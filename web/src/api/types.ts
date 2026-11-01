@@ -19,6 +19,13 @@ export interface DebugSessionRecord {
   closed_at?: string | null
 }
 
+/** POST /api/v1/debug-sessions/{id}/control —— 控制权状态（token 永不下发） */
+export interface DebugControlState {
+  enabled: boolean
+  ttl_seconds?: number
+  note?: string | null
+}
+
 /** POST /api/v1/debug-sessions 的 201 响应（契约只保证 id 与 state） */
 export interface CreateDebugSessionResponse {
   id: string | number

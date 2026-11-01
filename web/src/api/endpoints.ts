@@ -146,6 +146,7 @@ export function fetchSuiteVersions(suiteId: string, signal?: AbortSignal) {
 import type {
   CreateDebugSessionResponse,
   CreateTemplateRequest,
+  DebugControlState,
   DebugSessionRecord,
   LocatorValidateResponse,
   SnapshotCaptureResponse,
@@ -187,6 +188,35 @@ export function validateLocator(
     '/debug-sessions/' + encodeURIComponent(String(sessionId)) + '/locators/validate',
     { target },
   )
+}
+
+/** POST /api/v1/debug-sessions/{id}/control —— 领取/释放真机控制权（token 不出服务端） */
+export function setDebugControl(sessionId: string | number, enabled: boolean) {
+  return api.post<DebugControlState>(
+    '/debug-sessions/' + encodeURIComponent(String(sessionId)) + '/control',
+    { enabled },
+  )
+}
+
+/** POST /api/v1/debug-sessions/{id}/control/heartbeat —— 2s 续期，失效会返回 control_expired */
+export function heartbeatDebugControl(sessionId: string | number) {
+  return api.post<DebugControlState>(
+    '/debug-sessions/' + encodeURIComponent(String(sessionId)) + '/control/heartbeat',
+    {},
+  )
+}
+
+/** POST /api/v1/debug-sessions/{id}/input/key —— 直接操控的返回/Home 等有限键 */
+export function sendDebugKey(sessionId: string | number, name: string) {
+  return api.post<{ ok?: boolean }>(
+    '/debug-sessions/' + encodeURIComponent(String(sessionId)) + '/input/key',
+    { name },
+  )
+}
+
+/** 手势 WS 路径（与预览同一 Vite/平台代理；协议由 vendor 定义） */
+export function debugGestureWsPath(sessionId: string | number): string {
+  return '/api/v1/ws/debug/' + encodeURIComponent(String(sessionId)) + '/gesture'
 }
 
 /** POST /api/v1/debug-sessions/{id}/snapshots —— 采集快照（with_tree 时一并采集层级树） */

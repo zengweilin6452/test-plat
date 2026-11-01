@@ -39,9 +39,13 @@ import {
   closeDebugSession,
   createDebugSession,
   createTemplate,
+  debugGestureWsPath,
   fetchDebugSession,
   fetchSnapshotTree,
   fetchTemplates,
+  heartbeatDebugControl,
+  sendDebugKey,
+  setDebugControl,
   validateLocator,
   validateTemplate,
 } from '../api/endpoints'
@@ -53,6 +57,7 @@ import { Empty } from './Empty'
 import { Notice } from './Notice'
 import { useToast } from './Toast'
 import { DASH } from '../lib/fmt'
+import { Dialog } from './Dialog'
 
 export interface DebugTarget {
   /** 执行资源 serial（adb serial 或浏览器标识） */
@@ -389,6 +394,14 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
    *  会话任一变化后 key 不匹配即视为未验证，必须重新验证。 */
   const [cropVerification, setCropVerification] = useState<CropVerification | null>(null)
 
+  /** 直接操控：控制权在服务端，前端只反映 enabled；手势 WS 每次手势一条。 */
+  const [controlEnabled, setControlEnabled] = useState(false)
+  const [controlPending, setControlPending] = useState(false)
+  const [controlError, setControlError] = useState<string | null>(null)
+  const [controlConfirmOpen, setControlConfirmOpen] = useState(false)
+  /** 触点提示（相对 .debug-frame 的百分比） */
+  const [touchDot, setTouchDot] = useState<{ left: number; top: number } | null>(null)
+
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   /** 主动关闭标记：区别于服务端断开 */
@@ -398,6 +411,43 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   const wsRetriesRef = useRef(0)
   /** frozen 的 ref 镜像：WS onmessage 闭包不随 frozen 重建（重建会断流重连） */
   const frozenRef = useRef(false)
+  const gestureWsRef = useRef<WebSocket | null>(null)
+  const gestureQueueRef = useRef<string[]>([])
+  const gestureSeqRef = useRef(0)
+  const lastMoveAtRef = useRef<number | null>(null)
+  const pointerStartRef = useRef<{ nx: number; ny: number; at: number } | null>(null)
+
+  const closeGestureSocket = useCallback(() => {
+    const ws = gestureWsRef.current
+    gestureWsRef.current = null
+    gestureQueueRef.current = []
+    gestureSeqRef.current = 0
+    lastMoveAtRef.current = null
+    pointerStartRef.current = null
+    if (ws) {
+      try {
+        ws.close(1000)
+      } catch {
+        // socket 已关闭
+      }
+    }
+  }, [])
+
+  /** 退出直接操控：本地先停，再尽力让服务端释放 vendor 控制权。 */
+  const disableControl = useCallback(
+    (release = true) => {
+      closeGestureSocket()
+      setControlEnabled(false)
+      setControlPending(false)
+      setTouchDot(null)
+      setControlError(null)
+      const id = sessionRef.current
+      if (release && id !== null) {
+        void setDebugControl(id, false).catch(() => undefined)
+      }
+    },
+    [closeGestureSocket],
+  )
 
   const reset = useCallback(() => {
     setSession(null)
@@ -424,7 +474,13 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     setNewLogical('')
     setTemplateError(null)
     setCropVerification(null)
-  }, [])
+    closeGestureSocket()
+    setControlEnabled(false)
+    setControlPending(false)
+    setControlError(null)
+    setTouchDot(null)
+    setControlConfirmOpen(false)
+  }, [closeGestureSocket])
 
   /** open 的 ref 镜像：mutation 回调里读 props 会拿到过期闭包 */
   const openRef = useRef(open)
@@ -696,6 +752,193 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
    * `debug_session_not_active`，提前请求只会在界面上挂一条红字。 */
   const sessionActive = detailQuery.data?.state === 'active'
 
+  // ------------------------------------------------------------ 直接操控
+  const controlState = useMemo(
+    () =>
+      controlAvailability({
+        sessionActive,
+        wsOpen: wsStatus === 'open',
+        frozen,
+        inspectMode,
+        hasFrame: frameSize !== null,
+        busy: createMutation.isPending || closeMutation.isPending || controlPending,
+      }),
+    [
+      sessionActive,
+      wsStatus,
+      frozen,
+      inspectMode,
+      frameSize,
+      createMutation.isPending,
+      closeMutation.isPending,
+      controlPending,
+    ],
+  )
+
+  /** 心跳：vendor 5s 无心跳自动撤权；2s 续期，失败即退出操控并说明原因。 */
+  useEffect(() => {
+    if (!controlEnabled || !session) return
+    let stopped = false
+    const timer = setInterval(() => {
+      void heartbeatDebugControl(session.id).catch((error) => {
+        if (stopped) return
+        const described = describeError(error)
+        setControlError('控制权已失效（' + described.code + '）：' + described.message)
+        setControlEnabled(false)
+        setTouchDot(null)
+        closeGestureSocket()
+      })
+    }, 2000)
+    return () => {
+      stopped = true
+      clearInterval(timer)
+    }
+  }, [controlEnabled, session, closeGestureSocket])
+
+  /** 冻结/切图像模式/会话失效时强制退出操控（释放服务端控制权）。 */
+  useEffect(() => {
+    if (!controlEnabled) return
+    if (frozen || inspectMode !== 'native' || !sessionActive) {
+      disableControl(sessionActive)
+    }
+  }, [controlEnabled, frozen, inspectMode, sessionActive, disableControl])
+
+  /** 组件卸载/切设备时关闭手势 WS（会话关闭由 handleClose 负责）。 */
+  useEffect(() => () => closeGestureSocket(), [closeGestureSocket])
+
+  const confirmEnableControl = useCallback(async () => {
+    const id = sessionRef.current
+    if (id === null) return
+    setControlConfirmOpen(false)
+    setControlPending(true)
+    setControlError(null)
+    try {
+      await setDebugControl(id, true)
+      setControlEnabled(true)
+    } catch (error) {
+      const described = describeError(error)
+      setControlError('启用直接操控失败（' + described.code + '）：' + described.message)
+    } finally {
+      setControlPending(false)
+    }
+  }, [])
+
+  const handleControlToggle = useCallback(() => {
+    if (controlEnabled) {
+      disableControl(true)
+      return
+    }
+    if (!controlState.enabled) return
+    setControlConfirmOpen(true)
+  }, [controlEnabled, controlState.enabled, disableControl])
+
+  const handleControlKey = useCallback(async (name: 'back' | 'home') => {
+    const id = sessionRef.current
+    if (id === null) return
+    try {
+      await sendDebugKey(id, name)
+    } catch (error) {
+      const described = describeError(error)
+      setControlError('按键失败（' + described.code + '）：' + described.message)
+      if (described.code === 'control_expired' || described.code === 'control_not_enabled') {
+        setControlEnabled(false)
+        setTouchDot(null)
+        closeGestureSocket()
+      }
+    }
+  }, [closeGestureSocket])
+
+  const gestureSend = useCallback((payload: object) => {
+    const text = JSON.stringify(payload)
+    const ws = gestureWsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(text)
+    } else if (ws) {
+      gestureQueueRef.current.push(text)
+    }
+  }, [])
+
+  const openGesture = useCallback(() => {
+    const id = sessionRef.current
+    if (id === null) return
+    closeGestureSocket()
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const ws = new WebSocket(proto + '://' + window.location.host + debugGestureWsPath(id))
+    gestureWsRef.current = ws
+    ws.onopen = () => {
+      for (const text of gestureQueueRef.current) ws.send(text)
+      gestureQueueRef.current = []
+    }
+    ws.onmessage = (event) => {
+      let message: { kind?: string; code?: string; message?: string } | null = null
+      try {
+        message = JSON.parse(String(event.data))
+      } catch {
+        return
+      }
+      if (message?.kind === 'error') {
+        setControlError(
+          '操控失败（' + (message.code ?? 'error') + '）：' + (message.message ?? ''),
+        )
+        setControlEnabled(false)
+        setTouchDot(null)
+        closeGestureSocket()
+      }
+    }
+    ws.onerror = () => setControlError('操控通道连接失败，请重新启用直接操控')
+  }, [closeGestureSocket])
+
+  const stagePoint = useCallback((event: React.PointerEvent) => {
+    const frame = stageRef.current
+    if (!frame) return null
+    const rect = frame.getBoundingClientRect()
+    return normalizeStagePoint(rect, event.clientX, event.clientY)
+  }, [])
+
+  const handleControlPointerDown = (event: React.PointerEvent) => {
+    if (!controlEnabled) return
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    const point = stagePoint(event)
+    if (!point) return
+    event.preventDefault()
+    try {
+      ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+    } catch {
+      // 指针已释放
+    }
+    pointerStartRef.current = { nx: point.nx, ny: point.ny, at: Date.now() }
+    lastMoveAtRef.current = null
+    openGesture()
+    gestureSend(gestureMessage('start', point.nx, point.ny, ++gestureSeqRef.current))
+    setTouchDot({ left: point.nx * 100, top: point.ny * 100 })
+  }
+
+  const handleControlPointerMove = (event: React.PointerEvent) => {
+    if (!controlEnabled || !pointerStartRef.current) return
+    const point = stagePoint(event)
+    if (!point) return
+    event.preventDefault()
+    setTouchDot({ left: point.nx * 100, top: point.ny * 100 })
+    const now = Date.now()
+    if (!shouldSendGestureMove(lastMoveAtRef.current, now)) return
+    lastMoveAtRef.current = now
+    gestureSend(gestureMessage('move', point.nx, point.ny, ++gestureSeqRef.current))
+  }
+
+  const finishControlPointer = (event: React.PointerEvent) => {
+    if (!controlEnabled || !pointerStartRef.current) return
+    const point = stagePoint(event) ?? pointerStartRef.current
+    event.preventDefault()
+    gestureSend(gestureMessage('end', point.nx, point.ny, ++gestureSeqRef.current))
+    pointerStartRef.current = null
+    setTouchDot(null)
+    try {
+      ;(event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId)
+    } catch {
+      // 指针已释放
+    }
+  }
+
   /** 模板清单（图像识别）：按调试会话隔离，vendor 返回 {templates: [...]} */
   const templatesQuery = useQuery({
     queryKey: ['debug-templates', session?.id],
@@ -863,20 +1106,21 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   }
 
   const handleStageDown = (event: React.MouseEvent) => {
+    if (controlEnabled) return
     const point = pointToDevice(event)
     if (!point) return
     setDragging({ x: point.x, y: point.y, w: 0, h: 0 })
   }
 
   const handleStageMove = (event: React.MouseEvent) => {
-    if (!dragging) return
+    if (controlEnabled || !dragging) return
     const point = pointToDevice(event)
     if (!point) return
     setDragging(normalizeRegion(dragging.x, dragging.y, point.x, point.y))
   }
 
   const handleStageUp = () => {
-    if (!dragging) return
+    if (controlEnabled || !dragging) return
     const box = dragging
     setDragging(null)
     // 太小的框多半是误点：清掉而不是留一个 1px 的模板区域
@@ -995,6 +1239,20 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
           会话 {detailQuery.data?.state ?? (session ? 'opening' : '未建立')} · {wsText}
         </span>
         {target?.leaseHint ? <span className="small muted">· {target.leaseHint}</span> : null}
+        <Button
+          size="small"
+          kind={controlEnabled ? 'soft' : 'default'}
+          disabled={!controlEnabled && (!controlState.enabled || controlPending)}
+          title={
+            controlEnabled
+              ? '退出直接操控，恢复只读预览'
+              : controlState.reason ?? '向真机发送点击/滑动（单操作者）'
+          }
+          onClick={handleControlToggle}
+        >
+          {controlPending ? '领取控制权…' : controlEnabled ? '退出操控' : '直接操控'}
+        </Button>
+        {controlEnabled ? <Badge tone="green" dot>操控中</Badge> : null}
         <span className="spacer" />
         <Button size="small" onClick={handleClose}>返回设备池</Button>
         {frozen ? (
@@ -1040,6 +1298,11 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
             <Notice tone="red" title="关闭失败">{closeError}</Notice>
           </div>
         ) : null}
+        {controlError ? (
+          <div className="mb">
+            <Notice tone="amber" title="直接操控">{controlError}</Notice>
+          </div>
+        ) : null}
         {!target && !createMutation.isPending ? (
           <div className="mb">
             <Notice tone="amber" title="没有可调试设备">
@@ -1062,16 +1325,26 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
               <span className="small muted">{wsText}</span>
             </div>
             <div
-              className="debug-stage phone-stage"
+              className={'debug-stage phone-stage' + (controlEnabled ? ' control-mode' : '')}
               onMouseDown={handleStageDown}
               onMouseMove={handleStageMove}
               onMouseUp={handleStageUp}
               onMouseLeave={handleStageUp}
+              onPointerDown={handleControlPointerDown}
+              onPointerMove={handleControlPointerMove}
+              onPointerUp={finishControlPointer}
+              onPointerCancel={finishControlPointer}
             >
               <div className="phone">
                 <div className="phone-camera" />
                 <div className="debug-frame" ref={stageRef} style={{ display: frameSize ? undefined : 'none' }}>
                   <canvas ref={canvasRef} aria-label="设备画面预览" />
+                  {controlEnabled && touchDot ? (
+                    <span
+                      className="debug-touch-dot"
+                      style={{ left: touchDot.left + '%', top: touchDot.top + '%' }}
+                    />
+                  ) : null}
                   {overlayBoxes.map((box) => (
                     <div
                       key={box.index}
@@ -1124,6 +1397,13 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                     <div className="small" style={{ marginTop: 6 }}>{upstreamHint(detailError)}</div>
                   ) : null}
                 </Notice>
+              </div>
+            ) : null}
+            {controlEnabled ? (
+              <div className="debug-control-bar">
+                <span className="small muted">直接操控中 · 点击/拖动画面（单操作者）</span>
+                <Button size="small" onClick={() => void handleControlKey('back')}>返回键</Button>
+                <Button size="small" onClick={() => void handleControlKey('home')}>Home</Button>
               </div>
             ) : null}
           </section>
@@ -1501,6 +1781,26 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         </div>
       </div>
 
+      <Dialog
+        open={controlConfirmOpen}
+        onClose={() => setControlConfirmOpen(false)}
+        title="启用直接操控"
+        description="会向真机发送点击与滑动；单操作者，其他操作者占用时会被拒绝。"
+        footer={
+          <>
+            <Button onClick={() => setControlConfirmOpen(false)}>取消</Button>
+            <Button kind="primary" onClick={() => void confirmEnableControl()}>
+              启用
+            </Button>
+          </>
+        }
+      >
+        <p className="small muted">
+          点击/拖动左侧真机画面即可操作设备；冻结画面、切到图像模板模式或关闭会话会自动退出。
+          控制权约 5 秒无心跳自动释放。
+        </p>
+      </Dialog>
+
       <footer className="debug-pane-foot">
         <span className="foot-hint">关闭面板会同时关闭调试会话并释放资源租约</span>
         <Button onClick={handleClose} disabled={closeMutation.isPending}>
@@ -1527,6 +1827,64 @@ function editRegion(region: Region | null, key: keyof Region, raw: string): Regi
   if (value === '') return null
   if (!/^\d+$/.test(value)) return region
   return { ...(region ?? { x: 0, y: 0, w: 0, h: 0 }), [key]: Number(value) }
+}
+
+/** 直接操控：把指针位置换算成 vendor 手势 WS 的归一化坐标（0..1）。 */
+export function normalizeStagePoint(
+  rect: { left: number; top: number; width: number; height: number },
+  clientX: number,
+  clientY: number,
+): { nx: number; ny: number } {
+  const clamp = (value: number) => Math.min(Math.max(value, 0), 1)
+  if (rect.width <= 0 || rect.height <= 0) return { nx: 0, ny: 0 }
+  return {
+    nx: clamp((clientX - rect.left) / rect.width),
+    ny: clamp((clientY - rect.top) / rect.height),
+  }
+}
+
+export interface ControlAvailabilityInput {
+  sessionActive: boolean
+  wsOpen: boolean
+  frozen: boolean
+  inspectMode: 'native' | 'image'
+  hasFrame: boolean
+  busy: boolean
+}
+
+/** 直接操控可用性：每个禁用都必须有可读原因，前端 disabled 只是体验，
+ *  服务端仍会独立校验控制权。 */
+export function controlAvailability(
+  input: ControlAvailabilityInput,
+): { enabled: boolean; reason: string | null } {
+  if (!input.sessionActive) return { enabled: false, reason: '调试会话尚未激活' }
+  if (input.inspectMode === 'image') {
+    return { enabled: false, reason: '图像模板框选模式下不可操控' }
+  }
+  if (input.frozen) return { enabled: false, reason: '冻结快照时不可操控，先恢复预览' }
+  if (!input.wsOpen) return { enabled: false, reason: '实时画面未连接' }
+  if (!input.hasFrame) return { enabled: false, reason: '画面尚未就绪' }
+  if (input.busy) return { enabled: false, reason: '会话切换中' }
+  return { enabled: true, reason: null }
+}
+
+/** vendor /api/v1/input/gesture 的消息形状（start/move/end + 序号）。 */
+export function gestureMessage(
+  type: 'start' | 'move' | 'end',
+  nx: number,
+  ny: number,
+  seq: number,
+): { type: string; nx: number; ny: number; seq: number } {
+  return { type, nx, ny, seq }
+}
+
+/** 拖动 MOVE 按 20Hz 节流；DOWN/UP 不节流。 */
+export function shouldSendGestureMove(
+  lastSentAt: number | null,
+  now: number,
+  intervalMs = 50,
+): boolean {
+  return lastSentAt === null || now - lastSentAt >= intervalMs
 }
 
 /** 把 vendor 的 base64 JPEG 帧画到 canvas；解码失败保留上一帧 */

@@ -64,6 +64,9 @@ ERROR_CODES: frozenset[str] = frozenset(
         # 调试 / 模板 / 元信息
         "debug_session_not_active",
         "viewer_unavailable",
+        "viewer_bad_response",
+        "control_not_enabled",
+        "control_expired",
         "crop_not_verified",
         "schema_doc_missing",
         # 设备同步
