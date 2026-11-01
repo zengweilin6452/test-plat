@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## 现状指针
 
@@ -45,3 +45,6 @@ D:\python312\python.exe -m pytest tests/test_issue04_builds.py tests/test_issue2
 - 不修改 `vendor/`、不安装依赖、不 push。
 
 ## Comments
+
+- 2026-11-01 实现完成（commit `0801718`，合并 `2b8430f`）。修复：①派发前复核区分 `skipped(pending/no_build/baseline_missing)/verified/mismatch/unreadable`，**unreadable（adb 失败、包未安装、无 versionName/Code）与 mismatch 一样阻断**；②包名先过 `PACKAGE_NAME_RE` 白名单再拼 `adb shell`，防止基准被写入 shell 片段；③核对结论落事件（`identity_verified/mismatch/unreadable/unverified`），payload 明确 `execution_allowed`、`verification_level`、`apk_digest_verified=false`；④`mark_spawn_failed` 接受 reason/stage，`test_runs.reason_code` 显示真实原因；⑤页面把 blocking 原因转成可读文案，观测/预期缺失显示「未读取到」，并声明只核对安装包字段、不验证 APK 字节。
+- 证据：`test_issue24_execution_wiring.py` 7 passed（含 mismatch/unreadable/pending 三态与租约释放）；`web/tests/task-wizard.test.cjs` 9 passed。真机 `749622c9` 上的身份复核实测记入工单 10。
