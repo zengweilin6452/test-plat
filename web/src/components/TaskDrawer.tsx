@@ -298,11 +298,11 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
                 <StatusBadge status={displayTaskStatus(task.lifecycle, readiness)} />{' '}
                 <span className="muted small">{task.lifecycle}</span>
               </dd>
-              <dt>修订 readiness</dt>
+              <dt>修订 readiness（配置就绪）</dt>
               <dd>
                 <ReadinessBadge readiness={readiness} />
               </dd>
-              <dt>最近一次运行</dt>
+              <dt>最近一次运行（运行状态）</dt>
               <dd>
                 {task.run ? (
                   <>
@@ -318,6 +318,10 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
               <dt>修订总数</dt>
               <dd>{task.revision_count}</dd>
             </dl>
+            <p className="muted small" style={{ marginTop: 8 }}>
+              配置就绪（readiness = validated）只说明输入已通过校验；设备就绪由执行资源页与运行时的租约决定，
+              两者任一不满足都不会真正开跑。
+            </p>
 
             {validate.isPending ? (
               <div className="mt">
@@ -538,7 +542,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
                 ) : null}
               </Notice>
             ) : revisionsQuery.isLoading ? (
-              <Empty icon="tasks" title="正在加载修订历史" description="正在请求 /api/v1/tasks/{id}/revisions" />
+              <Empty loading icon="tasks" title="正在加载修订历史" description="正在请求 /api/v1/tasks/{id}/revisions" />
             ) : revisions.length === 0 ? (
               <Empty icon="tasks" title="暂无修订记录" description="该任务还没有可展示的修订。" />
             ) : (

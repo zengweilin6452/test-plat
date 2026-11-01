@@ -209,7 +209,7 @@ export function TasksPage() {
           </Toolbar>
         </div>
         {tasksQuery.isLoading ? (
-          <Empty icon="tasks" title="正在加载任务" description="正在请求 /api/v1/tasks" />
+          <Empty loading icon="tasks" title="正在加载任务" description="正在请求 /api/v1/tasks；返回前不判断有没有任务。" />
         ) : rows.length === 0 && !error ? (
           <Empty
             icon="tasks"

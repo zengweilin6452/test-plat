@@ -33,6 +33,7 @@ import { useToast } from '../components/Toast'
 import { TARGET_CATALOG, isImplementedPlatform, isPerformanceType, moduleName } from '../constants'
 import { displayStatus } from '../lib/display'
 import { DASH, fmtDateTime } from '../lib/fmt'
+import { pagePhase, type PagePhase } from '../lib/pageState'
 import { useTargetScope } from '../store/scope'
 import type {
   AnalysisMetric,
@@ -110,6 +111,19 @@ export function PerfPage() {
 
   // 默认分析第一条已结束的运行；换了运行就回到原始判定
   const finishedRuns = perfRuns.filter((run) => run.state === 'completed')
+  // 加载 ≠ 空：两个区块各自按 runs 查询的阶段渲染
+  const runsPhase = pagePhase({
+    isLoading: runsQuery.isLoading,
+    isError: runsQuery.isError,
+    count: perfRuns.length,
+  })
+  const finishedPhase = pagePhase({
+    isLoading: runsQuery.isLoading,
+    isError: runsQuery.isError,
+    count: finishedRuns.length,
+  })
+  const analysisEmptyCopy = perfAnalysisEmptyCopy(finishedPhase, planned)
+  const runsEmptyCopy = perfRunsEmptyCopy(runsPhase, planned)
   const currentRunId = selectedRunId ?? finishedRuns[0]?.id ?? null
   useEffect(() => {
     setEvaluationId(null)
@@ -244,15 +258,14 @@ export function PerfPage() {
         />
 
         {finishedRuns.length === 0 ? (
-          <Empty
-            icon="pulse"
-            title={planned ? '该目标端尚未接入' : '还没有已完成的性能运行'}
-            description={
-              planned
-                ? 'iOS / Web 目标端暂无执行能力，接入后按同一套指标口径开通。'
-                : '性能或联动任务跑完后，这里展示指标、门禁逐项与基线对比。'
-            }
-          />
+          finishedPhase === 'loading' ? (
+            <Empty loading title={analysisEmptyCopy.title} description={analysisEmptyCopy.description} />
+          ) : (
+            <Empty
+              title={analysisEmptyCopy.title}
+              description={analysisEmptyCopy.description}
+            />
+          )
         ) : (
           <div style={{ padding: '0 20px 20px' }}>
             <div className="toolbar">
@@ -285,7 +298,7 @@ export function PerfPage() {
                 {analysisError.message}
               </Notice>
             ) : analysisQuery.isLoading ? (
-              <Empty icon="pulse" title="正在加载运行分析" description="正在请求 GET /api/v1/analyses?run_id=" />
+              <Empty loading icon="pulse" title="正在加载运行分析" description="正在请求 GET /api/v1/analyses?run_id=" />
             ) : analysis ? (
               <>
                 <VerdictNotice analysis={analysis} />
@@ -313,16 +326,15 @@ export function PerfPage() {
             title="性能运行"
             hint="指标口径：PSS 内存 / 应用进程 CPU / 帧率 / GPU 占用"
           />
-          {perfRuns.length === 0 && !error ? (
-            <Empty
-              icon="pulse"
-              title={planned ? '该目标端尚未接入' : '还没有性能运行'}
-              description={
-                planned
-                  ? 'iOS / Web 目标端暂无执行能力，接入后按同一套指标口径开通。'
-                  : '提交性能或联动任务后，运行与门禁结论会出现在这里。'
-              }
-            />
+          {perfRuns.length === 0 ? (
+            runsPhase === 'loading' ? (
+              <Empty loading title={runsEmptyCopy.title} description={runsEmptyCopy.description} />
+            ) : (
+              <Empty
+                title={runsEmptyCopy.title}
+                description={runsEmptyCopy.description}
+              />
+            )
           ) : (
             <Table
               columns={columns}
@@ -554,7 +566,7 @@ function TrialCard({
         </select>
       </label>
       <div className="mt">
-        <Button kind="primary" disabled={!canTrial || pending} onClick={onTrial}>
+        <Button kind="primary" disabled={!canTrial || pending} title={canTrial ? undefined : '先在「基线与门禁」选择已保存的策略与基线'} onClick={onTrial}>
           {pending ? '试算中…' : '按此基线试算'}
         </Button>
       </div>
@@ -650,6 +662,67 @@ export function baselineCreatePayload(run: RunRecord | undefined, name: string, 
   return { request_key: requestKey, run_id: run.id, name: name.trim() }
 }
 
+/**
+ * 运行分析面板的占位文案：加载中 / 失败 / 规划中目标端 / 真实无已完成运行。
+ * 只有最后一种才能说「还没有」。
+ */
+export function perfAnalysisEmptyCopy(
+  phase: PagePhase,
+  planned: boolean,
+): { title: string; description: string } {
+  if (phase === 'loading') {
+    return {
+      title: '正在加载运行分析',
+      description: '正在请求 GET /api/v1/runs 与 /api/v1/analyses；返回前不判断有没有性能结论。',
+    }
+  }
+  if (phase === 'error') {
+    return {
+      title: '性能运行暂不可用',
+      description: '接口返回错误（见上方错误码），请稍后重试；这不代表没有已完成运行。',
+    }
+  }
+  if (planned) {
+    return {
+      title: '该目标端尚未接入',
+      description: 'iOS / Web 目标端暂无执行能力，接入后按同一套指标口径开通；可先切回 Android。',
+    }
+  }
+  return {
+    title: '还没有已完成的性能运行',
+    description: '性能或联动任务跑完后，这里展示指标、门禁逐项与基线对比。',
+  }
+}
+
+/** 「性能运行」表格的占位文案（同上：加载中不等于没有运行） */
+export function perfRunsEmptyCopy(
+  phase: PagePhase,
+  planned: boolean,
+): { title: string; description: string } {
+  if (phase === 'loading') {
+    return {
+      title: '正在加载性能运行清单',
+      description: '正在请求 GET /api/v1/runs；返回前不判断有没有性能运行。',
+    }
+  }
+  if (phase === 'error') {
+    return {
+      title: '性能运行清单暂不可用',
+      description: '接口返回错误（见上方错误码），请稍后重试。',
+    }
+  }
+  if (planned) {
+    return {
+      title: '该目标端尚未接入',
+      description: 'iOS / Web 目标端暂无执行能力，接入后按同一套指标口径开通。',
+    }
+  }
+  return {
+    title: '还没有性能运行',
+    description: '提交性能或联动任务后，运行与门禁结论会出现在这里。',
+  }
+}
+
 function BaselineManager({ applicationId, runs, initialRunId, onSelected }: {
   applicationId: string | null | undefined
   runs: RunRecord[]
@@ -685,7 +758,7 @@ function BaselineManager({ applicationId, runs, initialRunId, onSelected }: {
       <label className="field"><span>基线名称</span><input aria-label="基线名称" value={name} disabled={save.isPending} onChange={(event) => { edit(); setName(event.target.value) }} /></label>
     </div>
     <p className="small muted mt">保留来源组件、指标快照及设备档案；同名基线由后端复用，不覆盖既有快照。需要保留另一份来源时请填写新名称。</p>
-    <Button kind="primary" disabled={!source || !name.trim() || save.isPending} onClick={() => save.mutate()}>{save.isPending ? '保存中…' : '从运行创建基线'}</Button>
+    <Button kind="primary" disabled={!source || !name.trim() || save.isPending} title={source && name.trim() ? undefined : '先选择已完成的来源运行并填写基线名称'} onClick={() => save.mutate()}>{save.isPending ? '保存中…' : '从运行创建基线'}</Button>
     {save.isError ? <Notice tone="red" title="基线创建失败">{describeError(save.error).message}</Notice> : null}
     {save.isSuccess ? <p className="small mt" role="status">{save.data.created === false ? '已复用同名基线' : '已创建基线'}：{save.data.name} v{save.data.version}，来源运行 {save.data.source_run_id ?? '未提供'}。</p> : null}
     {list.isError ? <Notice tone="red" title="基线加载失败">{describeError(list.error).message}</Notice> : list.isLoading ? <p className="small muted mt">正在加载基线…</p> : <Table
@@ -699,7 +772,7 @@ function BaselineManager({ applicationId, runs, initialRunId, onSelected }: {
         { key: 'profile', header: '设备档案', render: (baseline) => baseline.profile ?? baseline.profile_error ?? '缺少档案' },
         { key: 'metrics', header: '快照指标', render: (baseline) => <div className="small">{(baseline.metrics ?? []).map((metric) => <div key={metric.key}>{metricLabel(metric.key)}：{metric.value ?? metric.median ?? metric.missing_reason_text ?? metric.missing_reason ?? '未采集'} {metric.unit ?? ''}</div>)}</div> },
         { key: 'created', header: '创建时间', render: (baseline) => <span className="small muted">{fmtDateTime(baseline.created_at)}</span> },
-        { key: 'select', header: '操作', render: (baseline) => <Button size="small" disabled={!baseline.source_run_id} onClick={() => onSelected(baseline.source_run_id!)}>用于试算</Button> },
+        { key: 'select', header: '操作', render: (baseline) => <Button size="small" disabled={!baseline.source_run_id} title={baseline.source_run_id ? undefined : '该基线没有来源运行，不能用于试算'} onClick={() => onSelected(baseline.source_run_id!)}>用于试算</Button> },
       ]}
       footer={<span>本页最多显示最新 200 条基线；可比性与结论由后端核验。</span>}
     />}

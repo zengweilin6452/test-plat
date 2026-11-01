@@ -52,6 +52,20 @@ export function describeIdentityBlocking(blocking: { check: string; reason: stri
   return blocking.map(item => IDENTITY_BLOCKING_TEXT[item.reason] ?? `${item.check}：${item.reason}`)
 }
 
+/**
+ * 身份核对结果的一句话说明（工单 09：身份未学习 / 未判定必须如实显示，且给下一步）。
+ * match + pending 时是「待确认」，match + confirmed 是「基准已固定」，
+ * unknown 是本次读取没拿到可比对的身份（未学习），conflict 由阻断原因列表展开。
+ */
+export function identityCheckNote(result: IdentityCheck['result'] | null | undefined, state?: IdentityCheck['identity_state']): string | null {
+  if (!result) return '尚未读取设备安装身份：选择构建与空闲设备后点「读取设备安装身份」。'
+  if (result === 'unknown') return '本次未判定：没读到可比较的安装身份，请确认设备已连接并重试读取。'
+  if (result === 'conflict') return '身份冲突：设备上的安装包与构建声明不一致，按下方阻断原因修正后重试。'
+  return state === 'confirmed'
+    ? '身份基准已固定：后续运行会按此复核，本设备不会改写基准。'
+    : '身份尚未学习完成：与构建声明一致但未确认，确认后才会固定基准并用于运行前复核。'
+}
+
 /** 观测/预期字段的空值说明：读不到就写「未读取到」，不冒充有值。 */
 function showValue(value: unknown, empty = '未读取到'): string {
   return value === null || value === undefined || value === '' ? empty : String(value)
@@ -88,6 +102,7 @@ export function BuildRegistration({ applicationId, buildId, resourceId, onRegist
       <p>选择构建与空闲设备后读取安装身份。只核对设备上已安装包的包名 / versionName / versionCode，不验证 APK 字节摘要；上面填写的 SHA256 仅为登记声明。</p>
       <Button disabled={busy || !buildId || !resourceId} onClick={() => identity.mutate()}>读取设备安装身份</Button>
       {check ? <div role="status"><p>{check.checked_at} · {check.result}</p>
+        <p className="muted small">{identityCheckNote(check.result, check.identity_state)}</p>
         <dl className="summary-dl">
           <dt>包名</dt><dd>{showValue(check.observed.package_name)}（构建声明 {showValue(check.expected.package_name)}）</dd>
           <dt>versionName</dt><dd>{showValue(check.observed.version_name)}（构建声明 {showValue(check.expected.version_name)}）</dd>

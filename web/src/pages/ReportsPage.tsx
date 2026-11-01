@@ -26,6 +26,7 @@ import { ReportDrawer } from '../components/ReportDrawer'
 import { TARGET_CATALOG, isPerformanceType } from '../constants'
 import { displayStatus } from '../lib/display'
 import { fmtDateTime } from '../lib/fmt'
+import { pagePhase, type PagePhase } from '../lib/pageState'
 import { useTargetScope } from '../store/scope'
 import type { RunOutcome, RunRecord } from '../types'
 
@@ -38,6 +39,35 @@ export function conclusionText(module: string | null, outcome: RunOutcome | null
     return outcome === 'passed' ? '性能门禁通过，指标与基线可比' : '性能阈值未满足，查看指标与基线'
   }
   return outcome === 'passed' ? '用例断言通过，执行过程可追溯' : '断言未满足，已保留失败现场'
+}
+
+/**
+ * 报告清单占位文案：加载中 / 失败 / 无任何已完成运行 / 筛选后为空 四种互不冒充。
+ * filtered=true 时说明是筛选条件导致空，指引清除筛选，而不是让用户以为平台没跑过。
+ */
+export function reportsEmptyCopy(phase: PagePhase, filtered: boolean): { title: string; description: string } {
+  if (phase === 'loading') {
+    return {
+      title: '正在加载报告清单',
+      description: '正在请求 GET /api/v1/runs?state=completed；返回前不判断有没有报告。',
+    }
+  }
+  if (phase === 'error') {
+    return {
+      title: '报告清单暂不可用',
+      description: '接口返回错误（见上方错误码），请稍后重试；这不代表没有已完成运行。',
+    }
+  }
+  if (filtered) {
+    return {
+      title: '没有匹配筛选条件的已完成运行',
+      description: '清除搜索关键词或把模块切回「全部模块」再看；筛选不影响历史报告留存。',
+    }
+  }
+  return {
+    title: '还没有已完成的运行',
+    description: '运行结束后会生成报告，这里按任务列出结论、证据与可比性说明。',
+  }
 }
 
 export function ReportsPage() {
@@ -66,6 +96,13 @@ export function ReportsPage() {
   // 只有完成的运行才有报告：completed 过滤在服务端完成，前端不再从
   // 全量列表里筛 —— 第 201 份之后的报告也能靠游标翻到（AC-REP-01）。
   const completed = runsQuery.data?.items ?? []
+  const filtered = Boolean(keyword.trim() || module)
+  const listPhase = pagePhase({
+    isLoading: runsQuery.isLoading,
+    isError: runsQuery.isError,
+    count: completed.length,
+  })
+  const emptyCopy = reportsEmptyCopy(listPhase, filtered)
   const nextCursor = runsQuery.data?.next_cursor ?? null
   const pageNo = pages.length + 1
 
@@ -114,12 +151,12 @@ export function ReportsPage() {
         </div>
       ) : null}
 
-      {completed.length === 0 && !error ? (
-        <Empty
-          icon="report"
-          title="还没有已完成的运行"
-          description="运行结束后会生成报告，这里按任务列出结论、证据与可比性说明。"
-        />
+      {listPhase === 'loading' ? (
+        <Empty loading title={emptyCopy.title} description={emptyCopy.description} />
+      ) : listPhase === 'error' ? (
+        <Empty title={emptyCopy.title} description={emptyCopy.description} />
+      ) : completed.length === 0 ? (
+        <Empty icon="report" title={emptyCopy.title} description={emptyCopy.description} />
       ) : (
         <div className="resource-grid">
           {completed.map((run) => (
@@ -155,12 +192,14 @@ export function ReportsPage() {
           <div className="flex">
             <Button
               disabled={pages.length === 0 || runsQuery.isFetching}
+              title={pages.length === 0 ? '已经是第一页' : undefined}
               onClick={() => setPages((stack) => stack.slice(0, -1))}
             >
               上一页
             </Button>
             <Button
               disabled={!nextCursor || runsQuery.isFetching}
+              title={!nextCursor ? '后端没有返回下一页游标（已到最后一页）' : undefined}
               onClick={() => setPages((stack) => [...stack, nextCursor])}
             >
               下一页

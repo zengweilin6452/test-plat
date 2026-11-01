@@ -641,6 +641,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
                         className="choice"
                         aria-pressed={form.resourceId === device.id}
                         disabled={!selectable}
+                        title={selectable ? undefined : '设备离线、未授权或维护中，暂不可选；可在「执行资源」同步后重试'}
                         onClick={() => update('resourceId', device.id)}
                       >
                         <strong>{device.name}</strong>

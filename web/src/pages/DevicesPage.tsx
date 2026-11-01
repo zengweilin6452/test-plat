@@ -185,7 +185,7 @@ export function DevicesPage() {
       </div>
 
       {resourcesQuery.isLoading ? (
-        <Empty icon="devices" title="正在加载资源池" description="正在请求 /api/v1/resources" />
+        <Empty loading icon="devices" title="正在加载资源池" description="正在请求 /api/v1/resources；返回前不判断有没有设备。" />
       ) : filtered.length === 0 && !error ? (
         <Empty
           icon="devices"
