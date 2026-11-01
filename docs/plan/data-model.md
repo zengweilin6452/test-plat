@@ -140,6 +140,21 @@ async def transition(run_id, *, expect: RunState, to: RunState,
 
 映射函数 `to_reason_code(vendor_not_tested_reason: str) -> str`：按关键词匹配（`档案`→profile_mismatch、`样本`→sample_count_below_minimum、`不支持`→metric_missing…），**未匹配一律 `metric_missing` 并记录原文**，不允许返回空。
 
+`test_runs.reason_code` 另有一套**运行级**取值（执行/派发/取消阶段由平台写入，与上面的门禁码不混用）：
+
+| 码 | 触发（写入方） |
+| --- | --- |
+| `cancel_requested` | 取消受理后的收敛（`POST /runs/{id}/cancel`、runner 退出兜底） |
+| `identity_mismatch` | 派发前设备安装身份与固定基准不一致（dispatcher） |
+| `identity_unreadable` | 派发前安装身份不可读：adb 失败/包未安装/无 versionName/versionCode |
+| `template_pin_mismatch` | 模板锁定版本缺失或摘要不符（dispatcher） |
+| `execution_copy_missing` | 固定代码副本缺失/损坏，拒绝回退可变来源（dispatcher） |
+| `ui_timeout` | joint 的 UI 执行窗超时（joint runner 收口） |
+| `invalid_perf_config` | 性能场景配置非法（duration 越界 / items 为空或非字符串），不夹紧不猜默认 |
+| `missing_performance_component` | performance/joint 以 completed 收敛但没有任何性能组件 → 降级 errored |
+
+同一列还会写入（排查用，非本期新增）：`local_lease_busy`、`lease_expired`、`device_unavailable`、`requested_device_not_found`、`requested_device_platform_mismatch`、`runner_spawn_failed`、`runner_exit_<退出码>`；`queued→dispatching` 期间的 `lease_acquired` 只是领取阶段原因，不代表失败。
+
 ## 5. 原型 schema 需要补的四处（唯一允许的「平台新增」）
 
 | # | 新增 | 理由 | 影响 |
