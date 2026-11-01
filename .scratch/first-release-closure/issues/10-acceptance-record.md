@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 02, 03, 04, 05, 06, 07, 08, 09
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## 交付物
 
@@ -41,3 +41,8 @@
 - 验收记录是交付物本身，不得用历史工单勾选代替当前 HEAD 的验收。
 
 ## Comments
+
+- 2026-11-01 交付：`.scratch/first-release-closure/acceptance.md`（提交 `74dfed6`，合入 `9fc8354`），在 HEAD `cf9f799` 上重跑验证，不摘抄历史结论。
+- 本次结果：后端全量 544 项（543 passed / 1 skipped / 0 failed，退出码 0；`addopts=-q` 与命令行 `-q` 合成 `-qq` 不打印收尾行，判定方式已写入记录）、定向 19 文件 200 passed、前端 `tsc --noEmit` 0 / `npm test` 47 passed / `npm run build` 成功、`alembic heads=0008`、契约基线一致；专用库 `testdock_frc10`，共享库 `testdock.test_runs` 为 0。
+- 31 条 User Stories：已通过 22、已实现待验 8、未完成 0、受阻 1（US1 可信来源为空）。真机 UI / 性能 / 联动 / 调试、真实来源、1440×900 像素核对均未执行并写明解除条件，未记成通过。
+- 结论：自动化与契约层满足；首期交付验收为「有条件通过」，不满足点已在记录 §6 单列。
