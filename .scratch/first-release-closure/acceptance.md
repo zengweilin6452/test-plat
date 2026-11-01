@@ -494,3 +494,23 @@
 5. **不改变控制**：Phase 1 的控制权/手势 WS 与坐标归一化不受预览传输影响。
 
 全量回归（`testdock_frc10`，迁移 `0008`）：**577 项，576 passed / 1 skipped / 0 failed，退出码 0**（新增 3 项视频代理测试；计数方式同 §3 #1）。分支 `feat/debug-h264-preview`，提交 `b48a9e6`；按计划合并回集成分支。
+
+## 13. 直接操控点击延迟修复（2026-11-01 晚）
+
+**症状**：直接操控点击后约 0.5–2 秒设备才响应。
+
+**根因**：`handleControlPointerDown` 先设置 `pointerStartRef`，再调用 `openGesture()`；而 `openGesture()` 会调用 `closeGestureSocket()`，后者把 `pointerStartRef` 清空。`finishControlPointer` 因此直接 return，手势 `end` 从未发送；vendor 只能等 2s 空闲超时（或下一条手势断连）自己补 UP。Android 应用通常在 ACTION_UP 才完成点击，所以表现为点击延迟。
+
+**证据**：
+- 修复前 UI 会话 `3ba8f0be…/actions.jsonl`：`viewer.gesture.down seq:1` 后 `up seq:1`，间隔 0.5–2.0s，且 up 的 `duration_ms:0`（超时/断连清理，不是客户端 end）。
+- 对照 API 直发手势 `de7238e5…/actions.jsonl`：`down seq:1`、`up seq:2`，间隔 2ms。
+- vendor 空闲阈值 `_GESTURE_IDLE_TIMEOUT_SECONDS = 2.0`。
+
+**修复**：把 `openGesture()` 移到 `pointerStartRef.current = ...` 之前（`DebugDrawer.tsx:988-989`）；`closeGestureSocket` 仍保留 reset/disable 的清理职责。前端新增源码顺序回归测试（旧顺序失败，新顺序通过）。
+
+**复验**（真机 749622c9，H.264 预览）：
+- 新会话 `439a5196…/actions.jsonl`：`down seq:1` 于 `09:51:04.738`（注入 156ms），`up seq:2` 于 `09:51:04.740`（2ms 后）——end 已即时送达。
+- 同一次点击后设备树出现「学员/学习统计/学习时长」，页面真实切换。
+- 前端 58 项测试、`tsc --noEmit`、`npm run build` 通过；活动租约/会话收尾为 0。
+
+**剩余观察**：单次 DOWN 注入约 156ms；若仍感觉慢，下一步应量化 H.264 呈现延迟（本次只修了 2s 的根因，未改预览传输）。

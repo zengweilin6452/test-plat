@@ -982,9 +982,12 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     } catch {
       // 指针已释放
     }
+    // 必须先 openGesture：它会调用 closeGestureSocket 清空 pointerStartRef；
+    // 反过来会把刚记下的指针清掉，pointerup 时 end 永远发不出去（vendor 只能等
+    // 2s 空闲超时补 UP，点击响应被拖到 UP 才发生）。
+    openGesture()
     pointerStartRef.current = { nx: point.nx, ny: point.ny, at: Date.now() }
     lastMoveAtRef.current = null
-    openGesture()
     gestureSend(gestureMessage('start', point.nx, point.ny, ++gestureSeqRef.current))
     setTouchDot({ left: point.nx * 100, top: point.ny * 100 })
   }
