@@ -288,6 +288,9 @@ class SuiteSourcesOut(BaseModel):
 
     items: list[SuiteSourceOut] = Field(default_factory=list)
     total: int
+    #: 来源为空时的明确提示（需要宿主配置）；有来源时为 None。
+    #: 空数组本身不解释原因，页面不能靠"空列表"猜出下一步该做什么。
+    hint: str | None = None
 
 
 class SuiteCreateIn(BaseModel):

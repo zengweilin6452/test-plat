@@ -146,6 +146,13 @@ def configured_code_copies_root() -> Path:
 #:        "test_types": ["ui", "joint"]}]
 SUITE_SOURCES_ENV = "TESTDOCK_SUITE_SOURCES"
 
+#: 来源为空时给浏览器看的提示。空数组本身不解释"为什么没有可选来源"，
+#: 页面需要一句明确的"该由宿主配置"，而不是一个可以随便填路径的输入框。
+EMPTY_SUITE_SOURCES_HINT = (
+    f"未配置可信套件来源：需要宿主预配置 {SUITE_SOURCES_ENV} 后才能登记或发现套件。"
+    "浏览器只能选择 source_id，不能指定宿主路径。"
+)
+
 
 @dataclass(frozen=True)
 class SuiteSource:
@@ -213,6 +220,11 @@ def configured_suite_sources() -> list[SuiteSource]:
 def list_suite_sources() -> list[dict[str, Any]]:
     """对外视图：只给 source_id / 显示名 / 适用类型，不含宿主绝对路径。"""
     return [source.public_view() for source in configured_suite_sources()]
+
+
+def suite_sources_hint(items: list[dict[str, Any]]) -> str | None:
+    """来源为空时的明确提示；有来源则无需提示（返回 None）。"""
+    return None if items else EMPTY_SUITE_SOURCES_HINT
 
 
 def resolve_configured_source(
@@ -816,16 +828,19 @@ __all__ = [
     "DISCOVER_TIMEOUT_S",
     "DiscoverErrorKind",
     "DiscoverResult",
+    "EMPTY_SUITE_SOURCES_HINT",
     "ResolvedSource",
     "SourceBoundaryError",
     "collect_suite",
     "configured_code_copies_root",
     "configured_trusted_roots",
     "copy_source",
+    "list_suite_sources",
     "load_code_copy_sidecar",
     "parse_collected_node_ids",
     "resolve_source",
     "resolve_suite_root",
+    "suite_sources_hint",
     "tree_digest",
     "verify_code_copy",
 ]

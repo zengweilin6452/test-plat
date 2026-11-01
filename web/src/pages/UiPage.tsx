@@ -76,6 +76,15 @@ export function pickVersion(
   return versions.find((item) => item.version === versionNo) ?? versions[0]
 }
 
+/**
+ * 版本固定代码副本状态：没有副本的旧版本不能执行，必须要求重新发现。
+ * `has_code_copy` 缺失（更老的接口）时不下结论，返回 null 由后端 readiness 兜底。
+ */
+export function versionCopyNotice(version: SuiteVersionRecord): string | null {
+  if (version.has_code_copy !== false) return null
+  return '该版本未保留固定代码副本：执行会被阻断，请用「重新发现」创建带副本的新版本。'
+}
+
 export function UiPage() {
   const { targetScope, setTargetScope } = useTargetScope()
   // 工单 19：工作区携带应用身份；过滤与提交都锚定这个应用（AC-APP-01）
@@ -183,6 +192,8 @@ export function UiPage() {
   const versions = versionsQuery.data?.items ?? []
   const activeVersion = pickVersion(versions, versionNo)
   const suiteCases: SuiteCaseRecord[] = activeVersion?.manifest?.cases ?? []
+  // 旧版本没有固定代码副本时不能执行：直接要求重新发现，不显示"未验证"就放行。
+  const copyNotice = activeVersion ? versionCopyNotice(activeVersion) : null
   const suitesError = suitesQuery.isError ? describeError(suitesQuery.error) : null
   const versionsError = versionsQuery.isError ? describeError(versionsQuery.error) : null
 
@@ -513,12 +524,16 @@ export function UiPage() {
                     <span className="muted small">
                       {activeVersion.source_commit ?? 'local'} · 发现于{' '}
                       {fmtDateTime(activeVersion.created_at)}
-                      {activeVersion.manifest?.suite_root
-                        ? ' · ' + String(activeVersion.manifest.suite_root)
-                        : ''}
                     </span>
                   ) : null}
                 </Toolbar>
+              </div>
+            ) : null}
+            {copyNotice ? (
+              <div className="mb" style={{ padding: '0 20px' }}>
+                <Notice tone="amber" title={'v' + (activeVersion?.version ?? '') + ' 没有固定代码副本'}>
+                  {copyNotice}
+                </Notice>
               </div>
             ) : null}
             <Table
