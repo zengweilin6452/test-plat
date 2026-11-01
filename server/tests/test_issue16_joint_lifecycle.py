@@ -782,3 +782,57 @@ def test_ui_timeout_failure_still_registers_collect_window(
     assert report["status"] == "errored"
     assert report["verdict"] is None, "非 completed 不得有 outcome"
     assert report["collectWindow"] == window
+
+
+def test_perf_collect_scope_is_entered_before_ui_runs(monkeypatch, tmp_path):
+    """真机缺陷回归：`kit.collect()` 只构造作用域，必须 `__enter__` 才开采集。
+
+    旧实现直接把未进入的作用域交给 finalize，UI 跑完才在 stop 时报
+    `'NoneType' object has no attribute 'stop'`——联动的性能采集其实从未启动，
+    报告却写成"性能组件 completed / not_tested"。这里用假 PerfKit 钉住入口。
+    """
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "server/runner_pkg"))
+    from testdock_runner import joint_job
+    from testdock_runner.env import ensure_vendor_on_path
+    from testdock_runner.ui_job import UiJobOptions
+
+    ensure_vendor_on_path(Path(__file__).resolve().parents[2] / "vendor")
+    import mobile_perf.kit as kit_mod
+    calls: list[str] = []
+
+    class FakeScope:
+        report = {"metricsSummary": {"cpu_process_pct": {"median": 1.0}}}
+
+        def __enter__(self):
+            calls.append("enter")
+            return self
+
+        def finalize(self):
+            calls.append("finalize")
+            return self.report
+
+    class FakeKit:
+        def __init__(self, **kwargs):
+            calls.append("kit")
+
+        def collect(self, spec):
+            calls.append("collect")
+            return FakeScope()
+
+    monkeypatch.setattr(kit_mod, "PerfKit", FakeKit)
+    options = UiJobOptions(
+        run_id="run-real-scope",
+        artifacts_dir=tmp_path,
+        serial="serial",
+        app_package="com.example.app",
+        perf={"items": ["CPU"]},
+    )
+
+    scope = joint_job._start_perf_collect(options)
+
+    assert calls == ["kit", "collect", "enter"], calls
+    assert joint_job._stop_collection(scope) == FakeScope.report
+    assert calls == ["kit", "collect", "enter", "finalize"], calls

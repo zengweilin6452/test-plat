@@ -17,6 +17,7 @@ TESTDOCK_FAKE_PERF=collect_start_failed / TESTDOCK_FAKE_UI_TIMEOUT=1 模拟矩�
 
 from __future__ import annotations
 
+import contextlib
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -95,7 +96,16 @@ def _start_perf_collect(options: UiJobOptions):
         host_run_id=str(options.run_id),
         runs_dir=str(runs_dir),
     )
-    return kit.collect(spec)
+    # collect() 只构造作用域；真正的 perf-start 在 __enter__ 里发生。不进入就
+    # 直接交给 finalize，会在 UI 跑完后报 "'NoneType' object has no attribute
+    # 'stop'"——采集从未启动，报告却以为性能组件已执行（真机验收发现）。
+    scope = kit.collect(spec)
+    try:
+        return scope.__enter__()
+    except Exception:
+        with contextlib.suppress(Exception):
+            scope.finalize()
+        raise
 
 
 def _ui_window_timeout(options: UiJobOptions) -> int:
