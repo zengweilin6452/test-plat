@@ -1,0 +1,73 @@
+{
+  "buttons": [
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "同步设备池",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "打开调试",
+      "title": ""
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "打开调试",
+      "title": "设备当前不可调试"
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "打开调试",
+      "title": "设备当前不可调试"
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "打开调试",
+      "title": "设备当前不可调试"
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "打开调试",
+      "title": "设备当前不可调试"
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "打开调试",
+      "title": "设备当前不可调试"
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "打开调试",
+      "title": "设备当前不可调试"
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "打开调试",
+      "title": "设备当前不可调试"
+    }
+  ],
+  "hash": "#/devices",
+  "heading": "执行资源",
+  "states": [],
+  "text": "执行资源\n\n设备与浏览器资源池：可用状态、占用情况与授权\n\n同步设备池\n星河\n全部目标端\n目标端\n全部目标端\nAndroid\niOS\nWeb\n项目\n全部项目\n星河 Demo\n全部设备（8）\n空闲（1）\n占用中（0）\n离线（7）\n待授权（0）\n退役中（0）\n1 台可用 / 0 台占用中 / 7 台不可用（共 8 台）\n749622c9\n可用\n可调试\n平台\nAndroid\n系统\nAndroid 14\n分辨率\n1080x2400\n设备编号\n749622c9\n当前占用\n无占用\n打开调试\nABC123456789\n离线\n未连接\n平台\nAndroid\n系统\nAndroid 14\n分辨率\n1080x2400\n设备编号\nABC123456789\n当前占用\n检查连接与设备状态\n打开调试\nDEF123456789\n离线\n未连接\n平台\nAndroid\n系统\nAndroid 13\n分辨率\n1080x2340\n设备编号\nDEF123456789\n当前占用\n检查连接与设备状态\n打开调试\nGHI123456789\n离线\n未连接\n平台\nAndroid\n系统\nAndroid 13\n分辨率\n1080x2340\n设备编号\nGHI123456789\n当前占用\n检查连接与设备状态\n打开调试\nJKL123456789\n离线\n未连接\n平台\nAndroid\n系统\nAndroid 13\n分辨率\n1080x2340\n设备编号\nJKL123456789\n当前占用\n检查连接与设备状态\n打开调试\nMNO123456789\n离线\n未连接\n平台\nAndroid\n系统\nAndroid 14\n分辨率\n1080x2400\n设备编号\nMNO123456789\n当前占用\n检查连接与设备状态\n打开调试\ncross-project-dev\n离线\n未连接\n平台\nAndroid\n系统\nAndroid 17\n分辨率\n1200x2608\n设备编号\ncross-project-dev\n当前占用\n检查连接与设备状态\n打开调试\nemulator-5554\n离线\n未连接\n平台\nAndroid\n系统\nAndroid 14\n分辨率\n1080x2400\n设备编号\nemulator-5554\n当前占用\n检查连接与设备状态\n打开调试\n设备占用状态与 UI、性能任务共用；接入时由宿主协调设备租约与短事务准入。平台不执行连接、安装或授权操作。",
+  "viewport": {
+    "dpr": 1,
+    "h": 0,
+    "w": 0
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "buttons": [
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "新建任务",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "运行分析",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "基线与门禁",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "Android已有组件基础",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "iOS规划中",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "Web规划中",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "UI 自动化不采集性能指标",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "性能测试需要填写采集时长",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "UI + 性能需要填写采集时长",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "取消",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "下一步",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "刷新",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "关闭",
+      "title": ""
+    }
+  ],
+  "hash": "#/perf",
+  "heading": "性能测试",
+  "states": [
+    {
+      "state": "empty",
+      "text": "还没有已完成的性能运行\n性能或联动任务跑完后，这里展示指标、门禁逐项与基线对比。"
+    },
+    {
+      "state": "empty",
+      "text": "还没有性能运行\n提交性能或联动任务后，运行与门禁结论会出现在这里。"
+    }
+  ],
+  "text": "性能测试\n\n性能指标与门禁结论：阈值由后端评估，页面只做展示\n\n新建任务\n星河\n全部目标端\n目标端\n全部目标端\nAndroid\niOS\nWeb\n门禁结论来自 gate_evaluations\n门禁结论不在前端计算\n性能结论由后端根据阈值与基线评估后写入 gate_evaluations。样本不足或基线不可比时结论为「未判定」， 页面不会把它显示成未通过或已通过；指标缺失会显示具体原因，而不是 0。\n运行分析\n基线与门禁\n运行分析\n指标取 median；门禁逐项来自后端 checks，试算只新增判定行\n还没有已完成的性能运行\n性能或联动任务跑完后，这里展示指标、门禁逐项与基线对比。\n性能运行\n指标口径：PSS 内存 / 应用进程 CPU / 帧率 / GPU 占用\n还没有性能运行\n提交性能或联动任务后，运行与门禁结论会出现在这里。",
+  "viewport": {
+    "dpr": 1,
+    "h": 0,
+    "w": 0
+  }
+}

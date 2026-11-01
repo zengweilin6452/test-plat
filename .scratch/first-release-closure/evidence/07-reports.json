@@ -1,0 +1,30 @@
+{
+  "buttons": [
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    }
+  ],
+  "hash": "#/reports",
+  "heading": "报告中心",
+  "states": [
+    {
+      "state": "empty",
+      "text": "还没有已完成的运行\n运行结束后会生成报告，这里按任务列出结论、证据与可比性说明。"
+    }
+  ],
+  "text": "报告中心\n\n保留每次运行的原始结论，从结果回到证据。\n\n星河\n全部目标端\n目标端\n全部目标端\nAndroid\niOS\nWeb\n全部模块\nUI\n性能\n联动\n重跑创建新记录，不覆盖历史证据\n还没有已完成的运行\n运行结束后会生成报告，这里按任务列出结论、证据与可比性说明。",
+  "viewport": {
+    "dpr": 1,
+    "h": 1145,
+    "w": 1145
+  }
+}

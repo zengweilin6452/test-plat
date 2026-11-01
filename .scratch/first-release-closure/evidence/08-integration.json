@@ -1,0 +1,19 @@
+{
+  "buttons": [
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    }
+  ],
+  "hash": "#/integration",
+  "heading": "接入说明",
+  "states": [],
+  "text": "接入说明\n\n外部系统如何把测试定义与结果写入平台\n\n星河\n全部目标端\n目标端\n全部目标端\nAndroid\niOS\nWeb\n接口基址 /api/v1\n能力核查\n来自 GET /api/v1/health，30s 自动刷新\n后端服务 · ok\n数据库 · ok\nmobile_auto vendor · present\nmobile_perf vendor · present\n鉴权与幂等\n接入方需要携带访问凭据；写接口均应带幂等键，重试不会产生重复记录。 凭据只放在服务端，前端页面永远不直连数据库。\n平台能力\n外部系统可以使用的写入与查询能力\n测试定义写入\n\nPOST /api/v1/tasks 创建任务草稿；PATCH /tasks/{id} 与 POST /tasks/{id}/validate 形成修订并验证（幂等键 request_key）。\n\n构建与套件登记\n\nPOST /api/v1/builds 登记构建（同 key 同身份复用）；POST /api/v1/suites 登记套件并固定代码副本。\n\n运行发起与跟踪\n\nPOST /api/v1/runs 发起运行（幂等键重复提交返回 200 + duplicate）；GET /runs/{id}/events 按序号补拉，WS /ws/runs/{id} 实时跟踪。\n\n结果与证据\n\n结果由 runner 经内部协议上报并落库（runs/cases/metrics/gate_evaluations）；浏览器经 GET /runs/{id}/report 与 /artifacts 读取，error/available/expired 分别呈现。\n\n门禁评估\n\n阈值评估在后端完成并写入 gate_evaluations；试算经 POST /runs/{id}/gate-evaluations 只新增 reanalysis，不改写原始判定。\n\n错误码\n统一错误信封 { code, message, request_id }\nvalidation_error\n\n400 请求体字段缺失、类型不符或改写固定输入\n\nreadiness_incomplete\n\n422 修订未验证或缺少显式身份（application_id/task_id）\n\nnot_found\n\n404 任务/运行/修订不存在或跨归属引用\n\nstate_conflict\n\n409 运行终态不可再改、取消竞争等状态不允许\n\nstale_version\n\n409 任务被他人更新（lock_version CAS 失败），请刷新重试\n\ndevice_busy\n\n409 目标资源已有活动租约（含占用者信息）\n\n一次完整接入\n验证任务后发起运行，由执行器管理资源与上报\n定义\n→\n验证\n→\n执行\n→\n报告\nPOST /api/v1/tasks                       # 创建任务草稿\nPOST /api/v1/tasks/{id}/validate         # 验证当前修订，取得 revision_id\nPOST /api/v1/runs                        # 提交 application_id/task_id/revision_id/device\nGET  /api/v1/runs/{id}/events             # 跟踪运行\nGET  /api/v1/runs/{id}/report             # 读取原始结论与证据\nGET  /api/v1/runs/{id}/report/export      # 导出报告 JSON",
+  "viewport": {
+    "dpr": 1,
+    "h": 1145,
+    "w": 1145
+  }
+}

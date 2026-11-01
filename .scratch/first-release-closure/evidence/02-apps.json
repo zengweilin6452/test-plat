@@ -1,0 +1,37 @@
+{
+  "buttons": [
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "Android\n\n已有组件基础",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "iOS\n\n规划中",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "Web\n\n规划中",
+      "title": ""
+    }
+  ],
+  "hash": "#/apps",
+  "heading": "项目与应用",
+  "states": [],
+  "text": "项目与应用\n\n一个产品项目下分别登记 Web、Android 与 iOS 应用，作为创建与报告的入口。\n\n星河\n全部目标端\n目标端\n全部目标端\nAndroid\niOS\nWeb\nAndroid\n\n已有组件基础\n\niOS\n\n规划中\n\nWeb\n\n规划中\n\n目标端与应用\n同一应用可按目标端分别登记，任务只引用已登记的目标\n星河 Demo\n应用名称\t目标端\t标识\t关联任务\t执行能力\t工作区\n星河 Android\tAndroid\tcom.example.xinghe\t0\t\n已有组件基础\t进入工作区 ›\n星河 iOS\tiOS\tcom.example.xinghe.ios\t0\t\n规划中\t进入工作区 ›\n星河 Web\tWeb\thttps://staging.example.test/\t0\t\n规划中\t进入工作区 ›\n共 3 个应用 · 当前筛选 全部目标端 · 全库 3 个",
+  "viewport": {
+    "dpr": 1,
+    "h": 0,
+    "w": 0
+  }
+}

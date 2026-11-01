@@ -1,0 +1,126 @@
+{
+  "buttons": [
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "新建任务",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "Android已有组件基础",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "iOS规划中",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "Web规划中",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "UI 自动化不采集性能指标",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "性能测试需要填写采集时长",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "UI + 性能需要填写采集时长",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "取消",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "下一步",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "刷新",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "关闭",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "刷新",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "关闭",
+      "title": ""
+    }
+  ],
+  "hash": "#/tasks",
+  "heading": "任务中心",
+  "states": [
+    {
+      "state": "empty",
+      "text": "还没有测试任务\n点击新建任务，选择固定测试输入后启动运行。"
+    }
+  ],
+  "text": "任务中心\n\n统一管理测试任务的创建、执行流程和结果证据。\n\n新建任务\n星河\n全部目标端\n目标端\n全部目标端\nAndroid\niOS\nWeb\n任务使用 TASK- 编号，每次执行使用独立 RUN- 编号\n任务列表\n每行展示最新修订与最近一次运行；点击任务查看配置，查看执行打开运行详情\n全部模块\nUI\n性能\n联动\n全部运行态\n已完成\nfailed 是结论不是运行态\n执行中\n异常\n已取消\n排队中\n按任务名称或编号搜索（服务端过滤 ?q=）\n还没有测试任务\n点击新建任务，选择固定测试输入后启动运行。\n运行编号与任务编号由后端生成：任务保留 TASK- 编号，启动后产生独立 RUN- 编号。",
+  "viewport": {
+    "dpr": 1,
+    "h": 1145,
+    "w": 1145
+  }
+}

@@ -1,0 +1,169 @@
+{
+  "buttons": [
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "新建任务",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "查看执行记录",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "测试套件",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "设备调试",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "图像模板",
+      "title": ""
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "运行套件",
+      "title": "该套件还没有 discover 过，没有可运行的版本"
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "查看用例\n›",
+      "title": "该套件还没有 discover 过，没有用例可看"
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "运行套件",
+      "title": "该套件还没有 discover 过，没有可运行的版本"
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "查看用例\n›",
+      "title": "该套件还没有 discover 过，没有用例可看"
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "运行套件",
+      "title": "该套件还没有 discover 过，没有可运行的版本"
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "查看用例\n›",
+      "title": "该套件还没有 discover 过，没有用例可看"
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "运行套件",
+      "title": "该套件还没有 discover 过，没有可运行的版本"
+    },
+    {
+      "disabled": true,
+      "tag": "BUTTON",
+      "text": "查看用例\n›",
+      "title": "该套件还没有 discover 过，没有用例可看"
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "Android已有组件基础",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "iOS规划中",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "Web规划中",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "UI 自动化不采集性能指标",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "性能测试需要填写采集时长",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "UI + 性能需要填写采集时长",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "取消",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "下一步",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "刷新",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "关闭",
+      "title": ""
+    }
+  ],
+  "hash": "#/ui",
+  "heading": "UI 自动化",
+  "states": [],
+  "text": "UI 自动化\n\n用例、套件与执行记录：断言结果可追溯到报告与现场证据\n\n新建任务\n星河\n全部目标端\n目标端\n全部目标端\nAndroid\niOS\nWeb\n断言与现场证据均在后端留存\n查看执行记录\n测试套件\n设备调试\n图像模板\n测试套件\n套件来自 test_suites；用例数取自最新 discover 版本\n套件 / 应用\t目标端\t最新版本\t用例数\t最近发现\t操作\n下单链路\n星河 Android\n\tAndroid\t未发现\t—\t—\t\n运行套件\n查看用例\n›\n\n个人中心\n星河 Android\n\tAndroid\t未发现\t—\t—\t\n运行套件\n查看用例\n›\n\n核心链路回归\n星河 Android\n\tAndroid\t未发现\t—\t—\t\n运行套件\n查看用例\n›\n\n登录与账号\n星河 Android\n\tAndroid\t未发现\t—\t—\t\n运行套件\n查看用例\n›\n共 4 个套件 · 类型 UI 自动化",
+  "viewport": {
+    "dpr": 1,
+    "h": 0,
+    "w": 0
+  }
+}

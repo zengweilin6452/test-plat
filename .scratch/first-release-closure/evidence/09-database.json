@@ -1,0 +1,199 @@
+{
+  "buttons": [
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "导出字典",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "关系总览",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "字段字典",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "写入流程",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "projects\n产品级隔离单元，Android、iOS、Web 应用归属于同一",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "project_members\n复用身份提供方，以项目角色授权，不在业务库保存登",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "applications\n目标端属于应用，不为每种端复制一套任务和报告表。",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "app_builds\n固定待测构建；移动包与 Web 部署均采用同一版本记录。",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "environments\n保存各环境的非敏感配置，实际站点地址可随环境区分。",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "execution_nodes\n宿主 Agent 与可用适配器，初期按项目独占。",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "resource_profiles\n不可变的可比性档案：系统、设备或浏览器、采集",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "execution_resources\n真机、模拟器或浏览器槽位。每个实例只承载",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "device_checks\n设备短检查（readiness / identity",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "debug_sessions\n人工设备控制使用短期调试会话，与自动运行竞争同一资",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "resource_leases\n保留运行或调试的独占历史，用 fencing t",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "test_suites\n登记代码维护的 UI 用例或性能场景，不把脚本正文塞进数",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "suite_versions\n固定仓库、提交及选择器，旧运行可追溯到当时的用例。",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "test_tasks\n用户可编辑的逻辑任务；不存通过或失败结果。 Web/iOS",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "task_revisions\n每次保存新增不可变修订；运行只引用已验证修订。 只",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "task_request_keys\n任务创建幂等键；跨重启复用",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "test_runs\n一次提交或重跑对应一行，保留执行状态、最终结论和当时配置。 ",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "run_components\n一次运行下的 UI/性能子结果。联动共用运行和租约",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "case_results\n每个用例的执行尝试独立保存，可区分用例重试与整次重跑。",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "artifacts\n保存文件元数据和私有存储键，截图、日志、录像、曲线均通过此表",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "metric_summaries\n按指标、统计窗口和统计量保存查询所需的小体积摘",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "baselines\n不可变的对照版本；源运行和全部可比性信息一并保留。 来源组件",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "gate_policies\n平台持有门槛，适配器负责正确的测量与统计。",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "gate_evaluations\n原始判定与后续试算分开保存；改规则不会覆盖历史",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "run_events\n状态变化、步骤标记、接入事件按运行顺序追加，支持断线续看。",
+      "title": ""
+    },
+    {
+      "disabled": false,
+      "tag": "BUTTON",
+      "text": "audit_events\n记录谁修改配置、发起运行或调整规则，不承载完整业务数据",
+      "title": ""
+    }
+  ],
+  "hash": "#/database",
+  "heading": "数据设计",
+  "states": [],
+  "text": "数据设计\n\n表关系、字段字典与写入流程（数据源 GET /api/v1/schema）\n\n导出字典\n星河\n全部目标端\n目标端\n全部目标端\nAndroid\niOS\nWeb\n共 26 张表\n关系总览\n字段字典\n写入流程\n表清单（26）\n基础资产\n5\nprojects\n产品级隔离单元，Android、iOS、Web 应用归属于同一项目。\nproject_members\n复用身份提供方，以项目角色授权，不在业务库保存登录口令。 角色必须由后端检查；project_id 外键不等于行级访问控制。\napplications\n目标端属于应用，不为每种端复制一套任务和报告表。\napp_builds\n固定待测构建；移动包与 Web 部署均采用同一版本记录。\nenvironments\n保存各环境的非敏感配置，实际站点地址可随环境区分。\n执行资源\n6\nexecution_nodes\n宿主 Agent 与可用适配器，初期按项目独占。 宿主凭据不入 capabilities；首期不设计跨项目共享节点池。\nresource_profiles\n不可变的可比性档案：系统、设备或浏览器、采集器、分辨率、指标版本。 档案内容变化新增记录，不覆盖旧记录；性能比较还须校验应用、场景和指标口径。\nexecution_resources\n真机、模拟器或浏览器槽位。每个实例只承载一个活动运行。 Web 并发通过多个独立槽位表示；资源重新建档须在无活动租约时处理。\ndevice_checks\n设备短检查（readiness / identity）；与运行、调试共用 resource_leases 互斥\ndebug_sessions\n人工设备控制使用短期调试会话，与自动运行竞争同一资源租约。 只读预览不占独占租约；会发送输入、冻结采集等操作按宿主冲突规则受控。断线不能立即释放资源。\nresource_leases\n保留运行或调试的独占历史，用 fencing token 拒绝过期执行者。 部分唯一索引保证每实例、运行或调试会话最多一条未释放租约；超时回收仍需 Agent 隔离旧进程。\n测试定义\n2\ntest_suites\n登记代码维护的 UI 用例或性能场景，不把脚本正文塞进数据库。\nsuite_versions\n固定仓库、提交及选择器，旧运行可追溯到当时的用例。\n任务运行\n4\ntest_tasks\n用户可编辑的逻辑任务；不存通过或失败结果。 Web/iOS 未接入时只能是 draft；计划能力不能用设备数据冒充已就绪。\ntask_revisions\n每次保存新增不可变修订；运行只引用已验证修订。 只有字段完整不代表可运行；适配器能力、套件类型及配置 schema 仍由提交事务验证。\ntask_request_keys\n任务创建幂等键；跨重启复用\ntest_runs\n一次提交或重跑对应一行，保留执行状态、最终结论和当时配置。 终态只追加新运行或新试算，不改原始结论；这种不可变性及状态转换须由后端写入边界实现。\n结果证据\n3\nrun_components\n一次运行下的 UI/性能子结果。联动共用运行和租约，分别保留结论。\ncase_results\n每个用例的执行尝试独立保存，可区分用例重试与整次重跑。 后端只接受 UI 组件的用例记录，校验 case_key 属于固定 suite_version。\nartifacts\n保存文件元数据和私有存储键，截图、日志、录像、曲线均通过此表归档。 文件先写临时键并校验成功，再提交元数据；无法做到数据库与文件原子提交，需幂等补偿。\n性能质量\n4\nmetric_summaries\n按指标、统计窗口和统计量保存查询所需的小体积摘要。 采样率、单位换算、窗口边界属于适配器契约；原始 series 单独归档，不逐点写业务库。\nbaselines\n不可变的对照版本；源运行和全部可比性信息一并保留。 来源组件的应用、场景、环境、profile 和完整性须由创建基线事务验证；不靠跨表 CHECK。\ngate_policies\n平台持有门槛，适配器负责正确的测量与统计。\ngate_evaluations\n原始判定与后续试算分开保存；改规则不会覆盖历史结论。 同项目外键不保证规则与基线适用当前应用；服务必须检查完整可比性。\n治理追溯\n2\nrun_events\n状态变化、步骤标记、接入事件按运行顺序追加，支持断线续看。\naudit_events\n记录谁修改配置、发起运行或调整规则，不承载完整业务数据。 只追加；审计主体与实体是否合法由授权后的业务事务写入。\n表分组\n7 个分组，共 26 张表\n基础资产\n5 张表\nprojects · project_members · applications · app_builds · environments\n执行资源\n6 张表\nexecution_nodes · resource_profiles · execution_resources · device_checks · debug_sessions · resource_leases\n测试定义\n2 张表\ntest_suites · suite_versions\n任务运行\n4 张表\ntest_tasks · task_revisions · task_request_keys · test_runs\n结果证据\n3 张表\nrun_components · case_results · artifacts\n性能质量\n4 张表\nmetric_summaries · baselines · gate_policies · gate_evaluations\n治理追溯\n2 张表\nrun_events · audit_events\n泳道\n按职责划分的表泳道（来自 /schema lanes）\n从配置到运行\n4 张表\nprojects · applications · test_tasks · task_revisions\n一次运行的可追溯结果\n4 张表\ntest_runs · run_components · case_results · artifacts\n共用资源，保留各端差异\n4 张表\nresource_profiles · execution_resources · debug_sessions · resource_leases\n性能口径与历史判定\n4 张表\nmetric_summaries · baselines · gate_policies · gate_evaluations",
+  "viewport": {
+    "dpr": 1,
+    "h": 1145,
+    "w": 1145
+  }
+}

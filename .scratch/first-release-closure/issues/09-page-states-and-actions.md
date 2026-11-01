@@ -4,7 +4,7 @@
 
 **Blocked by:** 05, 06, 07, 08
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## 现状指针
 
@@ -54,3 +54,13 @@ npm run build
 - 浏览器验收使用 `http://localhost:5173`；若需真机数据，先确认设备空闲。
 
 ## Comments
+
+- 2026-11-01 修复：新增 `web/src/lib/pageState.ts`，统一「加载 → 失败 → 空 → 就绪」阶段；Overview / Reports / Ui / Perf 补齐 `isLoading` 分支，加载中显示 `aria-busy`/`role=status` 的占位（`Empty loading`），不再把加载态冒充真实空态。
+- Overview 脚注不再写「接口未接入」：按阶段分别显示「正在加载概览数据…」「概览接口调用失败，见上方错误码后重试」「接口已连通但尚未返回计数」。
+- 无造假动作：DebugDrawer 复制表达式只在剪贴板写入成功后提示，失败给出真实错误；Ui 套件未 discover 时「运行套件 / 查看用例」disabled 且 title 说明原因；离线设备「打开调试」disabled 且 title 说明。
+- 身份未学习、来源为空、证据过期、未判定文案分别由 `InputRegistration.identityCheckNote` / `suiteSourceEmptyHint` / `evidenceState` / `not_tested` 呈现。
+- 提交：`ee15159`、`2a5a934`、`289b5c8`、`f3f84b9`，合入 `223eaad`。
+- 验证：`tsc -p tsconfig.json --noEmit` 通过；`npm test` 47 passed；`npm run build` 成功。
+- 九页浏览器核查（2026-11-01，`http://localhost:5173`，真实 8000 API）：Overview/Apps/Ui/Perf/Devices/Tasks/Reports/Integration/Database 均返回真实数据或真实空态；22 个 XHR 全部 200，无 console error；DOM/可访问树证据存于 `.scratch/first-release-closure/evidence/01-overview.txt`、`02-apps.json` … `09-database.json`。
+- 未执行：1440×900 视口下的像素级截图核对——内置浏览器 `visibility=hidden`、viewport 0×0，截图接口报 `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`；`agent-browser` 启动挂起。该项在 10 中记为「已实现待验」，不宣称已视觉对齐。
+- 有意保留差异：iOS/Web 目标端仍按 `planned` 展示「规划中」而非空态（规格驱动）；Reports 的筛选无结果单独成文案。
