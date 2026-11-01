@@ -12,5 +12,5 @@
 - 真机：749622c9 点击「我的」切页、Home 回桌面、单操作者 409、关闭后租约 0。
 
 ## Comments
-- 2026-11-01 交付：`feat/debug-direct-control`。后端 10 项控制测试、前端 52 项、`tsc`/build 通过；真机验收记录见 `acceptance.md §11`。
+- 2026-11-01 交付：`feat/debug-direct-control`（`5aad752`）。后端全量 574 项（573 passed / 1 skipped / 0 failed）、新增 10 项控制测试、前端 52 项、`tsc`/build 通过；真机验收记录见 `acceptance.md §11`。
 - 边界：浏览器后台标签页心跳被节流，超过 vendor 5s TTL 会如实失效并要求重新启用；H.264 预览按计划留作 Phase 2。
