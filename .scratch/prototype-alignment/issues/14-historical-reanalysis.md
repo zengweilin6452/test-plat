@@ -4,7 +4,7 @@
 
 **Blocked by:** 13
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-GATE-02：只新增 reanalysis，原 outcome 不变
 - [x] 报告持续显示 original 缺失，不补造
@@ -20,3 +20,7 @@
 - 分析页默认仍指向 original：缺 original 时 `original_missing=true`、verdict null，不兜底到补判定；显式 `evaluation_id` 才能选中。
 - 跨档案：显式指定另一档案运行的基线 → 判定照做但 `not_tested + profile_mismatch`，不伪造可比来源。
 - 验收（定向）：`test_issue14_historical_reanalysis.py` 4 例 + issue12/13、perf_gate_api、03_finalize、import_and_finalize、run_submission 回归全过；OpenAPI `--check` 通过。全量未跑（按指示）。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

@@ -4,7 +4,7 @@
 
 **Blocked by:** 08
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-REP-01：目标报告位于截断范围外时仍可分页或检索到
 - [x] AC-FILTER-01：搜索、模块、状态组合过滤在刷新和前后导航后一致
@@ -22,3 +22,7 @@
 - 顺手修复夹具：`_p3_common.make_run` 对 errored/cancelled 也写 `outcome='passed'`，直接违反 `ck_test_runs_state_outcome_pair`（此前没有测试用这两个状态插行所以没炸）；改为仅 completed 带 outcome。
 - 验收（按指示只跑定向）：`tests/test_issue10_report_search.py` 7 例（completed 过滤与 errored 带产物仍隔离、210 条超出截断范围可搜索直达且翻页不重不漏、q+模块+状态组合跨页一致、q 字面不 wildcard、游标绑定过滤与非法拒绝、state 校验）；make_run 消费方定向回归（run_submission/p3_transitions/p5_debug/p7_device_sync）全过；web `tsc --noEmit` 通过；`export_openapi.py --check` 通过。全量套件本轮未跑（按用户指示）。
 - 已知边界：cursor 是不透明 base64（非加密），前端篡改内容只会得到 422；报告中心 UI 的状态筛选下拉（state 参数）暂未加——报告页本来就只显示 completed，其他状态在运行页看。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

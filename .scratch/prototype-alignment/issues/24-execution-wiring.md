@@ -4,7 +4,7 @@
 
 **Blocked by:** 08
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] 派发时执行目录来自固定代码副本，不读可变来源目录；报告与事件记录实际使用的副本摘要
 - [x] 旧套件无固定副本时阻断派发，并明确提示需先创建新套件版本，不回退到来源目录
@@ -25,3 +25,7 @@
 - 夹具：`make_project` 的套件版本现在带真实可校验的 code_copy（副本根取自 TESTDOCK_CODE_COPIES_DIR / data 目录）。
 - 验收（定向）：`test_issue24_execution_wiring.py` 4 例（副本缺失阻断、happy path 带 suite_root 且只读、身份冲突阻断并释放租约、pending 不阻断）+ run_submission / p3_transitions / p5_debug / import_and_finalize / p7_device_sync 回归全过；OpenAPI `--check` 通过。
 - 已知边界：真机模式的 dumpsys 解析与 vendor 锁配合需要实机走查；runner 的 cwd/argv 仍未切换到副本目录（spawn 只把 suite_root 传给 runner，runner 侧消费归 runner 生命周期迭代）。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

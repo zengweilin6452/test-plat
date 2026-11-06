@@ -4,7 +4,7 @@
 
 **Blocked by:** 12、03
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-GATE-01：排队期间策略变化不改执行快照
 - [x] AC-CONTRACT-05：原始判定、组件结论与终态同事务收敛
@@ -22,3 +22,7 @@
 - AC-CONTRACT-05（finalizing 单事务收敛 original+组件+终态）此前已由工单 03 落地，本工单回归覆盖其判定核心路径。
 - 验收（定向）：`test_issue13_original_freeze.py` 5 例 + perf_gate_api / gates_logic / run_submission / 03_finalize / import_and_finalize / issue12 回归全过；OpenAPI 重新生成并通过 `--check`。全量未跑（按指示）。
 - 已知边界：快照里的 rules 是审计副本，判定仍按 policy_id 读行（gate_policies 行按约定不可变、改动即新增版本）；若未来允许原地改 rules，需要把判定输入改为读快照 rules。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

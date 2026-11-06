@@ -4,7 +4,7 @@
 
 **Blocked by:** 04、05
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-INPUT-03：三种类型分别验证，套件与修订测试类型不匹配失败
 - [x] AC-CORE-02：缺构建、缺套件、无效归属、空或不适用清单显示准确 missing/invalid
@@ -21,3 +21,7 @@
 - readiness 新增套件/修订类型一致性校验；带 `test_type` 的新清单按 §6.6 逐项校验，旧清单沿用旧口径（UI/joint 需用例与固定副本）。
 - 验收：`tests/test_issue06_typed_manifest.py` 10 例；worktree 全量 322 passed / 1 skipped；`export_openapi.py --check` 通过；未新增迁移（head 仍 0004）。
 - 已知接线缺口：joint 的实际执行（UI 与采集时间边界）归工单 16；浏览器侧清单展示与类型选择归工单 18/19。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

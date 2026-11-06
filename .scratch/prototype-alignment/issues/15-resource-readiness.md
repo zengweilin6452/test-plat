@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-RES-01：ready+idle、ready+busy、offline、unauthorized、draining 计数准确
 - [x] AC-RES-02：占用预览不新建调试、不额外采屏、不抢租约
@@ -20,3 +20,7 @@
 - AC-RES-03：`ReadinessCheckIn.test_type` 是 Literal（ui/performance/joint），未知值 422（有测试）；`_REQUIRED_CHECKS` 按类型取必需项，检查项缺失或 unknown 一律进 blocking，不冒充通过。
 - 验收（定向）：`test_issue15_resource_readiness.py` 2 例 + p7_device_sync、issue02_readiness 回归全过；web `tsc --noEmit` 通过；OpenAPI `--check` 通过。全量未跑（按指示）。
 - 已知边界："占用预览"没有独立端点——设备页对 busy 设备的可见信息来自列表行的 lease 字段与 409 details，不新建调试会话、不采屏、不抢租约（busy 预览语义由这两个既有行为构成）。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

@@ -4,7 +4,7 @@
 
 **Blocked by:** 06、07
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-APP-01：两个同平台不同应用逐个进入，所选应用准确
 - [x] 规划平台不能提交真实执行或显示设备就绪
@@ -18,3 +18,7 @@
 - 规划平台：iOS/Web 修订永远 draft（validate 拒绝）、POST /runs 422 readiness_incomplete（测试覆盖）；工作区 Notice 明示"仅支持保存草稿，不显示设备就绪，不伪装真实执行"。
 - 登记按钮：应用页"登记应用"按批准范围保持占位（不追加应用 CRUD）；任务创建仍走 TaskWizard（工单 06/07 通道）。
 - 验收（定向）：`test_issue19_app_workspace.py` 2 例；web `tsc --noEmit` 通过；OpenAPI `--check` 通过。逐应用进入的浏览器端到端走查未做（按指示）。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

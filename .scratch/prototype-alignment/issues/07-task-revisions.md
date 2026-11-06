@@ -4,7 +4,7 @@
 
 **Blocked by:** 06
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-CONTRACT-01：同名换构建或套件不得悄悄复用旧任务
 - [x] AC-CONTRACT-02：PATCH 与 validate 均形成新修订，并发修改返回 stale_version
@@ -22,3 +22,7 @@
 - PATCH：`config` 整份替换（不做深合并，删键可表达）；省略绑定字段沿用上一修订；CAS 失败 409 `stale_version` 且不追加修订。validate 成功追加 `validated` 修订，响应即最新 `revision.id` / `lock_version`，原修订保持 `draft`。
 - 验收：`tests/test_issue07_task_revisions.py` 14 例（同名同内容复用、换构建/套件/config 冲突、幂等键落库与跨引擎重启复用、同键异内容冲突、整份替换、省略不变、stale 不追加修订、validate 采用新 revision、CAS 并发、旧修订与旧运行不被回写）；worktree 全量 337 项（1 skipped）；`export_openapi.py --check` 通过；迁移 head 0005。
 - 已知接线缺口：浏览器侧"采用响应 revision_id 并据此发起运行"归工单 18/19；运行与试算的幂等键内容比较归工单 08/16（本工单只覆盖任务创建）。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

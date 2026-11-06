@@ -4,7 +4,7 @@
 
 **Blocked by:** 07
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-FILTER-01：组合过滤、刷新和前后导航结果一致
 - [x] URL 保留 scope、application、q、test_type、state
@@ -17,3 +17,7 @@
 - 服务端：GET /tasks 新增 `run_state`（七态白名单，failed/outcome 不可用作运行态 → 400），按任务**最近一次运行**的 state 过滤，不与 lifecycle/readiness 混用；q/test_type 组合仍可用。
 - 前端：任务中心过滤条件落在 URL（?q / ?test_type / ?run_state），刷新与前后导航结果一致；切 scope 由 ContextBar 触发整页重取（URL 保留 q/test_type 但运行态按 scope 重新过滤）。
 - 验收（定向）：`test_issue20_task_filters.py` 3 例 + p2_tasks_api 回归全过；web `tsc --noEmit` 通过；OpenAPI `--check` 通过。浏览器导航走查未做（按指示）。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

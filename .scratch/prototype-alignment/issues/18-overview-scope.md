@@ -4,7 +4,7 @@
 
 **Blocked by:** 08、10
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-OV-01：切换 scope 后统计、告警、列表和资源一致
 - [x] AC-OV-02：新建、模块卡、告警均可定位正确目标
@@ -19,3 +19,7 @@
 - 无判定样本：`pass_rate` 分母为 0 时 null（既有语义），测试在全新 scope（ios）上验证 null 而非 0%。
 - 无告警/无资源/接口失败：needs_attention=0 正常显示 0；无资源计数为 0；接口失败走既有红色 Notice（含 request_id）。
 - 验收（定向）：`test_issue18_overview_scope.py` 3 例；web `tsc --noEmit` 通过；OpenAPI `--check` 通过。浏览器端 scope 切换的端到端走查未做（按指示不跑全量/浏览器 QA）。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

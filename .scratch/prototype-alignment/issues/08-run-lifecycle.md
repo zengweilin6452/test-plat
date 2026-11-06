@@ -4,7 +4,7 @@
 
 **Blocked by:** 07
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-LIVE-01：断线重连不丢终态、不重复事件
 - [x] AC-CONTRACT-03：超过 500 条事件后仍可补拉，取消事实不丢失
@@ -25,3 +25,7 @@
 - 验收：`tests/test_issue08_run_lifecycle.py` 17 例（缺应用/任务/幂等键、省略修订固定并回传、草稿修订拒绝、五种固定输入改写拒绝、跨应用父运行 404、queued 取消收敛与重复取消 409、执行中取消只受理且与完成竞争保留 completed、终态取消 409、心跳读列并续租、621 条事件分页与取消事实保留、列表/详情/WS 投影一致、WS 实时终态与重连重放、阶段权重静态一致）；worktree 全量 354 项（353 passed / 1 skipped）；`scripts/export_openapi.py --check` 通过（路由返回裸 dict，契约文件无变化）；迁移 head `0006`。
 - 接口说明同步：`docs/plan/api-design.md` §2.4/§3.1/§4 更新为显式身份、固定输入、取消语义、事件分页与 WS 重连口径。
 - 已知接线缺口：运行前构建身份复核与固定代码副本接线未进派发路径（工单 04、05 原留待本工单），已单列为工单 24，原因见该工单 Comments。浏览器侧取消按钮与断线补拉的消费方归工单 18/19。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

@@ -4,7 +4,7 @@
 
 **Blocked by:** 01、03
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-INPUT-02：旧版本在来源目录变化后仍使用 V1
 - [x] 浏览器不能传任意宿主路径；越界与符号链接逃逸拒绝
@@ -23,3 +23,7 @@
 - 验收：`tests/test_issue05_suite_sources.py` 9 例（链接用例走 junction 回退）；worktree 全量 312 passed / 1 skipped；`scripts/export_openapi.py --check` 通过；迁移 head 仍为 `0004`（未新增迁移）。
 - 已知接线缺口：运行派发（`runner/spawn.py`、`scheduler/dispatcher.py`）尚未调用 `prepare_execution_copy`，执行侧真正读副本留待工单 08（运行生命周期）接线。
 - 来源管理目前只有环境变量，没有浏览器侧配置入口；界面部分归工单 18/21。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

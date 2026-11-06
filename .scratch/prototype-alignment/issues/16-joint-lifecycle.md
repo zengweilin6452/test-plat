@@ -4,7 +4,7 @@
 
 **Blocked by:** 02、13、15
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-JOINT-01：两个可追溯组件共享一次资源独占
 - [x] AC-JOINT-02：短 UI 结束立即停采，达到 ui_timeout_s 记超时
@@ -22,3 +22,7 @@
 - AC-JOINT-01（共享一次资源独占）是结构性的：joint 只有一次 spawn、一条租约，两个组件挂在同一 run 上（测试断言单运行双组件）。
 - 验收（定向）：`test_issue16_joint_lifecycle.py` 8 例 + run_submission / p5_debug / import_and_finalize / runner_contracts / 03_finalize 回归全过；OpenAPI `--check` 通过。全量未跑（按指示）。
 - 已知边界：真机 vendor 采集（PerfKit.collect 上下文）尚未实机验证——fake 路径覆盖矩阵与窗口语义，实机联调需要设备授权（spec §"真实验证"清单）；取消与完成并发的原子性由终态迁移乐观锁保证（既有 08 号测试覆盖）。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

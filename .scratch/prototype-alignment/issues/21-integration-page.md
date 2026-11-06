@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-INT-01：逐条验证示例与实际接口，不公开内部协议为普通接入 API
 - [x] AC-INT-02：DB 不可达、vendor 缺失、runner 未知分别反映
@@ -19,3 +19,7 @@
 - 不泄露：/health 不再输出 database_target（原实现把 DB 主机:库名拼进响应）。
 - AC 探测只读：调用前后 test_runs 与活动租约数不变（测试覆盖）。
 - 验收（定向）：`test_issue21_integration_probe.py` 3 例；web `tsc --noEmit` 通过；OpenAPI `--check` 通过。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

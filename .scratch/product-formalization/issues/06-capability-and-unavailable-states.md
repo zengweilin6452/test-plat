@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 **规格依据：** TestDock 正式化改造规格（2026-11-03）；AC-12、AC-14。遵守已确认的单工作空间边界及稳定身份、可恢复归档决策。
 
@@ -27,3 +27,6 @@
 
 - 2026-11-03：按用户确认的 12 张工单拆分发布；待实现，不表示验收已通过。
 
+## Answer
+
+2026-11-07 状态校正：实现与隔离库/静态验收记录见 `.scratch/product-formalization/implementation-report.md` 与 `fix-verification.md`；剩余现场验收缺口（浏览器缩放、换目录启停、真机闭环）集中在工单 03/08/10/11/12，见 `.scratch/STATUS.md`。

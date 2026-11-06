@@ -4,7 +4,7 @@
 
 **Blocked by:** 08
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-ID-01：同一运行跨页面编号一致
 - [x] 过滤、分页、新增运行和授权历史变更不重编号
@@ -21,3 +21,7 @@
 - 报告：`runId`/`hostRunId` 改用持久展示编号（与 api-design.md §2.5 的示例一致），并新增 `id`（UUID）保证精确身份；`GET /runs/{display_id}` 仍是 404，路径参数只接受 UUID。
 - 验收：`tests/test_issue09_stable_run_id.py` 6 例（持久/唯一/格式、新增运行与回填更早时间/删除旧运行后不重编号、列表/详情/WS/任务/报告编号一致、UUID 精确身份、回填幂等且按 created_at 排序、新运行接最大号）；worktree 全量 360 项（359 passed / 1 skipped）；`export_openapi.py` 已重新生成并通过 `--check`（`TaskRunRefOut` 新增 `display_id`）；迁移 head `0007`。
 - 已知边界：编号是**全局**递增（与旧算法一致，保证历史编号不跳号），因此编号会暴露跨项目的运行总量；若后续要按项目编号，需要单独迁移并明确历史编号如何保留。告警/通知模块尚未实现，接上时直接复用同一 `display_id`。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。

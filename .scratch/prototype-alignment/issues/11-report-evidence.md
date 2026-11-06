@@ -4,7 +4,7 @@
 
 **Blocked by:** 10
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] AC-REP-03：available 可下载，expired/missing 不提供假入口
 - [x] AC-REP-04：运行后改变档案或策略，历史报告仍追溯原输入
@@ -22,3 +22,7 @@
 - 前端：报告抽屉加"重跑（引用原输入）"（POST /runs 带 `parent_run_id` + 原修订，成功后跳运行页）、"性能分析"跳转（/perf）、"导出 JSON"直链；`RunReport` 类型补 revision/build/resourceProfile/evidence/gateEvaluations。
 - 验收（按指示只跑定向）：`tests/test_issue11_report_evidence.py` 6 例（追溯修订/构建/档案、缺失字段 null 不冒充、改策略不改写原始判定、available 才有下载入口且 missing 下载 404、导出与快照逐字段一致、重跑新运行带 parent_run_id 且原记录一行不改）；web `tsc --noEmit` 通过；OpenAPI 基线重新生成并通过 `--check`。全量套件未跑（按用户指示）。
 - 已知边界：`thresholdsAtRun` 目前仍来自 vendor report.json（`runtime.read_report_source`），平台侧"排队时固定策略与阈值快照"（`gate_evaluations` 扩列）归工单 13；`resourceProfile` 的 id/name/fingerprint 已回传，spec 明细是否在抽屉展开展示留给工单 21 的报告页打磨。
+
+## Answer
+
+2026-11-07 状态校正：验收项已全部勾选，实现已并入 `integration/first-release-closure`（证据见 `.scratch/first-release-closure/acceptance.md` 与 `server/tests/`、`web/tests/` 对应用例）。原 `Status: ready-for-human` 是未校正的历史值，以本文件为准。
