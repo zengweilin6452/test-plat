@@ -17,10 +17,10 @@ from __future__ import annotations
 import json
 import os
 import queue
-import threading
 import signal
 import subprocess
 import sys
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -384,7 +384,7 @@ def _terminate_process_tree(process: subprocess.Popen) -> None:
             os.killpg(os.getpgid(process.pid), signal.SIGTERM)
     except Exception:  # noqa: BLE001
         pass
-    _quiet(lambda: process.wait(timeout=5));
+    _quiet(lambda: process.wait(timeout=5))
     if process.poll() is None:
         _quiet(process.kill)
 
@@ -449,9 +449,8 @@ def run_ui_job(options: UiJobOptions, context: RunnerContext) -> UiJobResult:
 
 
 def _open_session(serial: str, artifacts_dir: Path, options: UiJobOptions) -> Any:
-    from mobile_auto.core.session import DeviceSession
-
     from mobile_auto.config import MobileConfig
+    from mobile_auto.core.session import DeviceSession
 
     session = DeviceSession(MobileConfig(
         device_serial=serial, artifacts_dir=Path(artifacts_dir).resolve(),
@@ -602,7 +601,7 @@ def _run_pytest(
                 _terminate_process_tree(process)
                 break
     finally:
-        _quiet(lambda: process.wait(timeout=10));
+        _quiet(lambda: process.wait(timeout=10))
         if process.poll() is None:
             _terminate_process_tree(process)
         reader.join(timeout=2)

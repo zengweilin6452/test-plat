@@ -22,7 +22,8 @@ from typing import Any
 
 # test_suites.test_type 与 task_revisions.test_type 是同一套枚举，
 # 复用 task.py 的常量，避免两个模块各写一份后漂移。
-from .task import TEST_TYPES
+# 显式别名：routers/suites.py 通过 suite_domain.TEST_TYPES 读取这份再导出。
+from .task import TEST_TYPES as TEST_TYPES
 
 #: manifest 的形状版本（未来改结构时用它做迁移判断）
 MANIFEST_SCHEMA_VERSION = 1

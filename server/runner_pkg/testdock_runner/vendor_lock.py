@@ -115,7 +115,7 @@ class LocalDeviceLock:
         except (OSError, ValueError):
             return None
 
-    def __enter__(self) -> "LocalDeviceLock":
+    def __enter__(self) -> LocalDeviceLock:
         self.acquire()
         return self
 

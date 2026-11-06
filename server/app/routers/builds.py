@@ -19,9 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_session
 from ..schemas import (
     BuildCreateIn,
+    BuildIdentityCheckOut,
     BuildRecordOut,
     BuildsOut,
-    BuildIdentityCheckOut,
     ConfirmIdentityIn,
     IdentityCheckIn,
 )

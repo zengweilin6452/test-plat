@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -88,13 +87,12 @@ async def patch_workspace(
 
 @router.get("/capabilities", response_model=CapabilitiesOut)
 async def get_capabilities() -> dict[str, Any]:
-    from ..config import fake_runner_enabled, settings
+    from ..config import build_commit, fake_runner_enabled, settings
     from ..main import app as fastapi_app
 
-    commit = (os.environ.get("TESTDOCK_BUILD_COMMIT") or "").strip() or None
     return {
         "version": fastapi_app.version,
-        "commit": commit,
+        "commit": build_commit(),
         "demo_mode": settings.demo_mode,
         "fake_runner_enabled": fake_runner_enabled(),
         "platforms": [

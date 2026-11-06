@@ -192,7 +192,7 @@ export function UiPage() {
 
   // ---- 调试 tab：ready 设备清单（与 DevicesPage 同源 /api/v1/resources）----
   const resourcesQuery = useQuery({
-    queryKey: ['resources', targetScope],
+    queryKey: ['resources', targetScope, ctx.projectId],
     queryFn: ({ signal }) => fetchResources(targetScope, signal, ctx.projectId),
     enabled: tab === 'debug',
     retry: false,
@@ -209,7 +209,7 @@ export function UiPage() {
   // 后端 P2 起就有 GET /suites 与 /suites/{id}/versions；用例清单不在独立表里，
   // 而是 suite_versions.manifest.cases，所以"用例"页签读的是所选版本。
   const suitesQuery = useQuery({
-    queryKey: ['suites', 'ui'],
+    queryKey: ['suites', 'ui', ctx.projectId],
     queryFn: ({ signal }) => fetchSuites('ui', signal, ctx.projectId),
     enabled: !planned && (tab === 'suites' || tab === 'cases'),
     retry: false,

@@ -118,31 +118,68 @@ def _vendor_src(vendor_src: str | Path | None = None) -> str | None:
     return None
 
 
+def _prepare_vendor_import(src: str | None) -> None:
+    """让随后的 `from mobile_perf import ...` 必须命中请求的 src。
+
+    sys.modules 里的 mobile_perf 可能来自别处（开发机的 editable 安装、
+    先前一次不同 src 的调用）；这种情况先清掉再导入，不能静默沿用旧模块。
+    """
+    if not src:
+        return
+    expected = Path(src).resolve()
+    cached = sys.modules.get("mobile_perf")
+    if cached is not None:
+        loaded = Path(getattr(cached, "__file__", "") or "").resolve()
+        if expected not in loaded.parents:
+            for name in [
+                name
+                for name in list(sys.modules)
+                if name == "mobile_perf" or name.startswith("mobile_perf.")
+            ]:
+                del sys.modules[name]
+    if sys.path and sys.path[0] == src:
+        return
+    if src in sys.path:
+        sys.path.remove(src)
+    sys.path.insert(0, src)
+
+
+def _require_loaded_from(module: Any, src: str | None, label: str) -> Any:
+    """确认拿到的是 `src` 下的模块，而不是 sys.modules 里先前加载的另一份。"""
+    if not src:
+        return module
+    loaded = Path(getattr(module, "__file__", "") or "").resolve()
+    if Path(src).resolve() not in loaded.parents:
+        raise RuntimeError(
+            f"vendor 模块 {label} 已从 {loaded} 加载，与期望的 {Path(src).resolve()} 不一致；"
+            "同一进程内切换 vendor 源需要重启后端。"
+        )
+    return module
+
+
 def _import_metric_dict(vendor_src: str | Path | None = None):
     src = _vendor_src(vendor_src)
-    if src and src not in sys.path:
-        sys.path.insert(0, src)
+    _prepare_vendor_import(src)
     from mobile_perf import metrics as vendor_metrics  # noqa: PLC0415  只读 import
 
-    return vendor_metrics
+    return _require_loaded_from(vendor_metrics, src, "mobile_perf.metrics")
 
 
 def _import_report_module(vendor_src: str | Path | None = None):
     src = _vendor_src(vendor_src)
-    if src and src not in sys.path:
-        sys.path.insert(0, src)
+    _prepare_vendor_import(src)
     from mobile_perf import report as vendor_report  # noqa: PLC0415  只读 import
 
-    return vendor_report
+    return _require_loaded_from(vendor_report, src, "mobile_perf.report")
 
 
 def load_judge(vendor_src: str | Path | None = None):
     """只读拿到 vendor 的 (judge, JudgeSpec, Verdict)。不在本模块缓存状态。"""
     src = _vendor_src(vendor_src)
-    if src and src not in sys.path:
-        sys.path.insert(0, src)
+    _prepare_vendor_import(src)
     from mobile_perf.judge import JudgeSpec, Verdict, judge  # noqa: PLC0415
 
+    _require_loaded_from(sys.modules["mobile_perf"], src, "mobile_perf")
     return judge, JudgeSpec, Verdict
 
 

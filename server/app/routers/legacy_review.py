@@ -69,6 +69,15 @@ class LegacyApplyIn(BaseModel):
     actions: list[LegacyActionIn]
 
 
+async def _count(session: AsyncSession, table: str, column: str, entity_id: str) -> int:
+    """按固定表名/列名统计关联数量；table/column 只由本模块字面量传入，不来自请求。"""
+    result = await session.execute(
+        text(f"SELECT count(*) FROM {table} WHERE {column}::text = :id"),
+        {"id": entity_id},
+    )
+    return int(result.scalar() or 0)
+
+
 async def _preview_items(session: AsyncSession) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
 
@@ -79,14 +88,18 @@ async def _preview_items(session: AsyncSession) -> list[dict[str, Any]]:
         )
     ).mappings().first()
     if project:
-        runs = int((await session.execute(text("SELECT count(*) FROM test_runs WHERE project_id::text = :id"), {"id": project["id"]})).scalar() or 0)
+        runs = await _count(session, "test_runs", "project_id", project["id"])
         blockers = await identity_mod.collect_archive_blockers(session, entity="project", entity_id=project["id"])
         match_basis = ["固定 ID 与 seeds 命名空间一致", f"编码={project['code']}"]
         if project["name"] == SEED_ORIGINAL_PROJECT_NAME:
             match_basis.append("原始名称字段一致")
         if project["origin"] == "demo_seed":
             match_basis.append("显式演示导入标记")
-        confidence = "confirmed" if project["name"] == SEED_ORIGINAL_PROJECT_NAME or project["origin"] == "demo_seed" else "needs_manual_review"
+        confidence = (
+            "confirmed"
+            if project["name"] == SEED_ORIGINAL_PROJECT_NAME or project["origin"] == "demo_seed"
+            else "needs_manual_review"
+        )
         items.append({
             "id": project["id"],
             "entity": "project",
@@ -95,22 +108,27 @@ async def _preview_items(session: AsyncSession) -> list[dict[str, Any]]:
             "match_basis": match_basis,
             "confidence": confidence,
             "related_counts": {
-                "applications": int((await session.execute(text("SELECT count(*) FROM applications WHERE project_id::text = :id"), {"id": project["id"]})).scalar() or 0),
+                "applications": await _count(session, "applications", "project_id", project["id"]),
                 "test_runs": runs,
-                "test_tasks": int((await session.execute(text("SELECT count(*) FROM test_tasks WHERE project_id::text = :id"), {"id": project["id"]})).scalar() or 0),
+                "test_tasks": await _count(session, "test_tasks", "project_id", project["id"]),
             },
             "has_real_runs": runs > 0,
             "active_occupancy": any(blockers.values()),
             "real_run_count": runs,
             "allowed_actions": ["keep", "rename", "archive"],
-            "note": "已承载真实运行：建议保留并改名，不重建或迁移历史记录。" if runs else "未检测到真实运行；归档仍保留全部历史。",
+            "note": (
+                "已承载真实运行：建议保留并改名，不重建或迁移历史记录。"
+                if runs
+                else "未检测到真实运行；归档仍保留全部历史。"
+            ),
             "archived": project["archived_at"] is not None,
         })
 
     app_rows = (
         await session.execute(
             text(
-                "SELECT id::text AS id, project_id::text AS project_id, platform, name, identifier, origin, archived_at "
+                "SELECT id::text AS id, project_id::text AS project_id, platform, name, "
+                "identifier, origin, archived_at "
                 "FROM applications WHERE id::text = ANY(:ids) OR identifier = ANY(:identifiers)"
             ),
             {"ids": list(SEED_APP_IDS), "identifiers": list(SEED_ORIGINAL_IDENTIFIERS)},
@@ -119,7 +137,7 @@ async def _preview_items(session: AsyncSession) -> list[dict[str, Any]]:
     for row in app_rows:
         by_id = row["id"] in SEED_APP_IDS
         by_identifier = row["identifier"] in SEED_ORIGINAL_IDENTIFIERS
-        runs = int((await session.execute(text("SELECT count(*) FROM test_runs WHERE application_id::text = :id"), {"id": row["id"]})).scalar() or 0)
+        runs = await _count(session, "test_runs", "application_id", row["id"])
         blockers = await identity_mod.collect_archive_blockers(session, entity="application", entity_id=row["id"])
         basis = []
         if by_id:
@@ -135,13 +153,24 @@ async def _preview_items(session: AsyncSession) -> list[dict[str, Any]]:
             "name": row["name"],
             "current_name": row["name"],
             "match_basis": basis or ["原始标识命中，但固定 ID 不一致：需人工判断"],
-            "confidence": "confirmed" if (by_id and by_identifier) or row["origin"] == "demo_seed" else "needs_manual_review",
-            "related_counts": {"test_runs": runs, "test_tasks": int((await session.execute(text("SELECT count(*) FROM test_tasks WHERE application_id::text = :id"), {"id": row["id"]})).scalar() or 0)},
+            "confidence": (
+                "confirmed"
+                if (by_id and by_identifier) or row["origin"] == "demo_seed"
+                else "needs_manual_review"
+            ),
+            "related_counts": {
+                "test_runs": runs,
+                "test_tasks": await _count(session, "test_tasks", "application_id", row["id"]),
+            },
             "has_real_runs": runs > 0,
             "active_occupancy": any(blockers.values()),
             "real_run_count": runs,
             "allowed_actions": ["keep", "rename", "archive"],
-            "note": "历史 iOS / Web 应用保持可读；归档不会改写身份与证据。" if row["platform"] != "android" else "Android 应用已承载的真实运行继续保留。",
+            "note": (
+                "历史 iOS / Web 应用保持可读；归档不会改写身份与证据。"
+                if row["platform"] != "android"
+                else "Android 应用已承载的真实运行继续保留。"
+            ),
             "archived": row["archived_at"] is not None,
         })
 
@@ -154,7 +183,14 @@ async def _preview_items(session: AsyncSession) -> list[dict[str, Any]]:
             ),
             {
                 "ids": list(SEED_RESOURCE_IDS),
-                "serials": ["emulator-5554", "ABC123456789", "DEF123456789", "GHI123456789", "JKL123456789", "MNO123456789"],
+                "serials": [
+                    "emulator-5554",
+                    "ABC123456789",
+                    "DEF123456789",
+                    "GHI123456789",
+                    "JKL123456789",
+                    "MNO123456789",
+                ],
             },
         )
     ).mappings().all()
@@ -164,9 +200,15 @@ async def _preview_items(session: AsyncSession) -> list[dict[str, Any]]:
             "entity": "resource",
             "name": row["resource_key"],
             "current_name": row["resource_key"],
-            "match_basis": ["固定 ID 与原 seed 设备 serial 一致"] if row["id"] in SEED_RESOURCE_IDS else ["原 seed 设备 serial 命中，需人工判断"],
+            "match_basis": (
+                ["固定 ID 与原 seed 设备 serial 一致"]
+                if row["id"] in SEED_RESOURCE_IDS
+                else ["原 seed 设备 serial 命中，需人工判断"]
+            ),
             "confidence": "confirmed" if row["id"] in SEED_RESOURCE_IDS else "needs_manual_review",
-            "related_counts": {"debug_sessions": int((await session.execute(text("SELECT count(*) FROM debug_sessions WHERE resource_id::text = :id"), {"id": row["id"]})).scalar() or 0)},
+            "related_counts": {
+                "debug_sessions": await _count(session, "debug_sessions", "resource_id", row["id"]),
+            },
             "has_real_runs": False,
             "active_occupancy": False,
             "real_run_count": 0,
@@ -189,7 +231,11 @@ async def _preview_items(session: AsyncSession) -> list[dict[str, Any]]:
             "current_name": node["name"],
             "match_basis": ["固定 ID 与原 seed 本机节点一致"],
             "confidence": "confirmed",
-            "related_counts": {"execution_resources": int((await session.execute(text("SELECT count(*) FROM execution_resources WHERE node_id::text = :id"), {"id": node["id"]})).scalar() or 0)},
+            "related_counts": {
+                "execution_resources": await _count(
+                    session, "execution_resources", "node_id", node["id"]
+                ),
+            },
             "has_real_runs": False,
             "active_occupancy": False,
             "real_run_count": 0,
@@ -212,7 +258,9 @@ async def _preview_items(session: AsyncSession) -> list[dict[str, Any]]:
             "current_name": row["name"],
             "match_basis": ["固定 ID 与原 seed 套件一致"],
             "confidence": "confirmed",
-            "related_counts": {"suite_versions": int((await session.execute(text("SELECT count(*) FROM suite_versions WHERE suite_id::text = :id"), {"id": row["id"]})).scalar() or 0)},
+            "related_counts": {
+                "suite_versions": await _count(session, "suite_versions", "suite_id", row["id"]),
+            },
             "has_real_runs": False,
             "active_occupancy": False,
             "real_run_count": 0,

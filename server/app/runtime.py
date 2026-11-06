@@ -25,12 +25,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from sqlalchemy import text
 
@@ -254,23 +256,32 @@ async def _record_results(
         else:
             reason = reason or None
         cid = (await session.execute(text(
-            "INSERT INTO run_components (id, project_id, run_id, kind, adapter_key, adapter_version, state, outcome, reason_code, summary) "
-            "VALUES (gen_random_uuid(), :pid, :rid, :kind, :adapter, '1', :state, :outcome, :reason, CAST(:summary AS jsonb)) "
+            "INSERT INTO run_components (id, project_id, run_id, kind, adapter_key, "
+            "adapter_version, state, outcome, reason_code, summary) "
+            "VALUES (gen_random_uuid(), :pid, :rid, :kind, :adapter, '1', :state, "
+            ":outcome, :reason, CAST(:summary AS jsonb)) "
             "ON CONFLICT (project_id, run_id, kind) DO UPDATE SET state = EXCLUDED.state, "
-            "outcome = EXCLUDED.outcome, reason_code = EXCLUDED.reason_code, summary = EXCLUDED.summary "
+            "outcome = EXCLUDED.outcome, reason_code = EXCLUDED.reason_code, "
+            "summary = EXCLUDED.summary "
             "RETURNING id"
         ), {"pid": row["project_id"], "rid": row["id"], "kind": kind,
             "adapter": "mobile_perf" if kind == "performance" else "mobile_auto",
             "state": state, "outcome": outcome,
             "reason": reason,
-            "summary": json.dumps(report if kind == "performance" and report is not None else component.get("summary") or {}, ensure_ascii=False)})).scalar_one()
+            "summary": json.dumps(
+                report if kind == "performance" and report is not None
+                else component.get("summary") or {},
+                ensure_ascii=False,
+            )})).scalar_one()
         if kind == "ui":
             for case in cases:
                 if not isinstance(case, Mapping) or not case.get("case_key"):
                     continue
                 await session.execute(text(
-                    "INSERT INTO case_results (id, project_id, component_id, case_key, outcome, duration_ms, error_summary) "
-                    "VALUES (gen_random_uuid(), :pid, :cid, :key, :outcome, :duration, :error) "
+                    "INSERT INTO case_results (id, project_id, component_id, case_key, "
+                    "outcome, duration_ms, error_summary) "
+                    "VALUES (gen_random_uuid(), :pid, :cid, :key, :outcome, :duration, "
+                    ":error) "
                     "ON CONFLICT (project_id, component_id, case_key, attempt) DO NOTHING"
                 ), {"pid": row["project_id"], "cid": cid, "key": case["case_key"],
                     "outcome": case.get("outcome") or "errored",
@@ -282,10 +293,14 @@ async def _record_results(
                 mapped = summaries_from_report(report)
                 for metric in mapped.rows:
                     await session.execute(text(
-                        "INSERT INTO metric_summaries (id, project_id, component_id, metric_key, metric_version, unit, scope, window_key, "
-                        "statistic, sample_count, value, missing_reason, missing_reason_text) "
-                        "VALUES (gen_random_uuid(), :pid, :cid, :metric_key, :version, :unit, :scope, :window_key, "
-                        ":statistic, :sample_count, :value, :missing_reason, :missing_reason_text) ON CONFLICT DO NOTHING"
+                        "INSERT INTO metric_summaries (id, project_id, component_id, "
+                        "metric_key, metric_version, unit, scope, window_key, "
+                        "statistic, sample_count, value, missing_reason, "
+                        "missing_reason_text) "
+                        "VALUES (gen_random_uuid(), :pid, :cid, :metric_key, :version, "
+                        ":unit, :scope, :window_key, "
+                        ":statistic, :sample_count, :value, :missing_reason, "
+                        ":missing_reason_text) ON CONFLICT DO NOTHING"
                     ), {"pid": row["project_id"], "cid": cid, "version": mapped.metric_version, **metric.as_dict()})
     return has_perf
 
@@ -641,7 +656,8 @@ async def read_report_source(run_id: str | uuid.UUID) -> dict[str, Any] | None:
     data = dict(row)
     # vendor 侧 report.json（业务指标 / 阈值快照）若已登记成产物，就把内容并进来，
     # 让 GET /report 的 metricsSummary / thresholdsAtRun 有真实来源，而不是空对象。
-    data.update(_report_json_payload(str(run_id)))
+    # 同步引擎建连与文件读取都放到工作线程，避免阻塞事件循环。
+    data.update(await asyncio.to_thread(_report_json_payload, str(run_id)))
     return data
 
 
@@ -650,8 +666,10 @@ def _report_json_payload(run_id: str) -> dict[str, Any]:
 
     这里用同步引擎：read_report_source 既被异步请求调用，也可能被同步 TestClient
     路径调用，同步引擎不挑事件循环策略（Windows Proactor 下 psycopg async 不可用）。
+    调用方必须放进工作线程（asyncio.to_thread），否则会阻塞事件循环。
     """
     from sqlalchemy import create_engine
+    from sqlalchemy.exc import SQLAlchemyError
 
     picked: dict[str, Any] = {}
     try:
@@ -673,7 +691,8 @@ def _report_json_payload(run_id: str) -> dict[str, Any]:
                 ).mappings().all()
         finally:
             engine.dispose()
-    except Exception:  # noqa: BLE001 - 报告是只读视图，取不到就降级为空
+    except (SQLAlchemyError, OSError):
+        # 报告是只读视图：数据库/文件暂时不可用时降级为空；其他异常照常抛出。
         return {}
 
     report_candidates: list[tuple[str, Any]] = []
@@ -695,14 +714,12 @@ def _report_json_payload(run_id: str) -> dict[str, Any]:
     report_candidates.sort(key=lambda item: (item[0] != "report.json", len(item[0]), item[0]))
     report_path = report_candidates[0][1] if report_candidates else None
 
-    payload: dict[str, Any] = {}
     if report_path is not None and report_path.is_file():
         try:
             loaded = json.loads(report_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             loaded = None
         if isinstance(loaded, dict):
-            payload = loaded
             if isinstance(loaded.get("metricsSummary"), dict):
                 picked["metricsSummary"] = loaded["metricsSummary"]
             elif isinstance(loaded.get("metrics"), dict):

@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 #: test_tasks.lifecycle 的合法值（与 CHECK 一致）
 LIFECYCLES = ("draft", "ready", "archived")

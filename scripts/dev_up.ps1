@@ -13,6 +13,7 @@
 #   TESTDOCK_WEB_DIR           web 目录（默认安装目录下 web）
 #   TESTDOCK_RUNTIME_DIR       PID 记录与日志目录（默认安装目录下 .runtime/dev）
 #   TESTDOCK_DEMO_MODE         1 = 显式演示环境（需另配独立库与产物目录）
+#   TESTDOCK_BUILD_COMMIT      构建提交；未设置且目录是 git 仓库时自动取 --short HEAD
 #
 # 健康检查只认本实例：探测 URL 带平台标识，且先校验端口未被陌生进程占用。
 # 停止脚本只作用于本脚本写下的 PID 文件，不会误杀其他服务。
@@ -28,6 +29,11 @@ $WebDir = if ($env:TESTDOCK_WEB_DIR) { $env:TESTDOCK_WEB_DIR } else { Join-Path 
 $RunDir = if ($env:TESTDOCK_RUNTIME_DIR) { $env:TESTDOCK_RUNTIME_DIR } else { Join-Path $RepoRoot '.runtime\dev' }
 if (-not [IO.Path]::IsPathRooted($RunDir)) { $RunDir = Join-Path $RepoRoot $RunDir }
 $ServerDir = Join-Path $RepoRoot 'server'
+# 构建身份：/health 与 /capabilities 要能报出实际提交；正式安装没有 git 时留空，不猜。
+if (-not $env:TESTDOCK_BUILD_COMMIT -and (Get-Command git -ErrorAction SilentlyContinue)) {
+    $commit = (& git -C $RepoRoot rev-parse --short HEAD 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $commit) { $env:TESTDOCK_BUILD_COMMIT = "$commit".Trim() }
+}
 $ApiUrl = "http://${HostAddr}:${ApiPort}"
 $WebUrl = "http://${WebHost}:${WebPort}"
 & $Python (Join-Path $PSScriptRoot "deployment_env.py") --validate-demo

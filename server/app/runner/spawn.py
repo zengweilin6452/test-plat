@@ -25,10 +25,10 @@ import logging
 import os
 import signal
 import subprocess
-import sys
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from ..config import settings
 from ..domain import control as control_mod
@@ -279,8 +279,8 @@ async def _tail_stdout(run_id: str, process: RunnerProcess, log_path: Path) -> N
     每 0.2s 看文件有没有新内容。比管道可靠——进程被 taskkill 时管道里最后几行常常
     读不到，而文件一定已经写上去了。
     """
-    from ..domain import events as events_mod
     from ..db import get_sessionmaker
+    from ..domain import events as events_mod
     from ..ws import hub as hub_mod
 
     sessionmaker = get_sessionmaker()
@@ -401,11 +401,10 @@ async def _finalize_after_exit(run_id: str, code: int | None) -> None:
     这是"进程退出"这条路径上的安全网：正常路径里 runner 会先调
 /internal/runs/{id}/complete 或 /fail，这里看到 run 已经终态就直接跳过。
     """
-    from ..integrations.mobile_auto import map_exit_code
-    from ..db import get_sessionmaker
-    from ..domain import leases as leases_mod
-    from ..domain import runs as runs_mod
     from .. import runtime as runtime_mod
+    from ..db import get_sessionmaker
+    from ..domain import runs as runs_mod
+    from ..integrations.mobile_auto import map_exit_code
 
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session:
@@ -529,7 +528,7 @@ async def terminate_run_process(run_id: str, *, force: bool = True) -> bool:
         try:
             await asyncio.wait_for(process.wait(), 10)
             killed = True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("runner %s 未在 10s 内退出", pid)
     _PROCESSES.pop(run_id, None)
     return killed
@@ -541,7 +540,7 @@ async def wait_for_exit(run_id: str, timeout: float = EXIT_TIMEOUT_SECONDS) -> i
         return None
     try:
         return await asyncio.wait_for(process.wait(), timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         await terminate_run_process(run_id)
         return None
 

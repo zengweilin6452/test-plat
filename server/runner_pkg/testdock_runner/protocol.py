@@ -21,8 +21,9 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 CONTROL_TOKEN_HEADER = "X-Control-Token"
 REQUEST_TIMEOUT = 5.0

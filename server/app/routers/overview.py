@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
@@ -57,7 +56,10 @@ async def get_overview(
     app_total = await scalar(
         f"SELECT count(*) FROM applications WHERE platform = 'android' {app_project} {platform_clause}", params
     )
-    res_total = await scalar(f"SELECT count(*) FROM execution_resources WHERE 1=1 {res_project} {platform_clause}", params)
+    res_total = await scalar(
+        f"SELECT count(*) FROM execution_resources WHERE 1=1 {res_project} {platform_clause}",
+        params,
+    )
     res_ready = await scalar(
         f"SELECT count(*) FROM execution_resources WHERE status = 'ready' {res_project} {platform_clause}", params
     )

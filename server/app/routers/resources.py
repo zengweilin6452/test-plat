@@ -13,7 +13,7 @@ import asyncio
 import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -364,7 +364,7 @@ def run_readiness_check(
     return {
         "serial": serial,
         "test_type": test_type,
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "checked_at": datetime.now(UTC).isoformat(),
         "ready": not blocking,
         "blocking": blocking,
         "checks": checks,
@@ -522,7 +522,7 @@ async def check_resource_readiness(
         result = {
             "serial": resource["resource_key"],
             "test_type": payload.test_type,
-            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "checked_at": datetime.now(UTC).isoformat(),
             "ready": False,
             "blocking": [
                 {

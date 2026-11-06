@@ -18,13 +18,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from sqlalchemy import text as _text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..domain import identity as identity_mod
 from ..domain import runs as runs_mod
 from ..errors import CLIENT_HEADER, CLIENT_HEADER_VALUE, client_header_required, validation_error
-from sqlalchemy import text as _text
 from ..schemas import TaskCreateIn, TaskPatchIn, TaskRevisionListOut, TasksOut
 from ..services import tasks as task_service
 

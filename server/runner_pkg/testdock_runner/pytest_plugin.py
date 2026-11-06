@@ -1,11 +1,11 @@
 """平台 pytest 适配：用显式运行配置创建会话，不扩展 vendor 参数。"""
 import json
 import os
+from pathlib import Path
 
 import pytest
 
 from .ui_job import UiJobOptions, _open_session
-from pathlib import Path
 
 
 def pytest_addoption(parser):

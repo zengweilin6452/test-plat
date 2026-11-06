@@ -177,7 +177,7 @@ async def sync_resources(
     node_id: str | None = None,
 ) -> dict[str, Any]:
     t0 = time.perf_counter()
-    started_at = _dt.datetime.now(_dt.timezone.utc)
+    started_at = _dt.datetime.now(_dt.UTC)
 
     # ---- 1) 项目范围 -------------------------------------------------- #
     if project_id is not None:
@@ -212,7 +212,12 @@ async def sync_resources(
         if project_id is not None and str(fixed_node.project_id) != project_id:
             raise not_found("node", node_id)
         if fixed_node.status != "online":
-            raise ApiError(409, "state_conflict", f"节点 {node_id} 不在线，不能同步", {"node_id": node_id, "status": fixed_node.status})
+            raise ApiError(
+                409,
+                "state_conflict",
+                f"节点 {node_id} 不在线，不能同步",
+                {"node_id": node_id, "status": fixed_node.status},
+            )
         project_ids = [str(fixed_node.project_id)]
         if not _is_local_node(fixed_node.capabilities):
             # 指定了远端节点：本期没有 agent 上报，报 unreachable 即可——

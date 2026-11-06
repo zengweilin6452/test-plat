@@ -44,9 +44,21 @@ asyncio_default_fixture_loop_scope = "function"
 asyncio_default_test_loop_scope = "function"
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py312"
 src = ["app", "testdock_runner", "tests"]
+# 历史迁移（长 SQL）与测试夹具（pytest 注入 / 同模块覆盖 fixture）不纳入强制 lint。
+extend-exclude = ["alembic/versions", "alembic/_gen", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    # FastAPI `Depends()` 默认参数写法，项目统一使用。
+    "B008",
+    # 短字符串拼接沿用 %-format（存量风格），不作为缺陷扩散检查。
+    "UP031",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# alembic/env.py 先改 sys.path 再 import app，E402 是刻意顺序。
+"alembic/env.py" = ["E402"]

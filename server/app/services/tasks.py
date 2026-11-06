@@ -19,13 +19,11 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 from typing import Any
 
 from psycopg.types.json import Jsonb
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..domain import suite as suite_domain

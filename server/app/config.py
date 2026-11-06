@@ -130,6 +130,13 @@ def running_under_pytest() -> bool:
     return bool(os.environ.get("PYTEST_VERSION"))
 
 
+def build_commit() -> str | None:
+    """当前构建对应的提交（由 dev_up.ps1 / 部署方注入，未注入时不猜）。"""
+    import os
+
+    return (os.environ.get("TESTDOCK_BUILD_COMMIT") or "").strip() or None
+
+
 def formal_start_blocker() -> str | None:
     """正式启动的配置阻断检查（工单 07）。
 

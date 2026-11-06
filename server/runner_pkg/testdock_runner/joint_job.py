@@ -20,15 +20,15 @@ from __future__ import annotations
 import contextlib
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from . import EXIT_INFRA_ERROR
 from .artifacts import collect_layout, write_report_json
 from .env import RunnerContext, ensure_vendor_on_path, fake_enabled
 from .perf_recovery import clear_stale_perf_recording
 from .protocol import emit_stage, emit_text
-from . import EXIT_INFRA_ERROR
 from .ui_job import (
     SuiteCopyError,
     UiJobOptions,
@@ -72,7 +72,7 @@ class JointJobResult:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _start_perf_collect(options: UiJobOptions):
@@ -152,7 +152,9 @@ def _stop_collection(scope: Any) -> tuple[dict[str, Any] | None, str | None]:
         report = scope.finalize()
         return report if isinstance(report, dict) else None, None
     except Exception as exc:  # noqa: BLE001 - 停采失败不吞 UI 结果
-        detail = str(exc)[:300]
+        # str(exc) 可能是空串（bare Exception / TimeoutError）；空串是假值，
+        # 调用方按真值判断会把停采失败当成成功，至少回落到异常类名。
+        detail = (str(exc) or type(exc).__name__)[:300]
         emit_text(PERF_COLLECT_STOP_FAILED, detail=detail)
         return None, detail
 

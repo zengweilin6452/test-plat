@@ -281,6 +281,47 @@ def test_joint_collect_stop_failure_keeps_ui_result_but_reports_perf_errored(
     assert "collectWindow" in report
 
 
+def test_joint_collect_stop_failure_with_empty_message_still_errors_perf(
+    tmp_path, monkeypatch
+):
+    """异常消息为空时也不得把停采失败当成成功（str(exc) 空串是假值）。"""
+    from runner_pkg.testdock_runner import joint_job
+    from runner_pkg.testdock_runner.ui_job import UiJobResult
+
+    class SilentBrokenScope:
+        def finalize(self):
+            raise TimeoutError()
+
+    monkeypatch.setattr(
+        joint_job, "_start_perf_collect", lambda options: SilentBrokenScope()
+    )
+    monkeypatch.setattr(
+        joint_job,
+        "run_ui_job",
+        lambda options, context: UiJobResult(
+            exit_code=0,
+            reason="completed",
+            outcome="passed",
+            components=[{"kind": "ui", "state": "completed", "outcome": "passed"}],
+        ),
+    )
+    copy_root = tmp_path / "copy"
+    copy_root.mkdir()
+    options = _joint_options(
+        tmp_path, fake=False, suite_root=copy_root, app_package="com.example.joint"
+    )
+
+    result = joint_job.run_joint_job(options, _runner_context(tmp_path))
+
+    by_kind = {component["kind"]: component for component in result.components}
+    assert by_kind["performance"] == {
+        "kind": "performance",
+        "state": "errored",
+        "reason_code": "perf_collect_stop_failed",
+    }
+    assert "TimeoutError" in result.message
+
+
 def test_joint_perf_kit_writes_sqlite_under_artifacts(tmp_path, monkeypatch):
     """联动采集的 SQLite 必须落在运行产物目录，不能写只读 vendor 目录。"""
     import sys

@@ -38,16 +38,16 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import subprocess
 import contextlib
 import json
+import logging
 import re
 import secrets
+import subprocess
 import sys
-import logging
 import time
 import uuid as uuid_mod
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -58,7 +58,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..db import get_session
 from ..domain import leases as leases_mod
-from .tasks import require_client_header
 from ..errors import (
     ApiError,
     bad_request,
@@ -68,6 +67,7 @@ from ..errors import (
     validation_error,
 )
 from ..runner import spawn as spawn_mod
+from .tasks import require_client_header
 
 logger = logging.getLogger(__name__)
 
@@ -557,7 +557,7 @@ async def create_debug_session(
 
     # 先插会话行（opening；FK 要求它先存在），再在同一事务里领租约
     session_id = str(uuid_mod.uuid4())
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=DEFAULT_SESSION_SECONDS)
+    expires_at = datetime.now(UTC) + timedelta(seconds=DEFAULT_SESSION_SECONDS)
     await session.execute(
         text(
             """
@@ -958,9 +958,9 @@ async def _match_crop(source: bytes, current: bytes, region: list[int], threshol
             env=spawn_mod.build_env(run_id="crop-validation"), cwd=str(settings.repo_root),
         )
     except subprocess.TimeoutExpired:
-        raise ApiError(503, "service_unavailable", "图像验证超时")
+        raise ApiError(503, "service_unavailable", "图像验证超时") from None
     except OSError:
-        raise ApiError(503, "service_unavailable", "图像匹配进程不可用")
+        raise ApiError(503, "service_unavailable", "图像匹配进程不可用") from None
     if completed.returncode:
         raise ApiError(503, "service_unavailable", "图像匹配进程不可用")
     result = json.loads(completed.stdout)
@@ -1044,7 +1044,7 @@ async def validate_template(request: Request, session_id: str | None = None,
         except (TypeError, ValueError):
             from ..errors import validation_error
 
-            raise validation_error(["threshold 必须是数值"])
+            raise validation_error(["threshold 必须是数值"]) from None
         if not (0.10 <= value <= 1.00):
             from ..errors import validation_error
 

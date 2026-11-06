@@ -9,10 +9,8 @@
 
 from __future__ import annotations
 
-from . import suite, task
-
 # P3 追加：运行生命周期 / 租约 / 产物 / 事件
-from . import artifacts, events, leases, runs
+from . import artifacts, events, leases, runs, suite, task
 
 __all__ = [
     "artifacts",

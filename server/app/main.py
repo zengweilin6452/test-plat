@@ -13,21 +13,34 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Depends, FastAPI, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from .db import get_session
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import formal_start_blocker, scheduler_enabled, settings
+from .db import get_session
 from .errors import ApiError, redact_sensitive
+from .routers import (
+    analyses,
+    applications,
+    baselines,
+    builds,
+    gate_policies,
+    legacy_review,
+    onboarding,
+    overview,
+    projects,
+    resources,
+    runs,
+    suites,
+    tasks,
+)
+from .routers import debug as debug_router
+from .routers import workspace as workspace_router
 from .schemas import ErrorEnvelope
 from .ws import hub as _hub
-from .routers import applications, debug as debug_router, overview, projects, resources, runs, suites, tasks
-from .routers import analyses, baselines, builds, gate_policies
-from .routers import legacy_review, onboarding, workspace as workspace_router
 
 
 def _install_windows_event_loop_policy() -> None:
@@ -265,31 +278,44 @@ app.include_router(ws_router.router)
 __all__ = ["app", "main", "lifespan"]
 
 
+_VENDOR_MARKERS = {
+    "mobile_auto": "src/mobile_auto/__init__.py",
+    "mobile_perf": "src/mobile_perf/__init__.py",
+}
+
+
+def _vendor_state(name: str) -> str:
+    """present = 目录与入口文件都在；incomplete = 目录在但缺入口（复制中断/版本不符）。"""
+    root = settings.vendor_dir / name
+    if not root.is_dir():
+        return "missing"
+    return "present" if (root / _VENDOR_MARKERS[name]).is_file() else "incomplete"
+
+
 @app.get("/api/v1/health")
 async def health(session: AsyncSession = Depends(get_session)) -> dict[str, object]:
     """存活与能力探测分开呈现（工单 21、AC-INT-02/03）：
 
     - db：SELECT 1 实测，ok/fail；
-    - vendor：两个 vendor 目录是否就位，present/missing；
+    - vendor：入口文件是否就位，present/incomplete/missing（不只看目录存在）；
     - runner：API 视角无法确认执行侧数量，恒为 null（未知 ≠ 失败）；
     - 不输出数据库主机（无凭据/拓扑泄露），不启动运行、不占设备。
     """
     from sqlalchemy import text
+
+    from .config import build_commit
 
     try:
         await session.execute(text("SELECT 1"))
         db_state = "ok"
     except Exception:  # noqa: BLE001 - 探测把失败如实呈现，不抛 500
         db_state = "fail"
-    vendor = {
-        name: "present" if (settings.vendor_dir / name).is_dir() else "missing"
-        for name in ("mobile_auto", "mobile_perf")
-    }
     return {
         "status": "ok" if db_state == "ok" else "degraded",
         "version": app.version,
+        "commit": build_commit(),
         "db": db_state,
-        "vendor": vendor,
+        "vendor": {name: _vendor_state(name) for name in _VENDOR_MARKERS},
         "runners": {"active": None},
     }
 

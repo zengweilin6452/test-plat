@@ -43,6 +43,7 @@ data/          运行产物（artifacts、control.token 等，不入库）
 | `TESTDOCK_DATA_DIR` / `TESTDOCK_RUNTIME_DIR` | 安装目录下 `data/` / `.runtime/` | 产物与运行时目录 |
 | `TESTDOCK_SUITE_SOURCES` | 空 | 可信套件来源 JSON（宿主编排，浏览器不能任意指定宿主路径） |
 | `TESTDOCK_MOBILE_AUTO_SOURCE` / `TESTDOCK_MOBILE_PERF_SOURCE` | 空 | **仅**开发者 vendor 同步需要的显式只读源目录 |
+| `TESTDOCK_BUILD_COMMIT` | 空（`dev_up.ps1` 自动取 `git rev-parse --short HEAD`） | `/health` 与 `/capabilities` 报出的构建提交，便于核对运行实例代码 |
 
 端口占用时明确失败；健康检查只认本平台 `/api/v1/health` 的响应结构，不把其他服务
 返回 200 当作就绪。含空格的安装目录与解释器路径均可使用。

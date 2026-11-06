@@ -580,7 +580,9 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
         )
     except Exception as exc:  # noqa: BLE001 - spawn 失败必须收敛成 errored
         logger.exception("run %s spawn 失败", rid)
-        await mark_spawn_failed(rid, error=str(exc), lease=lease_details)
+        await mark_spawn_failed(
+            rid, error=str(exc) or type(exc).__name__, lease=lease_details
+        )
         return DispatchOutcome(run_id=rid, ok=False, reason="runner_spawn_failed")
 
     logger.info("run %s 已派发 pid=%s serial=%s", rid, pid, lease_details.get("serial"))
@@ -784,7 +786,7 @@ async def run_forever(
             logger.exception("dispatcher 轮次失败")
         try:
             await asyncio.wait_for(stop.wait() if stop else asyncio.sleep(interval), interval)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
 

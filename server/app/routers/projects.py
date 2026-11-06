@@ -86,7 +86,11 @@ async def rename_project(
 async def project_archive_preview(
     project_id: str, session: AsyncSession = Depends(get_session)
 ) -> dict[str, Any]:
-    return await identity_mod.archive_impact(session, entity="project", entity_id=_valid_uuid_or_none(project_id) or project_id)
+    return await identity_mod.archive_impact(
+        session,
+        entity="project",
+        entity_id=_valid_uuid_or_none(project_id) or project_id,
+    )
 
 
 @router.post("/projects/{project_id}/archive")

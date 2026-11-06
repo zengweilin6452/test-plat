@@ -32,7 +32,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..domain.gates import (
-    REASON_CODES,
+    REASON_BASELINE_MISSING,
+    REASON_GATE_POLICY_MISSING,
     REASON_PROFILE_MISMATCH,
     evaluation_fingerprint,
     gate_outcome,
@@ -40,14 +41,6 @@ from ..domain.gates import (
     snapshot_from_rows,
 )
 from ..domain.gates import build_report_view as _build_report_view
-from ..domain.gates import (
-    REASON_BASELINE_MISSING,
-    REASON_DEVICE_DEGRADED,
-    REASON_GATE_POLICY_MISSING,
-    REASON_METRIC_MISSING,
-    REASON_RUN_INCOMPLETE,
-    REASON_SAMPLE_BELOW_MIN,
-)
 from ..domain.metrics_view import median_metric_view
 from ..domain.metrics_view import metric_row_view as _metric_view
 from ..domain.profiles import ProfileNormalizationError, normalize_profile
@@ -476,7 +469,6 @@ async def _default_baseline_run_id(
         return None
     # 工单审查修复：旧基线的快照行可能只带 component_id（历史写入缺
     # source_run_id）——把它兜底解析回所属运行，而不是当成不存在的运行。
-    placeholders = ", ".join(f":id{i}" for i in range(len(run_ids)))
     params = {f"id{i}": str(value) for i, value in enumerate(run_ids)}
     resolved = (
         await session.execute(

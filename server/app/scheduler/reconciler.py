@@ -25,7 +25,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 from sqlalchemy import text
 
@@ -35,7 +34,6 @@ from ..domain import events as events_mod
 from ..domain import leases as leases_mod
 from ..domain import runs as runs_mod
 from ..integrations import leases as local_leases
-from . import dispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +203,7 @@ async def run_forever(
             logger.exception("reconciler 轮次失败")
         try:
             await asyncio.wait_for(stop.wait() if stop else asyncio.sleep(interval), interval)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
 

@@ -1,5 +1,7 @@
 
-import json, re, pathlib
+import json
+import pathlib
+import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 src = (ROOT / "docs/platform-prototype/schema.sql").read_text(encoding="utf-8")

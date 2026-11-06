@@ -8,7 +8,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Mapping, Protocol
+from collections.abc import Awaitable, Mapping
+from typing import Any, Protocol
 
 from . import spawn as spawn_mod
 

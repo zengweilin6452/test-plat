@@ -1,6 +1,5 @@
 """Deployment identity checks shared by startup and demo seeding."""
 import ipaddress
-
 from urllib.parse import parse_qs, unquote, urlsplit
 
 
@@ -24,7 +23,8 @@ def is_formal_database(value: str) -> bool:
             return True
         try:
             address = ipaddress.ip_address(host)
-            loopback = address.is_loopback or bool(getattr(address, "ipv4_mapped", None) and address.ipv4_mapped.is_loopback)
+            mapped = getattr(address, "ipv4_mapped", None)
+            loopback = address.is_loopback or bool(mapped and mapped.is_loopback)
         except ValueError:
             loopback = host == "localhost"
         return loopback and port == 55432 and database == "testdock"

@@ -37,10 +37,28 @@ def test_health_reports_three_state_capabilities(client):
     body = client.get("/api/v1/health").json()
     assert body["status"] in ("ok", "degraded")
     assert body["db"] in ("ok", "fail")
-    assert body["vendor"]["mobile_auto"] in ("present", "missing")
-    assert body["vendor"]["mobile_perf"] in ("present", "missing")
+    assert body["vendor"]["mobile_auto"] in ("present", "incomplete", "missing")
+    assert body["vendor"]["mobile_perf"] in ("present", "incomplete", "missing")
     # runner 未知：null（不是 0，也不是失败）
     assert body["runners"]["active"] is None
+    # 构建身份：未注入时为 null，注入后如实返回（不猜）
+    assert "commit" in body
+
+
+def test_health_distinguishes_incomplete_vendor_from_present(client, monkeypatch, tmp_path):
+    """目录在但缺入口文件时不能报 present（复制中断/版本不符必须可见）。"""
+    from app import config
+
+    root = tmp_path / "vendor"
+    (root / "mobile_auto").mkdir(parents=True)
+    marker = root / "mobile_perf/src/mobile_perf/__init__.py"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("", encoding="utf-8")
+    monkeypatch.setattr(config.settings, "vendor_dir", root)
+
+    body = client.get("/api/v1/health").json()
+    assert body["vendor"]["mobile_auto"] == "incomplete"
+    assert body["vendor"]["mobile_perf"] == "present"
 
 
 def test_health_does_not_leak_database_target(client):

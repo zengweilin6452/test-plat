@@ -6,12 +6,12 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+from . import ui_job
 from .artifacts import collect_layout, write_report_json
 from .env import Deadline, RunnerContext, ensure_vendor_on_path, fake_enabled
 from .perf_config import scenario_problems
 from .perf_recovery import clear_stale_perf_recording
 from .protocol import emit_stage, emit_text
-from . import ui_job
 from .ui_job import UiJobOptions, UiJobResult
 
 FAKE_VIEWER_PORT = 58000

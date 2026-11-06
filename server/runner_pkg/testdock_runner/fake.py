@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
@@ -34,8 +34,10 @@ _PNG_1X1 = bytes.fromhex(
 UI_TREE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <hierarchy rotation="0">
   <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.example.xinghe">
-    <node index="0" text="首页" resource-id="com.example.xinghe:id/title" class="android.widget.TextView" bounds="[48,120][540,180]" />
-    <node index="1" text="进入详情" resource-id="com.example.xinghe:id/enter" class="android.widget.Button" bounds="[48,240][540,320]" />
+    <node index="0" text="首页" resource-id="com.example.xinghe:id/title"
+          class="android.widget.TextView" bounds="[48,120][540,180]" />
+    <node index="1" text="进入详情" resource-id="com.example.xinghe:id/enter"
+          class="android.widget.Button" bounds="[48,240][540,320]" />
   </node>
 </hierarchy>
 """
@@ -89,7 +91,7 @@ def write_evidence(artifacts_dir: Path, *, serial: str, case_key: str) -> dict[s
     meta = target / "meta.json"
     entry = {
         "evidence_id": evidence_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "device_serial": serial,
         "app_package": "com.example.xinghe",
         "failure_type": "assertion",

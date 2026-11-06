@@ -14,7 +14,8 @@ DB 列；这里集中两件事：
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
 def missing_fields(row: Mapping[str, Any]) -> dict[str, Any]:

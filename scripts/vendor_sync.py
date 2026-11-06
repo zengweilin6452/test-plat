@@ -105,6 +105,10 @@ SOURCES = {
 # 单纯比对 parts 与 exclude_dirs 会漏（例如 tools/adb/.pytest_cache/...）。
 _EXCLUDE_DIR_NAMES = {"__pycache__", ".pytest_cache", ".ruff_cache", "__MACOSX"}
 
+# mobile_perf 的 SQLite 运行时数据目录不在 include 清单里，跑过 vendor 测试就会生成；
+# 校验时按"运行时产物"跳过，否则 check 会被 __pycache__/data 永久拖红。
+_CHECK_SKIP_PREFIXES = ("mobile_perf/data/",)
+
 
 def _prune_cache_dirs(target: str) -> int:
     """删除复制进 vendor 的缓存目录，返回删除的目录数。
@@ -263,10 +267,15 @@ def cmd_check() -> int:
             problems.append(f"缺失目录: {target}/")
             continue
         for path in root.rglob("*"):
-            if path.is_file():
-                rel = path.relative_to(VENDOR_DIR).as_posix()
-                if rel not in expected:
-                    problems.append(f"未登记文件: {rel}")
+            if not path.is_file():
+                continue
+            rel = path.relative_to(VENDOR_DIR).as_posix()
+            if _EXCLUDE_DIR_NAMES.intersection(Path(rel).parts):
+                continue
+            if rel.startswith(_CHECK_SKIP_PREFIXES):
+                continue
+            if rel not in expected:
+                problems.append(f"未登记文件: {rel}")
 
     if problems:
         print(f"[check] 失败，{len(problems)} 处问题：", file=sys.stderr)

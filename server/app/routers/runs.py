@@ -19,7 +19,7 @@ import re
 import shutil
 import uuid
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -115,12 +115,12 @@ async def list_runs(
         try:
             uuid.UUID(str(application_id))
         except ValueError:
-            raise validation_error(["application_id 必须是 uuid"])
+            raise validation_error(["application_id 必须是 uuid"]) from None
     if project_id:
         try:
             uuid.UUID(str(project_id))
         except ValueError:
-            raise validation_error(["project_id 必须是 uuid"])
+            raise validation_error(["project_id 必须是 uuid"]) from None
         exists = (
             await session.execute(
                 text("SELECT 1 FROM projects WHERE id::text = :pid"), {"pid": project_id}
@@ -589,7 +589,7 @@ async def _insert_run(session: AsyncSession, body: Mapping, *, internal: bool = 
         ),
         "requested_resource_id": resource_id,
         "source": "import" if internal else "api",
-        "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "submitted_at": datetime.now(UTC).isoformat(),
     }
 
     row = (

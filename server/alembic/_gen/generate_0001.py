@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """从 docs/platform-prototype/schema.sql 生成 server/alembic/versions/0001_initial.py。
 
 一次性工序工具（不是运行时依赖）：把评审稿 DDL 逐字搬成 Alembic 迁移，并叠加
