@@ -25,6 +25,9 @@ web/dist/
 .DS_Store
 Thumbs.db
 
+# Qoder 会话画布等运行时产物
+.qoder-credits/
+
 # 临时
 *.log
 .tmp/

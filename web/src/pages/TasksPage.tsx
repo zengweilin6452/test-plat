@@ -11,6 +11,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import { fetchTasks } from '../api/endpoints'
+import { useEffectiveContext } from '../store/effectiveContext'
 import { StatusBadge } from '../components/Badge'
 import { LinkButton } from '../components/Button'
 import { PageHeading, Panel, PanelHead } from '../components/Card'
@@ -30,6 +31,7 @@ import type { CreateTaskResponse, Platform, TaskRecord } from '../types'
 
 export function TasksPage() {
   const { targetScope, setTargetScope } = useTargetScope()
+  const ctx = useEffectiveContext()
   // 工单 20：过滤条件进 URL（q / test_type / run_state / scope），
   // 刷新与前后导航结果一致；切 scope 时重置过滤，不保留陈旧状态。
   const location = useLocation()
@@ -55,7 +57,7 @@ export function TasksPage() {
   const toast = useToast()
 
   const tasksQuery = useQuery({
-    queryKey: ['tasks', keyword, testType, runState],
+    queryKey: ['tasks', keyword, testType, runState, ctx.projectId],
     queryFn: ({ signal }) =>
       fetchTasks(
         undefined,
@@ -63,6 +65,7 @@ export function TasksPage() {
         signal,
         runState || undefined,
         testType || undefined,
+        ctx.projectId,
       ),
     retry: false,
   })

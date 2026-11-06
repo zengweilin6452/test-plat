@@ -44,7 +44,7 @@ import { displayStatus } from '../lib/display'
 import { DASH, fmtDateTime } from '../lib/fmt'
 import { pagePhase, type PagePhase } from '../lib/pageState'
 import { useDebugHandoff } from '../store/debugHandoff'
-import { useAppScope } from '../store/app'
+import { useEffectiveContext } from '../store/effectiveContext'
 import type { ApplicationRecord } from '../types'
 import { useTargetScope } from '../store/scope'
 import type { CreateTaskResponse, Platform, RunRecord, TargetScope } from '../types'
@@ -121,10 +121,11 @@ export function uiRunsEmptyCopy(
 export function UiPage() {
   const { targetScope, setTargetScope } = useTargetScope()
   // 工单 19：工作区携带应用身份；过滤与提交都锚定这个应用（AC-APP-01）
-  const { appId } = useAppScope()
+  const ctx = useEffectiveContext()
+  const appId = ctx.appId
   const appsQuery = useQuery({
-    queryKey: ['applications'],
-    queryFn: ({ signal }) => fetchApplications(signal),
+    queryKey: ['applications', 'all', ctx.projectId],
+    queryFn: ({ signal }) => fetchApplications(signal, { include_archived: true }),
     retry: false,
   })
   const currentApp = (appsQuery.data?.items ?? []).find((app: ApplicationRecord) => app.id === appId) ?? null
@@ -156,9 +157,9 @@ export function UiPage() {
   const toast = useToast()
 
   const runsQuery = useQuery({
-    queryKey: ['runs', 'ui', targetScope, appId],
+    queryKey: ['runs', 'ui', targetScope, appId, ctx.projectId],
     queryFn: ({ signal }) =>
-      fetchRuns(targetScope, 100, signal, appId ? { application_id: appId } : undefined),
+      fetchRuns(targetScope, 100, signal, { application_id: appId || undefined, project_id: ctx.projectId }),
     retry: false,
   })
 
@@ -192,7 +193,7 @@ export function UiPage() {
   // ---- 调试 tab：ready 设备清单（与 DevicesPage 同源 /api/v1/resources）----
   const resourcesQuery = useQuery({
     queryKey: ['resources', targetScope],
-    queryFn: ({ signal }) => fetchResources(targetScope, signal),
+    queryFn: ({ signal }) => fetchResources(targetScope, signal, ctx.projectId),
     enabled: tab === 'debug',
     retry: false,
   })
@@ -209,7 +210,7 @@ export function UiPage() {
   // 而是 suite_versions.manifest.cases，所以"用例"页签读的是所选版本。
   const suitesQuery = useQuery({
     queryKey: ['suites', 'ui'],
-    queryFn: ({ signal }) => fetchSuites('ui', signal),
+    queryFn: ({ signal }) => fetchSuites('ui', signal, ctx.projectId),
     enabled: !planned && (tab === 'suites' || tab === 'cases'),
     retry: false,
   })

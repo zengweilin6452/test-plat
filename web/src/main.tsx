@@ -3,17 +3,16 @@ import ReactDOM from 'react-dom/client'
 import { HashRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
+import { EffectiveContextProvider } from './store/effectiveContext'
+import { PlatformProvider } from './store/platform'
 import './styles/tokens.css'
 
 /**
- * 路由使用 HashRouter：
- * - 与原型 #overview 的深链风格一致，静态托管无需服务器 rewrite；
- * - 目标端选择器持久化在 hash 内的 query（形如 #/tasks?scope=android），
- *   刷新、复制链接、前进后退都能还原（实现见 src/store/scope.ts）。
+ * 路由使用 HashRouter：与 #/overview 深链风格一致，静态托管无需服务器 rewrite。
+ * 工作空间/能力与有效上下文由 Provider 统一提供，页面不再独立猜测默认项目。
  */
 const queryClient = new QueryClient({
   defaultOptions: {
-    // 骨架阶段：接口未接入时快速失败并展示空态，不做长时间重试
     queries: { retry: false, refetchOnWindowFocus: false, staleTime: 5_000 },
   },
 })
@@ -22,7 +21,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <HashRouter>
-        <App />
+        <PlatformProvider>
+          <EffectiveContextProvider>
+            <App />
+          </EffectiveContextProvider>
+        </PlatformProvider>
       </HashRouter>
     </QueryClientProvider>
   </React.StrictMode>,

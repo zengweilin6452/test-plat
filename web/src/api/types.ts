@@ -192,6 +192,9 @@ export interface RunReport {
   /** 后端门禁结论：passed / failed / not_tested；null 表示尚未判定 */
   verdict?: 'passed' | 'failed' | 'not_tested' | null
   target?: { id?: string | null; name?: string | null } | null
+  /** 改名 / 归档后的当前显示名，明确与运行时原始快照区分（AC-09） */
+  currentNames?: { application?: string | null; project?: string | null } | null
+  nameSource?: 'current_display_name' | null
   deviceProfile?: string | null
   durationS?: number | null
   /** vendor metricsSummary 原样透传：{metric_key: {unit, median, sampleCount, ...}} */

@@ -141,10 +141,10 @@ def _start_temp_instance() -> str:
     finally:
         pwfile.unlink(missing_ok=True)
 
-    logfile = TMP_DATA.parent / "pg_task9.log"
+    logfile = TMP_DATA.parent / f"pg_task9_{os.getpid()}.log"
     # pg_ctl start 必须 DEVNULL，不能 capture_output：pg_ctl 退出后它拉起的
     # postgres 继承了管道写端，reader 线程永远等不到 EOF，communicate() 挂死
-    # （py-spy 实测卡在 _communicate）。启动失败的信息在 pg_task9.log 里。
+    # （py-spy 实测卡在 _communicate）。启动失败的信息在本进程的 pg_task9_<pid>.log 里。
     try:
         subprocess.run(
             [
@@ -206,7 +206,7 @@ def _stop_temp_instance() -> None:
     )
     time.sleep(0.5)
     shutil.rmtree(TMP_DATA, ignore_errors=True)
-    (TMP_DATA.parent / "pg_task9.log").unlink(missing_ok=True)
+    (TMP_DATA.parent / f"pg_task9_{os.getpid()}.log").unlink(missing_ok=True)
 
 
 def pytest_configure(config: pytest.Config) -> None:

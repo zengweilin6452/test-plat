@@ -21,12 +21,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .config import scheduler_enabled, settings
+from .config import formal_start_blocker, scheduler_enabled, settings
 from .errors import ApiError, redact_sensitive
 from .schemas import ErrorEnvelope
 from .ws import hub as _hub
 from .routers import applications, debug as debug_router, overview, projects, resources, runs, suites, tasks
 from .routers import analyses, baselines, builds, gate_policies
+from .routers import legacy_review, onboarding, workspace as workspace_router
 
 
 def _install_windows_event_loop_policy() -> None:
@@ -48,6 +49,10 @@ async def lifespan(app: FastAPI):
     TESTDOCK_SCHEDULER=0 时只生成 token 不起后台任务 —— 单元测试直接用 domain
     层，不需要一个偷偷跑的后台循环去抢库里的 queued run。
     """
+    # 正式启动拒绝假执行配置（工单 07）：测试（pytest）与显式演示环境除外。
+    blocker = formal_start_blocker()
+    if blocker:
+        raise RuntimeError(blocker)
     token = control_mod.ensure_token(settings.control_token_path)
     app.state.control_token = token
     # 同值登记到 domain 层：`python -m app.main` 下 `from ..main import app` 会拿到
@@ -121,6 +126,10 @@ app.include_router(resources.router, prefix=API_PREFIX)
 app.include_router(tasks.router, prefix=API_PREFIX)
 app.include_router(runs.router, prefix=API_PREFIX)
 app.include_router(suites.router, prefix=API_PREFIX)
+# 正式化改造：工作空间设置 / 能力摘要 / 首用引导状态
+app.include_router(workspace_router.router, prefix=API_PREFIX)
+app.include_router(onboarding.router, prefix=API_PREFIX)
+app.include_router(legacy_review.router, prefix=API_PREFIX)
 
 
 # --------------------------------------------------------------------------- #

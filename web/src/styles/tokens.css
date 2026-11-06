@@ -718,10 +718,41 @@ dialog.drawer { margin: 0 0 0 auto; width: min(570px, 100vw); height: 100dvh; ma
 .phone-stage .phone { width: 226px; max-width: 100%; border: 6px solid #26354e; border-radius: 29px; background: white; box-shadow: 0 12px 25px #1c305b15; overflow: hidden; position: relative; padding-top: 19px; }
 .phone-stage .phone-camera { width: 36px; height: 9px; border-radius: 7px; background: #26354e; position: absolute; left: 50%; transform: translateX(-50%); top: 5px; z-index: 2; }
 .phone-stage .debug-frame { width: 100%; }
-.phone-stage .debug-stage-empty { aspect-ratio: 214 / 558; max-height: 74vh; display: grid; place-items: center; background: #0b0f14; color: #9daec8; padding: 10px; text-align: center; font-size: 11px; }
+.phone-stage .debug-stage-empty { width: 100%; aspect-ratio: 214 / 558; max-height: 74vh; display: grid; place-items: center; background: #0b0f14; color: #9daec8; padding: 10px; text-align: center; font-size: 11px; }
 .phone-stage .phone-bottom { height: 4px; width: 62px; background: #29364b; border-radius: 4px; margin: 8px auto; }
 
 /* 直接操控（vendor 手势 WS）：触点与操控态 */
 .debug-stage.control-mode { cursor: crosshair; touch-action: none; outline: 2px solid rgba(66, 99, 235, .45); outline-offset: -2px; }
 .debug-touch-dot { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: rgba(66, 99, 235, .82); border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(66, 99, 235, .35); pointer-events: none; z-index: 3; }
 .debug-control-bar { display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; margin: 8px auto 0; }
+
+/* ---- 正式化改造：工作空间/引导/管理表单与长名称（工单 01/02/08/10） ---- */
+.form-stack { display: grid; gap: 12px; align-content: start; }
+.form-stack .field > span { font-size: var(--fs-xs); color: var(--ink-soft); font-weight: var(--fw-medium); }
+.form-stack input, .form-stack select { max-width: 100%; }
+.workspace-name, .breadcrumb-workspace, .context-project-name {
+  display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.demo-badge {
+  margin: 0 4px 16px; padding: 7px 10px; border-radius: var(--radius-xs);
+  border: 1px solid #efd9a8; background: #fff8e9; color: #895d0e; font-size: var(--fs-xs);
+}
+.mode-tag {
+  display: inline-flex; align-items: center; gap: 7px; border: 1px solid #dce4f4;
+  color: #65758f; background: #f9fbff; border-radius: var(--radius-3xs);
+  padding: var(--space-1) 9px; font-size: var(--fs-xs); white-space: nowrap;
+}
+.mode-tag i { width: 5px; height: 5px; background: var(--blue); border-radius: var(--radius-pill); }
+.onboarding-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.onboarding-list li { border-left: 3px solid var(--line); padding-left: 12px; }
+.onboarding-list li.done { border-left-color: var(--green, #34a06a); }
+.wrap-cell { white-space: normal; overflow-wrap: anywhere; max-width: 320px; }
+.context-strip .notice { max-width: 420px; font-size: var(--fs-xs); }
+@media (max-width: 1100px) {
+  .workspace-name, .breadcrumb-workspace, .context-project-name { max-width: 140px; }
+}
+@media (max-width: 760px) {
+  .workspace-name, .breadcrumb-workspace, .context-project-name { max-width: 100px; }
+  .mode-tag { font-size: 9px; padding: var(--space-1) 6px; }
+  .context-strip { flex-wrap: wrap; }
+}

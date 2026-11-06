@@ -1,21 +1,26 @@
+import { useQuery } from '@tanstack/react-query'
+import { useLocation } from 'react-router-dom'
+import { fetchOnboardingStatus } from './api/endpoints'
+import { onboardingDestination, onboardingSkipped } from './lib/formalization'
 /**
- * 路由表。9 个页面与导航一一对应（原型 L139 顺序）。
- *
- * 使用 HashRouter（见 main.tsx）：
- * - 与原型 #overview 深链风格一致，静态托管不需要服务器 rewrite；
- * - 目标端 ?scope= 挂在 hash 内部的 query 上，刷新与分享都能还原。
+ * 路由表：正式产品页面 + 旧帮助/数据设计深链接兼容。
  */
 import { Navigate, Route, Routes } from 'react-router-dom'
+import { AboutPage } from './pages/AboutPage'
 import { AppsPage } from './pages/AppsPage'
 import { DatabasePage } from './pages/DatabasePage'
 import { DevicesPage } from './pages/DevicesPage'
+import { HelpPage } from './pages/HelpPage'
 import { IntegrationPage } from './pages/IntegrationPage'
+import { LegacyReviewPage } from './pages/LegacyReviewPage'
+import { NotFoundPage } from './pages/NotFoundPage'
+import { OnboardingPage } from './pages/OnboardingPage'
 import { OverviewPage } from './pages/OverviewPage'
 import { PerfPage } from './pages/PerfPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { TasksPage } from './pages/TasksPage'
 import { UiPage } from './pages/UiPage'
-import { NotFoundPage } from './pages/NotFoundPage'
 
 export const ROUTES = [
   { path: '/overview', Page: OverviewPage },
@@ -25,14 +30,29 @@ export const ROUTES = [
   { path: '/devices', Page: DevicesPage },
   { path: '/tasks', Page: TasksPage },
   { path: '/reports', Page: ReportsPage },
+  { path: '/onboarding', Page: OnboardingPage },
+  { path: '/help', Page: HelpPage },
+  { path: '/settings', Page: SettingsPage },
+  { path: '/about', Page: AboutPage },
+  { path: '/legacy-review', Page: LegacyReviewPage },
+  // 兼容旧深链接
   { path: '/integration', Page: IntegrationPage },
   { path: '/database', Page: DatabasePage },
 ] as const
 
+function InitialRoute() {
+  const location = useLocation()
+  const query = useQuery({ queryKey: ['onboarding-status'], queryFn: ({ signal }) => fetchOnboardingStatus(signal), retry: false })
+  if (query.isLoading) return <p role="status">正在核对首次使用状态…</p>
+  if (query.isError) return <div role="alert">首次使用状态读取失败。<button onClick={() => query.refetch()}>重试</button></div>
+  if (!query.data) return null
+  return <Navigate to={{ pathname: onboardingDestination(query.data.complete, onboardingSkipped()), search: location.search }} replace />
+}
+
 export function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/overview" replace />} />
+      <Route path="/" element={<InitialRoute />} />
       {ROUTES.map(({ path, Page }) => (
         <Route key={path} path={path} element={<Page />} />
       ))}

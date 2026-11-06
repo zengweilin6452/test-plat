@@ -25,7 +25,7 @@ import { ContextBar, PlannedNotice, PrimaryAction } from '../components/PageBits
 import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
 import { Tabs } from '../components/Tabs'
-import { useAppScope } from '../store/app'
+import { useEffectiveContext } from '../store/effectiveContext'
 import { Table, type Column } from '../components/Table'
 import { RunDrawer } from '../components/RunDrawer'
 import { TaskWizard, newRequestKey } from '../components/TaskWizard'
@@ -71,8 +71,14 @@ function verdictTone(verdict: string | null | undefined): 'green' | 'red' | 'amb
 }
 
 export function PerfPage() {
+  const ctx = useEffectiveContext()
+  return <ScopedPerfPage key={`${ctx.projectId ?? 'all'}:${ctx.appId ?? 'none'}`} />
+}
+
+function ScopedPerfPage() {
   const { targetScope, setTargetScope } = useTargetScope()
-  const { appId } = useAppScope()
+  const ctx = useEffectiveContext()
+  const appId = ctx.appId
   const [tab, setTab] = useState<'analysis' | 'baseline'>('analysis')
   const [policyId, setPolicyId] = useState('')
   const planned = !isImplementedPlatform(targetScope)
@@ -86,8 +92,8 @@ export function PerfPage() {
   const toast = useToast()
 
   const runsQuery = useQuery({
-    queryKey: ['runs', 'perf', targetScope, appId],
-    queryFn: ({ signal }) => fetchRuns(targetScope, 100, signal, appId ? { application_id: appId } : undefined),
+    queryKey: ['runs', 'perf', targetScope, appId, ctx.projectId],
+    queryFn: ({ signal }) => fetchRuns(targetScope, 100, signal, { application_id: appId || undefined, project_id: ctx.projectId }),
     retry: false,
   })
 

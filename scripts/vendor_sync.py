@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -25,10 +26,41 @@ VENDOR_DIR = REPO_ROOT / "vendor"
 LOCK_PATH = VENDOR_DIR / "VENDOR.lock.json"
 LOCK_SCHEMA_VERSION = 1
 
-# 源仓库绝对路径（只读）。可在 CI 用环境变量覆盖。
+# 开发者同步源：只允许通过显式环境配置提供，不再写死某人的 D 盘路径。
+# 正常运行直接使用仓库内已有的 vendor/ 快照；只有 `sync` 子命令需要源。
+_CONFIG_KEYS = {
+    "mobile_auto": "TESTDOCK_MOBILE_AUTO_SOURCE",
+    "mobile_perf": "TESTDOCK_MOBILE_PERF_SOURCE",
+}
+
+
+def _configured_root(name: str) -> Path:
+    value = os.environ.get(_CONFIG_KEYS[name], "").strip()
+    if not value:
+        raise SystemExit(
+            f"未配置 {_CONFIG_KEYS[name]}：vendor 同步需要显式指定只读源目录；"
+            "正常启动直接使用仓库内已锁定的 vendor 快照，不需要同步。"
+        )
+    return Path(value)
+
+
+def sources() -> dict[str, dict[str, object]]:
+    """按当前环境构造源配置；check/list 不需要源路径存在。"""
+    result: dict[str, dict[str, object]] = {}
+    for name, key in _CONFIG_KEYS.items():
+        value = os.environ.get(key, "").strip()
+        cfg: dict[str, object] = {
+            "root": Path(value) if value else None,
+            "target": name,
+        }
+        result[name] = cfg
+    return result
+
+
 SOURCES = {
     "mobile_auto": {
-        "root": Path(r"D:\\workspace\\claudecode-test\\moblie-auto"),
+        "root": None,  # 由 _configured_root() 在 sync 时解析
+
         "target": "mobile_auto",
         "include": [
             "src/mobile_auto",
@@ -48,7 +80,7 @@ SOURCES = {
         "exclude_globs": {"*.pyc", "*.pyo"},
     },
     "mobile_perf": {
-        "root": Path(r"D:\\workspace\\claudecode-test\\moblie-xn"),
+        "root": None,  # 由 _configured_root() 在 sync 时解析
         "target": "mobile_perf",
         "include": [
             "src/mobile_perf",
@@ -151,7 +183,10 @@ def cmd_sync(names: list[str] | None = None) -> int:
     plans = {}
     for name in selected:
         cfg = SOURCES[name]
-        source_files = list(_iter_source_files(cfg["root"], cfg["include"], cfg["exclude_dirs"], cfg["exclude_globs"]))
+        root = _configured_root(name)
+        cfg = {**cfg, "root": root}
+        SOURCES[name] = cfg
+        source_files = list(_iter_source_files(root, cfg["include"], cfg["exclude_dirs"], cfg["exclude_globs"]))
         incoming = {f"{cfg['target']}/{rel}" for rel, _ in source_files}
         removed = {rel for rel in files if rel.startswith(cfg["target"] + "/")} - incoming
         if removed:

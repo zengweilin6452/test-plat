@@ -1,9 +1,10 @@
 /**
- * 侧栏（原型 L47–L60 的 aside）。
- * 包含：品牌、工作空间、4 组导航、底部"当前目标端"提示与用户信息。
+ * 侧栏：统一品牌定义、真实工作空间名称、本机模式与全站导航。
+ * 不再展示虚构团队、头像身份或研发阶段标签。
  */
 import { NavLink, useLocation } from 'react-router-dom'
 import { SCOPE_OPTIONS } from '../../constants'
+import { BRAND, usePlatform } from '../../store/platform'
 import { Icon } from '../Icon'
 import { NAV_GROUPS } from './navItems'
 import type { TargetScope } from '../../types'
@@ -20,8 +21,14 @@ function scopeLabel(scope: TargetScope): string {
 }
 
 export function Sidebar({ scope, open, onNavigate }: SidebarProps) {
-  // 切页时保留 ?scope=，保证目标端选择在导航之间不丢失
   const { search } = useLocation()
+  const { workspace, capabilities, loading, error } = usePlatform()
+
+  const workspaceName = loading
+    ? '正在加载工作空间…'
+    : error || !workspace
+      ? '工作空间读取失败'
+      : workspace.name
 
   return (
     <aside className={'sidebar' + (open ? ' open' : '')} aria-label="主导航">
@@ -29,18 +36,24 @@ export function Sidebar({ scope, open, onNavigate }: SidebarProps) {
         <span className="brand-mark">
           <Icon name="pulse" size={19} />
         </span>
-        TestDock
+        {BRAND.name}
       </NavLink>
 
-      <div className="workspace">
+      <div className="workspace" title={workspaceName}>
         <span className="workspace-icon">
           <Icon name="box" size={16} />
         </span>
         <div>
-          <strong>星河工作空间</strong>
-          <small>内部测试平台</small>
+          <strong className="workspace-name">{workspaceName}</strong>
+          <small>{BRAND.mode}</small>
         </div>
       </div>
+
+      {capabilities?.demo_mode || workspace?.demo_mode ? (
+        <div className="demo-badge" role="status" aria-label="演示环境">
+          <span aria-hidden="true">●</span> {BRAND.demoBadge}
+        </div>
+      ) : null}
 
       {NAV_GROUPS.map((group, index) => (
         <div key={group.label ?? 'root-' + index}>
@@ -65,10 +78,12 @@ export function Sidebar({ scope, open, onNavigate }: SidebarProps) {
           {scopeLabel(scope)} · 切换会同步到地址栏
         </div>
         <div className="profile">
-          <span className="avatar">测</span>
+          <span className="avatar" aria-hidden="true">
+            <Icon name="box" size={15} />
+          </span>
           <div>
-            <strong>测试工程组</strong>
-            <div className="muted small">P1 骨架阶段</div>
+            <strong>{BRAND.mode}</strong>
+            <div className="muted small">无登录 · 本机使用</div>
           </div>
         </div>
       </div>

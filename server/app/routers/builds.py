@@ -56,6 +56,10 @@ async def create_build(
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, object]:
     """登记构建；同 key 同身份返回原记录，不同身份 409 且不改原记录。"""
+    from ..domain import identity as identity_mod
+
+    # 归档守卫（工单 04）：归档范围禁止登记新构建
+    await identity_mod.assert_scope_active(session, application_id=payload.application_id)
     record, created = await build_service.register_build(
         session,
         application_id=payload.application_id,

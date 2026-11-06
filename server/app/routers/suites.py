@@ -52,14 +52,21 @@ async def list_suite_sources() -> dict[str, Any]:
 @router.get("/suites")
 async def list_suites(
     test_type: Annotated[str | None, Query(description="ui / performance / joint")] = None,
+    project_id: Annotated[str | None, Query()] = None,
+    include_archived: Annotated[bool, Query()] = False,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """套件列表，可按 test_type 过滤（枚举值来自 DB CHECK）。"""
+    """套件列表，可按 test_type 过滤（枚举值来自 DB CHECK）；默认排除归档套件。"""
     if test_type and test_type not in suite_domain.TEST_TYPES:
         raise validation_error(
             [f"test_type 只支持 {' / '.join(suite_domain.TEST_TYPES)}，收到 {test_type!r}"]
         )
-    return await suite_service.list_suites(session, test_type=test_type)
+    return await suite_service.list_suites(
+        session,
+        test_type=test_type,
+        project_id=project_id,
+        include_archived=include_archived,
+    )
 
 
 @router.post("/suites", status_code=201)
@@ -80,6 +87,10 @@ async def create_suite(
       - pytest 失败/0 用例    -> 422 discover_failed（带 stderr 尾巴）
       - 同名套件已存在        -> 409 state_conflict
     """
+    from ..domain import identity as identity_mod
+
+    # 归档守卫（工单 04）：归档范围禁止登记新套件 / 性能场景
+    await identity_mod.assert_scope_active(session, application_id=body.application_id)
     return await suite_service.create_suite(
         session,
         application_id=body.application_id,
@@ -115,6 +126,13 @@ async def publish_suite_version(
       - 来源不可用/副本失败   -> 422 discover_failed（details.reason）
     """
     suite_row = await suite_service.get_suite(session, suite_id)
+    from ..domain import identity as identity_mod
+
+    await identity_mod.assert_scope_active(
+        session,
+        project_id=str(suite_row["project_id"]),
+        application_id=str(suite_row["application_id"]),
+    )
     return await suite_service.publish_version(
         session,
         suite_row=suite_row,
@@ -138,6 +156,13 @@ async def discover_suite(
     失败语义与 POST /suites 相同；失败不发布半成品版本，诊断留在副本目录。
     """
     suite_row = await suite_service.get_suite(session, suite_id)
+    from ..domain import identity as identity_mod
+
+    await identity_mod.assert_scope_active(
+        session,
+        project_id=str(suite_row["project_id"]),
+        application_id=str(suite_row["application_id"]),
+    )
     return await suite_service.discover_version(
         session,
         suite_row=suite_row,

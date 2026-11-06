@@ -126,6 +126,14 @@ async def update_gate_policy(
     if current is None:
         raise HTTPException(status_code=404, detail="gate policy not found")
     current = dict(current)
+    from ..domain import identity as identity_mod
+
+    # 归档守卫（工单 04）：归档范围禁止修改门禁策略等业务配置
+    await identity_mod.assert_scope_active(
+        session,
+        project_id=str(current["project_id"]),
+        application_id=str(current["application_id"]),
+    )
 
     rules = payload.get("rules")
     if rules is None:
@@ -190,9 +198,12 @@ async def create_gate_policy(
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """新建策略（首期单条全局策略用默认阈值）。同一应用下重名则 version+1。"""
+    from ..domain import identity as identity_mod
+
     application_id = payload.get("application_id")
     if not application_id:
         raise HTTPException(status_code=422, detail="application_id 必填")
+    await identity_mod.assert_scope_active(session, application_id=str(application_id))
     app = (
         await session.execute(
             text("SELECT id, project_id FROM applications WHERE id::text = :id"),

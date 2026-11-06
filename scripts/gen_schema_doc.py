@@ -39,7 +39,7 @@ OUT_PATH = REPO_ROOT / "server" / "app" / "static_data" / "schema_doc.json"
 # 表分组 / 业务名称 / 泳道 / 写入流程：与原型 index.html、database-design.md 对齐
 # --------------------------------------------------------------------------- #
 TABLE_GROUPS: dict[str, list[str]] = {
-    "基础资产": ["projects", "project_members", "applications", "app_builds", "environments"],
+    "基础资产": ["workspace_settings", "projects", "project_members", "applications", "app_builds", "environments"],
     "执行资源": [
         "execution_nodes",
         "resource_profiles",
@@ -56,6 +56,7 @@ TABLE_GROUPS: dict[str, list[str]] = {
 }
 
 TABLE_TITLES: dict[str, str] = {
+    "workspace_settings": "工作空间设置",
     "projects": "项目",
     "project_members": "项目成员",
     "applications": "应用",

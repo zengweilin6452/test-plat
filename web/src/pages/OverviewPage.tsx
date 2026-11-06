@@ -13,6 +13,7 @@ import { TaskWizard } from '../components/TaskWizard'
 import { useQuery } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import { fetchOverview, fetchRuns } from '../api/endpoints'
+import { useEffectiveContext } from '../store/effectiveContext'
 import { Button } from '../components/Button'
 import { Panel, PanelHead, PageHeading } from '../components/Card'
 import { ContextBar } from '../components/PageBits'
@@ -95,16 +96,17 @@ export function OverviewPage() {
   const [wizardOpen, setWizardOpen] = useState(false)
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const { targetScope, setTargetScope } = useTargetScope()
+  const ctx = useEffectiveContext()
 
   const overviewQuery = useQuery({
-    queryKey: ['overview', targetScope],
-    queryFn: ({ signal }) => fetchOverview(targetScope === 'all' ? undefined : targetScope, signal),
+    queryKey: ['overview', targetScope, ctx.projectId],
+    queryFn: ({ signal }) => fetchOverview(targetScope === 'all' ? undefined : targetScope, signal, ctx.projectId),
     retry: false,
   })
 
   const runsQuery = useQuery({
-    queryKey: ['runs', 'overview', targetScope],
-    queryFn: ({ signal }) => fetchRuns(targetScope, 50, signal),
+    queryKey: ['runs', 'overview', targetScope, ctx.projectId],
+    queryFn: ({ signal }) => fetchRuns(targetScope, 50, signal, { project_id: ctx.projectId }),
     retry: false,
   })
 
@@ -281,7 +283,7 @@ export function OverviewPage() {
             用例失败会保留现场：截图、日志与步骤断言逐条可追溯。
           </p>
           <div className="muted small">
-            目标端：Android / iOS / Web · 已接入：{TARGET_CATALOG.android.capability}
+            目标端：Android / iOS / Web · 已接入：Android UI 自动化与性能采集
           </div>
           <a className="link-btn" href="#/ui">进入 UI 自动化 ›</a>
         </Panel>

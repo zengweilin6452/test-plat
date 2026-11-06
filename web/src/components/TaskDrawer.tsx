@@ -11,7 +11,7 @@
  *
  * 硬约束：
  * - outcome 为 null 时绝不显示「已通过 / 未通过」，只显示生命周期 / 就绪态；
- * - 后端 P2 端点未就绪（404）时显示 Notice + 错误码，页面不崩；
+ * - 后端接口读取失败时显示 Notice + 错误码，页面不崩；
  * - 缺失字段显示破折号，不显示 0。
  */
 import { useEffect, useMemo, useState } from 'react'
@@ -27,6 +27,7 @@ import {
   validateTask,
 } from '../api/endpoints'
 import { moduleName, TARGET_CATALOG } from '../constants'
+import { useEffectiveContext } from '../store/effectiveContext'
 import { displayStatus, displayTaskStatus } from '../lib/display'
 import { DASH, fmtDateTime } from '../lib/fmt'
 import type {
@@ -99,6 +100,7 @@ interface TaskDrawerProps {
 }
 
 export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
+  const ctx = useEffectiveContext()
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -148,14 +150,14 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
   const boundSuiteVersionId = latestRevision?.suite_version_id ?? null
 
   const buildsQuery = useQuery({
-    queryKey: ['builds', task?.application.id],
+    queryKey: ['builds', task?.application.id, ctx.projectId],
     queryFn: ({ signal }) => fetchBuilds(task!.application.id, signal),
     enabled: open && Boolean(task?.application.id),
     retry: false,
   })
   const suitesQuery = useQuery({
-    queryKey: ['suites', testType],
-    queryFn: ({ signal }) => fetchSuites(testType ?? undefined, signal),
+    queryKey: ['suites', testType, ctx.projectId],
+    queryFn: ({ signal }) => fetchSuites(testType ?? undefined, signal, ctx.projectId),
     enabled: open && Boolean(testType),
     retry: false,
   })

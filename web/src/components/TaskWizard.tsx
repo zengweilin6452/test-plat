@@ -12,7 +12,7 @@
  * 提交纪律：
  * - 写操作带 X-TestDock-Client: web（由 api/client.ts 统一注入）；
  * - request_key 每次「尝试提交」生成一次，网络失败重试复用同一个 key，保证幂等；
- * - 后端 P2 端点未就绪（404）时只显示 Notice + 错误码，不伪造成功、不关窗。
+ * - 读接口失败时只显示 Notice + 错误码，不伪造成功、不关窗。
  */
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -26,6 +26,7 @@ import {
   fetchSuites,
 } from '../api/endpoints'
 import { MODULE_NAMES, TARGET_CATALOG } from '../constants'
+import { useEffectiveContext } from '../store/effectiveContext'
 import { DASH } from '../lib/fmt'
 import {
   DEFAULT_PERF_ITEMS,
@@ -295,6 +296,7 @@ interface TaskWizardProps {
 }
 
 export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialModule, initialApplicationId, initialSuite }: TaskWizardProps) {
+  const ctx = useEffectiveContext()
   const uid = useId()
   const [step, setStep] = useState(1)
   const [form, setForm] = useState<WizardForm>(INITIAL_FORM)
@@ -331,8 +333,8 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
   }, [open, presetPlatform, initialModule, presetApplicationId, presetSuiteId, presetVersionId, presetName])
 
   const applicationsQuery = useQuery({
-    queryKey: ['applications', 'wizard'],
-    queryFn: ({ signal }) => fetchApplications(signal),
+    queryKey: ['applications', 'wizard', ctx.projectId],
+    queryFn: ({ signal }) => fetchApplications(signal, { project_id: ctx.projectId }),
     enabled: open,
     retry: false,
   })
@@ -353,9 +355,9 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
     retry: false,
   })
   const suitesQuery = useQuery({
-    queryKey: ['suites', 'wizard', form.module],
+    queryKey: ['suites', 'wizard', form.module, ctx.projectId],
     queryFn: ({ signal }) =>
-      fetchSuites(form.module === 'perf' ? 'performance' : form.module, signal),
+      fetchSuites(form.module === 'perf' ? 'performance' : form.module, signal, ctx.projectId),
     enabled: open && form.platform === 'android',
     retry: false,
   })
@@ -409,8 +411,8 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
 
   // Android 才需要选设备；其它端不请求资源列表
   const resourcesQuery = useQuery({
-    queryKey: ['resources', 'wizard'],
-    queryFn: ({ signal }) => fetchResources('android', signal),
+    queryKey: ['resources', 'wizard', ctx.projectId],
+    queryFn: ({ signal }) => fetchResources('android', signal, ctx.projectId),
     enabled: open && form.platform === 'android',
     retry: false,
   })
@@ -683,7 +685,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
                 id={fieldId('appVersion')}
                 value={form.appVersion}
                 maxLength={40}
-                placeholder="3.8.0-rc.2"
+                placeholder="例如 3.8.0-rc.2（示例不会自动提交）"
                 aria-invalid={Boolean(fieldErrors.appVersion)}
                 aria-describedby={fieldErrors.appVersion ? `${fieldId('appVersion')}-error` : undefined}
                 onChange={(event) => update('appVersion', event.target.value)}
@@ -700,7 +702,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
                 placeholder={form.module === 'perf' ? '首页滑动' : '核心链路回归'}
                 onChange={(event) => update('scenario', event.target.value)}
               />
-              <div className="field-hint">套件清单读接口在 P2 提供，这里先按名称登记</div>
+              <div className="field-hint">请选择可信来源登记套件；自由填写的场景名称不会自动成为套件版本。</div>
             </div>
           </div>
         </div>
@@ -1007,7 +1009,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
               {submitError.message}
               {submitError.code === 'HTTP_404' || submitError.code === 'not_found' ? (
                 <div className="small" style={{ marginTop: 6 }}>
-                  后端 P2 任务接口可能尚未上线（404），请联系后端确认 POST /api/v1/tasks 已部署。
+                  任务接口返回 404：请确认后端已升级、迁移已执行，且 POST /api/v1/tasks 可访问。
                 </div>
               ) : null}
               {submitError.requestId ? (

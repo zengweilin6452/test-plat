@@ -20,24 +20,102 @@ import type {
   TaskRecord,
 } from '../types'
 
-/** overview 不接受 scope（后端按 Android 统计），保留参数位以便后续扩展 */
-export function fetchOverview(scope: string | undefined, signal?: AbortSignal) {
-  return api.get<OverviewSummary>('/overview', { scope: scope || undefined }, signal)
+/** 工作台聚合：projectId 为空 = 显式「全部项目」跨项目汇总（工单 05） */
+export function fetchOverview(scope: string | undefined, signal?: AbortSignal, projectId?: string | null) {
+  return api.get<OverviewSummary>('/overview', { scope: scope || undefined, project_id: projectId || undefined }, signal)
 }
 
-export function fetchApplications(signal?: AbortSignal) {
-  return api.get<ApplicationsResponse>('/applications', undefined, signal)
+export function fetchApplications(
+  signal?: AbortSignal,
+  params: {
+    project_id?: string | null
+    platform?: string | null
+    include_archived?: boolean
+    archived_only?: boolean
+  } = {},
+) {
+  return api.get<ApplicationsResponse>('/applications', params, signal)
+}
+
+export function fetchApplication(id: string, signal?: AbortSignal) {
+  return api.get<import('../types').ApplicationRecord>('/applications/' + encodeURIComponent(id), undefined, signal)
+}
+
+export function createProject(body: { code: string; name: string }) {
+  return api.post<import('../types').ProjectRecord>('/projects', body)
+}
+
+export function renameProject(id: string, name: string) {
+  return api.patch<import('../types').ProjectRecord>('/projects/' + encodeURIComponent(id), { name })
+}
+
+export function createApplication(body: {
+  project_id: string
+  platform: string
+  name: string
+  identifier: string
+}) {
+  return api.post<import('../types').ApplicationRecord>('/applications', body)
+}
+
+export function renameApplication(id: string, name: string) {
+  return api.patch<import('../types').ApplicationRecord>('/applications/' + encodeURIComponent(id), { name })
+}
+
+export function fetchArchivePreview(entity: 'project' | 'application', id: string, signal?: AbortSignal) {
+  const base = entity === 'project' ? '/projects/' : '/applications/'
+  return api.get<import('../types').ArchivePreview>(base + encodeURIComponent(id) + '/archive-preview', undefined, signal)
+}
+
+export function archiveEntity(entity: 'project' | 'application', id: string) {
+  const base = entity === 'project' ? '/projects/' : '/applications/'
+  return api.post<import('../types').ArchiveResult>(base + encodeURIComponent(id) + '/archive', {})
+}
+
+export function restoreEntity(entity: 'project' | 'application', id: string) {
+  const base = entity === 'project' ? '/projects/' : '/applications/'
+  return api.post<import('../types').ArchiveResult>(base + encodeURIComponent(id) + '/restore', {})
+}
+
+export function fetchWorkspace(signal?: AbortSignal) {
+  return api.get<import('../types').WorkspaceSettings>('/workspace', undefined, signal)
+}
+
+export function renameWorkspace(name: string) {
+  return api.patch<import('../types').WorkspaceSettings>('/workspace', { name })
+}
+
+export function fetchCapabilities(signal?: AbortSignal) {
+  return api.get<import('../types').Capabilities>('/capabilities', undefined, signal)
+}
+
+export function fetchOnboardingStatus(signal?: AbortSignal) {
+  return api.get<import('../types').OnboardingStatus>('/onboarding/status', undefined, signal)
+}
+
+export function fetchLegacyReview(signal?: AbortSignal) {
+  return api.get<import('../types').LegacyReview>('/legacy-review', undefined, signal)
+}
+
+export function applyLegacyActions(body: {
+  preview_token: string
+  actions: import('../types').LegacyAction[]
+}) {
+  return api.post<import('../types').LegacyApplyResult>('/legacy-review/apply', body)
 }
 
 export function fetchResources(scope: TargetScope, signal?: AbortSignal, projectId?: string | null) {
-  // /resources 目前只支持 status 与 project_id 过滤；平台过滤在前端按 platform 字段做（见 DevicesPage）
+  // /resources 支持 status 与 project_id 过滤；平台过滤在前端按 platform 字段做（见 DevicesPage）
   void scope
   return api.get<ResourcesResponse>('/resources', { project_id: projectId || undefined }, signal)
 }
 
-/** GET /api/v1/projects —— 项目清单（设备页项目过滤用，device-registration.md D5） */
-export function fetchProjects(signal?: AbortSignal) {
-  return api.get<ProjectsResponse>('/projects', undefined, signal)
+/** GET /api/v1/projects —— 项目清单（管理列表可筛选归档） */
+export function fetchProjects(
+  signal?: AbortSignal,
+  params: { include_archived?: boolean; archived_only?: boolean } = {},
+) {
+  return api.get<ProjectsResponse>('/projects', params, signal)
 }
 
 /**
@@ -52,7 +130,7 @@ export function fetchRuns(
   scope: TargetScope,
   limit = 100,
   signal?: AbortSignal,
-  extra?: { state?: string; application_id?: string; test_type?: string; q?: string; cursor?: string },
+  extra?: { state?: string; application_id?: string; test_type?: string; q?: string; cursor?: string; project_id?: string | null },
 ) {
   return api.get<RunsResponse>('/runs', {
     scope: scope === 'all' ? undefined : scope,
@@ -67,12 +145,14 @@ export function fetchTasks(
   signal?: AbortSignal,
   runState?: string,
   testTypeOverride?: string,
+  projectId?: string | null,
 ) {
   return api.get<TasksResponse>('/tasks', {
     // 兼容旧签名：fetchTasks(testType, q)（工单 20 新增 run_state 过滤）
     test_type: testTypeOverride ?? testType,
     q,
     run_state: runState,
+    project_id: projectId || undefined,
   }, signal)
 }
 
@@ -128,8 +208,8 @@ export function createRun(body: {
 import type { SuiteVersionsResponse, SuitesResponse } from './types'
 
 /** GET /api/v1/suites —— 套件列表；test_type 精确过滤（ui / performance / joint） */
-export function fetchSuites(testType: string | undefined, signal?: AbortSignal) {
-  return api.get<SuitesResponse>('/suites', { test_type: testType }, signal)
+export function fetchSuites(testType: string | undefined, signal?: AbortSignal, projectId?: string | null) {
+  return api.get<SuitesResponse>('/suites', { test_type: testType, project_id: projectId || undefined }, signal)
 }
 
 /** GET /api/v1/suites/{id}/versions —— 版本列表（version 倒序，manifest 带用例清单） */

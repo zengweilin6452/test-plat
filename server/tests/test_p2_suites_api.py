@@ -30,7 +30,7 @@ if str(_TESTS_DIR) not in sys.path:
 
 pytest_plugins = ("_p2_common",)
 
-from _p2_common import CLIENT_HEADERS, TEST_DB  # noqa: E402
+from _p2_common import CLIENT_HEADERS, TEST_DB, _exec_sync  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -115,6 +115,20 @@ def test_list_suites_filters_by_test_type(api_client, seed):
     ui_ids = {item["id"] for item in ui_body["items"]}
     assert seed["other_suite_id"] in ui_ids
     assert seed["suite_id"] not in ui_ids
+
+
+def test_list_suites_excludes_archived_by_default(api_client, seed):
+    _exec_sync(
+        "UPDATE test_suites SET archived_at = now() WHERE id = CAST(:id AS uuid)",
+        {"id": seed["other_suite_id"]},
+    )
+    body = api_client.get("/api/v1/suites").json()
+    ids = {item["id"] for item in body["items"]}
+    assert seed["other_suite_id"] not in ids
+    assert seed["suite_id"] in ids
+
+    archived = api_client.get("/api/v1/suites", params={"include_archived": "true"}).json()
+    assert seed["other_suite_id"] in {item["id"] for item in archived["items"]}
 
 
 def test_list_suites_rejects_unknown_test_type(api_client):

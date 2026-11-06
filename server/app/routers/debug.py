@@ -62,7 +62,6 @@ from .tasks import require_client_header
 from ..errors import (
     ApiError,
     bad_request,
-    client_header_required,
     conflict,
     not_found,
     runner_spawn_failed,
@@ -551,6 +550,10 @@ async def create_debug_session(
             f"设备 {serial} 当前状态为 {resource['status']!r}，不可调试",
             {"serial": serial, "status": resource["status"]},
         )
+    from ..domain import identity as identity_mod
+
+    # 归档守卫（工单 04）：归档范围禁止启动新调试会话
+    await identity_mod.assert_scope_active(session, project_id=str(resource["project_id"]))
 
     # 先插会话行（opening；FK 要求它先存在），再在同一事务里领租约
     session_id = str(uuid_mod.uuid4())

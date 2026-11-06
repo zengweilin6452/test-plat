@@ -10,17 +10,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from dotenv import load_dotenv
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+# Shared root configuration also feeds os.environ readers (runner and startup guards).
+load_dotenv(REPO_ROOT / ".env", override=False)
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="TESTDOCK_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="TESTDOCK_", env_file=REPO_ROOT / ".env", extra="ignore")
 
     database_url: str = "postgresql+psycopg://testdock@127.0.0.1:55432/testdock"
     host: str = "127.0.0.1"
-    port: int = 8000
+    port: int = Field(8000, validation_alias=AliasChoices("TESTDOCK_PORT", "TESTDOCK_API_PORT"))
 
     data_dir: Path = REPO_ROOT / "data"
     runtime_dir: Path = REPO_ROOT / ".runtime"
@@ -36,9 +40,18 @@ class Settings(BaseSettings):
     run_timeout_s: int = 3600
     stale_run_seconds: int = 60
 
+    #: 显式演示环境开关（TESTDOCK_DEMO_MODE=1）：前端持续显示「演示环境」标识，
+    #: 并允许假执行配置。正式启动（缺省）检测到假执行时拒绝启动（工单 07）。
+    demo_mode: bool = False
+
     #: 产物保留天数（<=0 表示未配置保留策略，登记时不写 expires_at）。
     #: 配置后证据的 expired 状态按 expires_at 真实可达（工单 05）。
     artifact_retention_days: int = 0
+
+    @field_validator("data_dir", "runtime_dir", "vendor_dir", "adb_path", mode="after")
+    @classmethod
+    def installation_path(cls, value: Path) -> Path:
+        return value if value.is_absolute() else REPO_ROOT / value
 
     @property
     def artifacts_dir(self) -> Path:
@@ -103,4 +116,50 @@ def fake_runner_enabled() -> bool:
     return _truthy(os.environ.get(FAKE_RUNNER_ENV))
 
 
+def demo_mode_enabled() -> bool:
+    """是否处于显式演示环境（TESTDOCK_DEMO_MODE=1）。"""
+    import os
+
+    return _truthy(os.environ.get("TESTDOCK_DEMO_MODE"))
+
+
+def running_under_pytest() -> bool:
+    """pytest 会注入 PYTEST_VERSION；测试通道允许假执行（工单 07）。"""
+    import os
+
+    return bool(os.environ.get("PYTEST_VERSION"))
+
+
+def formal_start_blocker() -> str | None:
+    """正式启动的配置阻断检查（工单 07）。
+
+    假执行只允许在测试（pytest）或显式演示环境使用；正式启动检测到
+    TESTDOCK_FAKE_RUNNER=1 时拒绝启动并给出纠正提示，避免生成看似真实的
+    通过结果。返回 None 表示允许启动，否则返回给用户看的错误说明。
+    """
+    if demo_mode_enabled() and not running_under_pytest():
+        error = demo_isolation_error(settings.database_url, settings.data_dir)
+        if error:
+            return error
+    if not fake_runner_enabled():
+        return None
+    if running_under_pytest() or demo_mode_enabled():
+        return None
+    return (
+        "检测到假执行配置 TESTDOCK_FAKE_RUNNER=1。假执行只允许在测试或显式演示环境使用；"
+        "正式启动请移除该环境变量，或确属演示环境时设置 TESTDOCK_DEMO_MODE=1。"
+        "正式环境不能生成看似真实的通过结果。"
+    )
+
+
 settings = Settings()
+
+
+def demo_isolation_error(database_url: str, data_dir: Path) -> str | None:
+    from .deployment import is_formal_database
+
+    if is_formal_database(database_url):
+        return "演示环境必须使用独立数据库，不能连接正式默认库。"
+    if data_dir.resolve() == (REPO_ROOT / "data").resolve():
+        return "演示环境必须设置独立的 TESTDOCK_DATA_DIR 产物目录。"
+    return None

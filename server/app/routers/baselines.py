@@ -139,6 +139,7 @@ def _baseline_view(row: dict[str, Any]) -> dict[str, Any]:
 async def list_baselines(
     application_id: Annotated[str | None, Query()] = None,
     resource_profile_id: Annotated[str | None, Query()] = None,
+    project_id: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
@@ -149,6 +150,9 @@ async def list_baselines(
     if application_id:
         where.append("b.application_id::text = :application_id")
         params["application_id"] = application_id
+    if project_id:
+        where.append("b.project_id::text = :project_id")
+        params["project_id"] = project_id
     if resource_profile_id:
         # 参数既可以是 resource_profiles.id（uuid），也可以是规范化档案串
         # 本身（如 "android-13|1080x2400|pixel-7-pro"）—— 后者不查表，直接比对。
@@ -236,6 +240,12 @@ async def create_baseline(
         raise HTTPException(status_code=404, detail="run not found")
     if run["app_id"] is None:
         raise HTTPException(status_code=409, detail="运行没有关联应用")
+    from ..domain import identity as identity_mod
+
+    # 归档守卫（工单 04）：归档范围禁止登记新基线
+    await identity_mod.assert_scope_active(
+        session, project_id=str(run["project_id"]), application_id=str(run["app_id"])
+    )
     if run["environment_id"] is None:
         raise HTTPException(status_code=409, detail="运行 revision 没有环境，无法创建基线")
 

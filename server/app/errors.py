@@ -45,6 +45,10 @@ ERROR_CODES: frozenset[str] = frozenset(
         "task_configuration_conflict",
         "idempotency_conflict",
         "invalid_cursor",
+        # 项目 / 应用管理（正式化改造工单 02/04）
+        "identity_conflict",
+        "object_archived",
+        "archive_blocked",
         # 任务 / 套件
         "task_not_ready",
         "readiness_incomplete",
@@ -283,3 +287,37 @@ def runner_spawn_failed(message: str, details: dict[str, Any] | None = None) -> 
 
 def control_token_invalid() -> ApiError:
     return ApiError(401, "control_token_invalid", "缺少或错误的 X-Control-Token")
+
+
+# --------------------------------------------------------------------------- #
+# 正式化改造：项目 / 应用管理与归档守卫（工单 02/04）
+# --------------------------------------------------------------------------- #
+def identity_conflict(entity: str, entity_id: str, message: str) -> ApiError:
+    """同身份重复创建：409 + existing_id，前端据此提供「查看原对象」入口。"""
+    return ApiError(
+        409,
+        "identity_conflict",
+        message,
+        {"entity": entity, "existing_id": entity_id},
+    )
+
+
+def object_archived(entity: str, entity_id: str, name: str | None = None) -> ApiError:
+    """对已归档对象提交业务写入：管理层操作（改名 / 恢复）不受此限制。"""
+    label = f"{entity} {name or entity_id}"
+    return ApiError(
+        409,
+        "object_archived",
+        f"{label} 已归档，不能开展新业务；如需继续使用请先恢复",
+        {"entity": entity, "id": entity_id},
+    )
+
+
+def archive_blocked(entity: str, entity_id: str, blockers: dict[str, Any]) -> ApiError:
+    """归档被活动占用阻止：blockers 给出具体对象（运行 / 调试会话 / 租约）。"""
+    return ApiError(
+        409,
+        "archive_blocked",
+        f"{entity} {entity_id} 仍有进行中的活动，暂不能归档；请先等待运行结束或关闭调试会话",
+        {"entity": entity, "id": entity_id, "blockers": blockers},
+    )

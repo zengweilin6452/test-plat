@@ -33,6 +33,7 @@ from ..config import settings
 from ..db import get_session
 from ..domain import artifacts as artifacts_mod
 from ..domain import events as events_mod
+from ..domain import identity as identity_mod
 from ..domain import runs as runs_mod
 from ..errors import device_not_ready, not_found, readiness_incomplete, state_conflict, validation_error
 from ..schemas import RunsOut
@@ -88,6 +89,7 @@ async def list_runs(
     test_type: Annotated[str | None, Query()] = None,
     q: Annotated[str | None, Query()] = None,
     cursor: Annotated[str | None, Query()] = None,
+    project_id: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, object]:
@@ -114,6 +116,18 @@ async def list_runs(
             uuid.UUID(str(application_id))
         except ValueError:
             raise validation_error(["application_id 必须是 uuid"])
+    if project_id:
+        try:
+            uuid.UUID(str(project_id))
+        except ValueError:
+            raise validation_error(["project_id 必须是 uuid"])
+        exists = (
+            await session.execute(
+                text("SELECT 1 FROM projects WHERE id::text = :pid"), {"pid": project_id}
+            )
+        ).first()
+        if exists is None:
+            raise not_found("project", project_id)
 
     filters = {
         "scope": scope,
@@ -121,6 +135,7 @@ async def list_runs(
         "application_id": application_id,
         "test_type": test_type,
         "q": q,
+        "project_id": project_id,
     }
     where: list[str] = []
     params: dict[str, object] = {"limit": limit}
@@ -137,6 +152,10 @@ async def list_runs(
     if test_type:
         where.append("tr.test_type = :tt")
         params["tt"] = test_type
+    if project_id:
+        # 工单 05：运行列表跟随当前项目；缺省 = 全部项目汇总
+        where.append("n.project_id::text = :pid")
+        params["pid"] = project_id
     if q:
         q = str(q).strip()
         if q:
@@ -441,6 +460,9 @@ async def _insert_run(session: AsyncSession, body: Mapping, *, internal: bool = 
     )
     project_id = str(application["project_id"])
     application_id = str(application["id"])
+
+    # 归档守卫（工单 04）：锁身份行后确认项目 / 应用未归档，归档提交后不可能再插入新运行
+    await identity_mod.assert_scope_active(session, project_id=project_id, application_id=application_id)
 
     existing = (
         await session.execute(
@@ -1008,6 +1030,12 @@ async def _report_view(session: AsyncSession, run_id: str) -> dict:
     from .. import runtime as runtime_mod
 
     view = await _run_view(session, run_id)
+    project_name = (
+        await session.execute(
+            text("SELECT name FROM projects WHERE id::text = :pid"),
+            {"pid": str(view["project_id"])},
+        )
+    ).scalar()
     items = await artifacts_mod.list_artifacts(
         session, project_id=str(view["project_id"]), run_id=str(run_id)
     )
@@ -1123,6 +1151,13 @@ async def _report_view(session: AsyncSession, run_id: str) -> dict:
         "status": view["state"],
         "verdict": view["outcome"],
         "target": view["application"],
+        # 改名 / 归档前后读取同一历史运行：ID、修订快照、原始结论和证据不变；
+        # 展示名明确标为「当前名称」，不伪装成运行当时的原始记录（工单 02/04，AC-09）。
+        "currentNames": {
+            "application": view["application"]["name"],
+            "project": project_name,
+        },
+        "nameSource": "current_display_name",
         # 运行时档案（不可变行的内容）；没有就明说 null，不用设备 serial 冒充
         "resourceProfile": dict(profile) if profile else None,
         "deviceProfile": profile["name"] if profile else None,

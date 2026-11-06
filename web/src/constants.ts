@@ -48,11 +48,11 @@ export function isPerformanceType(value: string | null | undefined): boolean {
   return value === 'performance' || value === 'perf'
 }
 
-/** 原型 L74 targetCatalog */
+/** 目标端展示名；实际能力摘要来自服务端 GET /api/v1/capabilities（工单 06） */
 export const TARGET_CATALOG: Record<Platform, { label: string; capability: string }> = {
-  android: { label: 'Android', capability: '已有组件基础' },
-  ios: { label: 'iOS', capability: '规划中' },
-  web: { label: 'Web', capability: '规划中' },
+  android: { label: 'Android', capability: '支持 UI 自动化与性能采集' },
+  ios: { label: 'iOS', capability: '尚未支持执行' },
+  web: { label: 'Web', capability: '尚未支持执行' },
 }
 
 /** 目标端下拉文案（原型 L122 context 条） */
@@ -64,8 +64,8 @@ export const SCOPE_OPTIONS: { value: 'all' | Platform; label: string }[] = [
 ]
 
 /**
- * 只有这些端已接入执行能力；其余端走"规划态"页面（原型 L141）。
- * 平台侧同样以 android 为已接入端，iOS / Web 待接入。
+ * 兼容常量：服务端 /capabilities 是能力事实来源，这里只保留供表单过渡使用的
+ * 旧枚举默认值；实际「是否可执行」判断必须读服务端响应，读取失败时不显示可执行。
  */
 export const IMPLEMENTED_PLATFORMS: Platform[] = ['android']
 
@@ -78,5 +78,5 @@ export function runCodePrefix(isDraft: boolean): string {
   return isDraft ? 'TASK-' : 'RUN-'
 }
 
-/** 原型 L186 应用版本缺省值 */
-export const DEFAULT_BUILD_LABEL = '3.8.0-rc.2'
+/** 帮助示例（仅用于 placeholder，绝不自动提交）：例如 3.8.0-rc.2 */
+export const BUILD_LABEL_EXAMPLE = '例如 3.8.0-rc.2'

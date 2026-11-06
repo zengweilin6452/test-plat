@@ -145,7 +145,13 @@ export function traceRows(report: RunReport | undefined): TraceRow[] {
         .join(' · ')
     : '未绑定资源档案'
 
+  const currentName = asText(report?.currentNames?.application) ?? asText(report?.target?.name)
+  const currentProject = asText(report?.currentNames?.project)
   return [
+    // 改名 / 归档后读取同一历史运行：显示名明确标注为「当前名称」，
+    // 追溯仍依赖稳定 ID 与原始快照，不把新名称伪装成运行时原始记录。
+    ...(currentName ? [{ label: '应用当前名称', value: currentName }] : []),
+    ...(currentProject ? [{ label: '项目当前名称', value: currentProject }] : []),
     { label: '套件版本', value: suiteValue },
     { label: '固定副本', value: copyValue },
     { label: '构建', value: buildValue },

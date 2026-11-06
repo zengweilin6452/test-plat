@@ -21,8 +21,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..domain import identity as identity_mod
 from ..domain import runs as runs_mod
 from ..errors import CLIENT_HEADER, CLIENT_HEADER_VALUE, client_header_required, validation_error
+from sqlalchemy import text as _text
 from ..schemas import TaskCreateIn, TaskPatchIn, TaskRevisionListOut, TasksOut
 from ..services import tasks as task_service
 
@@ -34,6 +36,25 @@ DEFAULT_ACTOR = "web-client"
 #: 键的持久化在 services/tasks.py（task_request_keys 表，0005 迁移），
 #: 不再依赖进程内字典 —— 重启与多进程下都必须复用同一对象（spec §9.1）。
 IDEMPOTENCY_HEADER = "Idempotency-Key"
+
+
+async def _task_scope(session: AsyncSession, task_id: str) -> tuple[str, str]:
+    """读取任务所属的 (project_id, application_id)，供归档守卫锁定身份行。"""
+    row = (
+        await session.execute(
+            _text(
+                "SELECT t.application_id::text AS aid, a.project_id::text AS pid"
+                "  FROM test_tasks t JOIN applications a ON a.id = t.application_id"
+                " WHERE t.id::text = :id"
+            ),
+            {"id": task_id},
+        )
+    ).mappings().first()
+    if row is None:
+        from ..errors import not_found
+
+        raise not_found("task", task_id)
+    return row["pid"], row["aid"]
 
 
 def require_client_header(
@@ -56,6 +77,7 @@ async def list_tasks(
     test_type: Annotated[str | None, Query()] = None,
     q: Annotated[str | None, Query()] = None,
     run_state: Annotated[str | None, Query()] = None,
+    project_id: Annotated[str | None, Query()] = None,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, object]:
     """列表带每个任务最近一次运行与最新 revision 的测试类型。
@@ -106,6 +128,10 @@ async def list_tasks(
         where.append("(t.name ILIKE :q OR t.id::text = :qid)")
         params["q"] = f"%{q}%"
         params["qid"] = q
+    if project_id:
+        # 工单 05：任务列表跟随当前项目；test_tasks 自带 project_id 列
+        where.append("t.project_id::text = :project_id")
+        params["project_id"] = project_id
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY COALESCE(r.created_at, t.updated_at) DESC"
@@ -169,6 +195,10 @@ async def create_task(
     新建返回 201；复用既有对象返回 200。
     """
     key = (request_key or request.headers.get(IDEMPOTENCY_HEADER) or "").strip()
+    # 归档守卫（工单 04）：归档范围禁止登记新任务
+    await identity_mod.assert_scope_active(
+        session, project_id=body.project_id, application_id=body.application_id
+    )
     task, duplicate = await task_service.create_task(
         session,
         payload=body.model_dump(),
@@ -215,6 +245,8 @@ async def patch_task(
 
     成功时不是原地修改，而是**追加一条新修订**（修订不可变），并把 lifecycle 归位到 draft。
     """
+    pid, aid = await _task_scope(session, task_id)
+    await identity_mod.assert_scope_active(session, project_id=pid, application_id=aid)
     return await task_service.patch_task(
         session,
         task_id=task_id,
@@ -230,6 +262,8 @@ async def validate_task(
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """就绪校验：不满足 422 task_not_ready（details 列出 missing / invalid），满足则写 validated 修订。"""
+    pid, aid = await _task_scope(session, task_id)
+    await identity_mod.assert_scope_active(session, project_id=pid, application_id=aid)
     return await task_service.validate_task(session, task_id=task_id, created_by=DEFAULT_ACTOR)
 
 

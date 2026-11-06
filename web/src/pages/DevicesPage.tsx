@@ -9,7 +9,7 @@
  * 状态枚举按 schema.sql execution_resources.status：ready / offline / unauthorized / draining。
  * 「同步设备池」触发 POST /resources/sync（device-registration.md §4.1），按节点汇总结果。
  */
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { describeError } from '../api/client'
@@ -25,7 +25,7 @@ import { DASH } from '../lib/fmt'
 import { toWorkspaceTarget } from '../components/DebugDrawer'
 import { useDebugHandoff } from '../store/debugHandoff'
 import { useTargetScope } from '../store/scope'
-import { useProjectScope } from '../store/project'
+import { useEffectiveContext } from '../store/effectiveContext'
 import type { ResourceRecord, ResourceSyncResponse } from '../types'
 
 /** 把一轮同步结果压成一行人话；没有可说的节点返回 null */
@@ -41,38 +41,21 @@ function summarizeSync(result: ResourceSyncResponse): string {
 
 export function DevicesPage() {
   const { targetScope, setTargetScope } = useTargetScope()
-  const { projectId, setProjectId } = useProjectScope()
+  const ctx = useEffectiveContext()
+  const projectId = ctx.projectId
+  const setProjectId = ctx.setProject
   const navigate = useNavigate()
   const setPending = useDebugHandoff((state) => state.setPending)
-  // 首次进入（URL 与 localStorage 都没选过项目）时自动选第一个未归档项目；只兜底一次，
-  // 之后用户可以切回「全部项目」，不会再被强制选中。
-  const autoPicked = useRef(false)
 
   const projectsQuery = useQuery({
-    queryKey: ['projects'],
-    queryFn: ({ signal }) => fetchProjects(signal),
+    queryKey: ['projects', 'all'],
+    queryFn: ({ signal }) => fetchProjects(signal, { include_archived: true }),
     staleTime: 60_000,
   })
 
-  const projects = projectsQuery.data?.items
-
-  useEffect(() => {
-    if (!projects) return
-    if (projectId && !projects.some((project) => project.id === projectId)) {
-      // 上次选的项目已被删除：回落到第一个未归档项目，避免后端 404 卡住整页
-      autoPicked.current = true
-      setProjectId(projects.find((project) => !project.archived_at)?.id ?? null)
-      return
-    }
-    if (!projectId && !autoPicked.current) {
-      autoPicked.current = true
-      const first = projects.find((project) => !project.archived_at)
-      if (first) setProjectId(first.id)
-    }
-  }, [projectId, projects, setProjectId])
 
   const resourcesQuery = useQuery({
-    queryKey: ['resources', projectId],
+    queryKey: ['resources', projectId, targetScope],
     queryFn: ({ signal }) => fetchResources(targetScope, signal, projectId),
     retry: false,
   })

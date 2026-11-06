@@ -121,6 +121,8 @@ export interface ApplicationRecord {
   platform: Platform
   identifier: string
   task_count: number
+  archived_at?: string | null
+  created_at?: string | null
 }
 
 export interface ApplicationsResponse {
@@ -186,6 +188,102 @@ export interface ProjectRecord {
 export interface ProjectsResponse {
   items: ProjectRecord[]
   total: number
+}
+
+/** ---- 正式化改造：工作空间 / 能力 / 管理 / 引导 / 归档 / 旧数据（工单 01–10）---- */
+
+/** GET /api/v1/workspace（单工作空间；demo_mode 为显式演示环境标识） */
+export interface WorkspaceSettings {
+  name: string
+  customized_at: string | null
+  updated_at: string | null
+  demo_mode: boolean
+}
+
+/** GET /api/v1/capabilities（服务端能力摘要，前端不自行推导可执行能力） */
+export interface PlatformCapability {
+  platform: Platform
+  supported: boolean
+}
+
+export interface Capabilities {
+  version: string
+  commit: string | null
+  demo_mode: boolean
+  fake_runner_enabled: boolean
+  platforms: PlatformCapability[]
+}
+
+/** GET /api/v1/onboarding/status：完成状态由真实数据计算 */
+export interface OnboardingStep {
+  key: string
+  title: string
+  description: string
+  done: boolean
+  target: string | null
+  count: number
+}
+
+export interface OnboardingStatus {
+  complete: boolean
+  steps: OnboardingStep[]
+}
+
+/** 归档预览：关联数量、活动占用与是否归档 */
+export interface ArchiveBlockers {
+  active_runs: { id: string; state: string }[]
+  open_debug_sessions: { id: string; state: string; resource_id: string }[]
+  active_leases: { id: string; resource_id: string; run_id: string | null; debug_session_id: string | null }[]
+}
+
+export interface ArchivePreview {
+  entity: 'project' | 'application'
+  object: Record<string, unknown>
+  related_counts: Record<string, number>
+  blockers: ArchiveBlockers
+  archived: boolean
+}
+
+export interface ArchiveResult {
+  id: string
+  name: string
+  archived_at: string | null
+  already: boolean
+}
+
+/** GET /api/v1/legacy-review：旧演示数据候选（默认只预览） */
+export interface LegacyCandidate {
+  id: string
+  entity: 'project' | 'application' | 'resource' | 'suite' | 'node'
+  name: string
+  current_name: string
+  match_basis: string[]
+  confidence: 'confirmed' | 'needs_manual_review'
+  related_counts: Record<string, number>
+  has_real_runs: boolean
+  active_occupancy: boolean
+  real_run_count: number
+  allowed_actions: ('keep' | 'rename' | 'archive')[]
+  note: string
+}
+
+export interface LegacyReview {
+  items: LegacyCandidate[]
+  total: number
+  preview_token: string
+}
+
+export interface LegacyAction {
+  id: string
+  entity: string
+  action: 'keep' | 'rename' | 'archive'
+  name?: string
+}
+
+export interface LegacyApplyResult {
+  applied: { id: string; action: string; result: string }[]
+  rejected: { id: string; reason: string }[]
+  preview_token: string
 }
 
 /** POST /api/v1/resources/sync 响应里的一台设备 */

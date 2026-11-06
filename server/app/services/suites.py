@@ -101,15 +101,32 @@ def _version_dict(row: Any) -> dict[str, Any]:
     }
 
 
-async def list_suites(session: AsyncSession, *, test_type: str | None = None) -> dict[str, Any]:
-    """套件列表；test_type 精确过滤，不做模糊匹配（枚举值只有三种）。"""
+async def list_suites(
+    session: AsyncSession,
+    *,
+    test_type: str | None = None,
+    project_id: str | None = None,
+    include_archived: bool = False,
+) -> dict[str, Any]:
+    """套件列表；test_type 精确过滤，project_id 跟随当前项目（工单 05）。
+
+    与项目 / 应用列表一致：默认排除归档对象，显式 include_archived 才返回。
+    """
     params: dict[str, Any] = {}
+    where: list[str] = []
     sql = _SUITE_SQL
     if test_type:
         if test_type not in suite_domain.TEST_TYPES:  # pragma: no cover - Literal 已挡
             raise validation_error([f"test_type 只支持 {', '.join(suite_domain.TEST_TYPES)}"])
-        sql += " WHERE s.test_type = :test_type"
+        where.append("s.test_type = :test_type")
         params["test_type"] = test_type
+    if project_id:
+        where.append("s.project_id::text = :project_id")
+        params["project_id"] = project_id
+    if not include_archived:
+        where.append("s.archived_at IS NULL")
+    if where:
+        sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY a.platform, s.name"
     rows = (await session.execute(text(sql), params)).mappings().all()
     items = [_suite_dict(r) for r in rows]

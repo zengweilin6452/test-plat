@@ -268,6 +268,21 @@ async def _fetch_build(session: AsyncSession, build_id: str, *, for_update: bool
     return dict(row)
 
 
+async def _fetch_active_build(
+    session: AsyncSession, build_id: str, *, for_update: bool = False
+) -> dict[str, Any]:
+    # Match run submission: scope rows before build rows. Holding a build lock
+    # while waiting for the scope can deadlock with a concurrent submission.
+    from ..domain.identity import assert_scope_active
+
+    build = await _fetch_build(session, build_id)
+    await assert_scope_active(
+        session, project_id=str(build["project_id"]),
+        application_id=str(build["application_id"]),
+    )
+    return await _fetch_build(session, build_id, for_update=for_update)
+
+
 def serialize_build(row: dict[str, Any], *, duplicate: bool = False) -> dict[str, Any]:
     metadata = row.get("metadata") or {}
     identity = _identity_of(metadata)
@@ -485,7 +500,7 @@ async def run_identity_check(
     holder_id: str,
 ) -> dict[str, Any]:
     """在设备互斥下只读核对安装身份；返回可序列化的核对记录。"""
-    build = await _fetch_build(session, build_id)
+    build = await _fetch_active_build(session, build_id)
     if build.get("platform") != "android":
         raise ApiError(
             422,
@@ -707,7 +722,7 @@ async def confirm_identity(
     session: AsyncSession, *, build_id: str, check_id: str
 ) -> dict[str, Any]:
     """原子固定基准；只接受同构建、完整、版本一致、未被替代的核对结果。"""
-    build = await _fetch_build(session, build_id, for_update=True)
+    build = await _fetch_active_build(session, build_id, for_update=True)
     metadata = dict(build.get("metadata") or {})
     identity = _identity_of(metadata)
     checks = identity.get("checks")

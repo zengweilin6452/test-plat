@@ -16,6 +16,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import { fetchRuns } from '../api/endpoints'
+import { useEffectiveContext } from '../store/effectiveContext'
 import { StatusBadge } from '../components/Badge'
 import { Button, LinkButton } from '../components/Button'
 import { PageHeading } from '../components/Card'
@@ -72,6 +73,7 @@ export function reportsEmptyCopy(phase: PagePhase, filtered: boolean): { title: 
 
 export function ReportsPage() {
   const { targetScope, setTargetScope } = useTargetScope()
+  const ctx = useEffectiveContext()
   const [activeRun, setActiveRun] = useState<RunRecord | null>(null)
   // 服务端过滤 + 游标分页（工单 10）：q / module / 页栈变化都重新拉取；
   // 过滤条件变化时页栈清零，旧游标带新过滤条件会被服务端 422 拒掉。
@@ -81,13 +83,14 @@ export function ReportsPage() {
   const cursor = pages.length > 0 ? pages[pages.length - 1] : null
 
   const runsQuery = useQuery({
-    queryKey: ['runs', 'reports', targetScope, keyword, module, cursor],
+    queryKey: ['runs', 'reports', targetScope, keyword, module, cursor, ctx.projectId],
     queryFn: ({ signal }) =>
       fetchRuns(targetScope, 50, signal, {
         state: 'completed',
         q: keyword.trim() || undefined,
         test_type: module || undefined,
         cursor: cursor ?? undefined,
+        project_id: ctx.projectId,
       }),
     retry: false,
   })

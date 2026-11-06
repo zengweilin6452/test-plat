@@ -48,11 +48,216 @@
     },
     "/api/v1/applications": {
       "get": {
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "platform",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "include_archived",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "archived_only",
+            "required": false
+          }
+        ],
         "request": null,
         "responses": {
           "200": {
             "$ref": "#/components/schemas/ApplicationsOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "post": {
+        "parameters": [],
+        "request": {
+          "additionalProperties": true,
+          "title": "Body",
+          "type": "object"
+        },
+        "responses": {
+          "201": {
+            "additionalProperties": true,
+            "title": "Response Create Application Api V1 Applications Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/applications/{application_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Get Application Api V1 Applications  Application Id  Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true
+          }
+        ],
+        "request": {
+          "additionalProperties": true,
+          "title": "Body",
+          "type": "object"
+        },
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Rename Application Api V1 Applications  Application Id  Patch",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/applications/{application_id}/archive": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Archive Application Api V1 Applications  Application Id  Archive Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/applications/{application_id}/archive-preview": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Application Archive Preview Api V1 Applications  Application Id  Archive Preview Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/applications/{application_id}/restore": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Restore Application Api V1 Applications  Application Id  Restore Post",
+            "type": "object"
           },
           "400": {
             "$ref": "#/components/schemas/ErrorEnvelope"
@@ -121,6 +326,11 @@
           {
             "in": "query",
             "name": "resource_profile_id",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "project_id",
             "required": false
           },
           {
@@ -362,6 +572,29 @@
         "responses": {
           "200": {
             "$ref": "#/components/schemas/BuildIdentityCheckOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/capabilities": {
+      "get": {
+        "parameters": [],
+        "request": null,
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/CapabilitiesOut"
           },
           "400": {
             "$ref": "#/components/schemas/ErrorEnvelope"
@@ -844,12 +1077,92 @@
         }
       }
     },
+    "/api/v1/legacy-review": {
+      "get": {
+        "parameters": [],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Get Legacy Review Api V1 Legacy Review Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/legacy-review/apply": {
+      "post": {
+        "parameters": [],
+        "request": {
+          "$ref": "#/components/schemas/LegacyApplyIn"
+        },
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Apply Legacy Review Api V1 Legacy Review Apply Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/onboarding/status": {
+      "get": {
+        "parameters": [],
+        "request": null,
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/OnboardingStatusOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
     "/api/v1/overview": {
       "get": {
         "parameters": [
           {
             "in": "query",
             "name": "scope",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "project_id",
             "required": false
           }
         ],
@@ -875,11 +1188,177 @@
     },
     "/api/v1/projects": {
       "get": {
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_archived",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "archived_only",
+            "required": false
+          }
+        ],
         "request": null,
         "responses": {
           "200": {
             "$ref": "#/components/schemas/ProjectsOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "post": {
+        "parameters": [],
+        "request": {
+          "additionalProperties": true,
+          "title": "Body",
+          "type": "object"
+        },
+        "responses": {
+          "201": {
+            "additionalProperties": true,
+            "title": "Response Create Project Api V1 Projects Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}": {
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true
+          }
+        ],
+        "request": {
+          "additionalProperties": true,
+          "title": "Body",
+          "type": "object"
+        },
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Rename Project Api V1 Projects  Project Id  Patch",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/archive": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Archive Project Api V1 Projects  Project Id  Archive Post",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/archive-preview": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Project Archive Preview Api V1 Projects  Project Id  Archive Preview Get",
+            "type": "object"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/restore": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {
+            "additionalProperties": true,
+            "title": "Response Restore Project Api V1 Projects  Project Id  Restore Post",
+            "type": "object"
           },
           "400": {
             "$ref": "#/components/schemas/ErrorEnvelope"
@@ -1032,6 +1511,11 @@
           {
             "in": "query",
             "name": "cursor",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "project_id",
             "required": false
           },
           {
@@ -1453,6 +1937,16 @@
             "in": "query",
             "name": "test_type",
             "required": false
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "include_archived",
+            "required": false
           }
         ],
         "request": null,
@@ -1629,6 +2123,11 @@
           {
             "in": "query",
             "name": "run_state",
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "project_id",
             "required": false
           }
         ],
@@ -2004,6 +2503,52 @@
         "request": null,
         "responses": {
           "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/workspace": {
+      "get": {
+        "parameters": [],
+        "request": null,
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/WorkspaceOut"
+          },
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      },
+      "patch": {
+        "parameters": [],
+        "request": {
+          "$ref": "#/components/schemas/WorkspacePatchIn"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/schemas/WorkspaceOut"
+          },
           "400": {
             "$ref": "#/components/schemas/ErrorEnvelope"
           },
@@ -2592,6 +3137,49 @@
       "title": "BuildsOut",
       "type": "object"
     },
+    "CapabilitiesOut": {
+      "additionalProperties": true,
+      "properties": {
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Commit"
+        },
+        "demo_mode": {
+          "default": false,
+          "title": "Demo Mode",
+          "type": "boolean"
+        },
+        "fake_runner_enabled": {
+          "default": false,
+          "title": "Fake Runner Enabled",
+          "type": "boolean"
+        },
+        "platforms": {
+          "items": {
+            "$ref": "#/components/schemas/PlatformCapabilityOut"
+          },
+          "title": "Platforms",
+          "type": "array"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "platforms"
+      ],
+      "title": "CapabilitiesOut",
+      "type": "object"
+    },
     "ConfirmIdentityIn": {
       "additionalProperties": false,
       "description": "POST /builds/{id}/confirm-identity 请求体：显式提交该构建的核对结果。",
@@ -2700,6 +3288,131 @@
       "title": "LeaseOut",
       "type": "object"
     },
+    "LegacyActionIn": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "pattern": "^(keep|rename|archive)$",
+          "title": "Action",
+          "type": "string"
+        },
+        "entity": {
+          "title": "Entity",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        }
+      },
+      "required": [
+        "id",
+        "entity",
+        "action"
+      ],
+      "title": "LegacyActionIn",
+      "type": "object"
+    },
+    "LegacyApplyIn": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/components/schemas/LegacyActionIn"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "preview_token": {
+          "title": "Preview Token",
+          "type": "string"
+        }
+      },
+      "required": [
+        "preview_token",
+        "actions"
+      ],
+      "title": "LegacyApplyIn",
+      "type": "object"
+    },
+    "OnboardingStatusOut": {
+      "additionalProperties": true,
+      "properties": {
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/components/schemas/OnboardingStepOut"
+          },
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "complete",
+        "steps"
+      ],
+      "title": "OnboardingStatusOut",
+      "type": "object"
+    },
+    "OnboardingStepOut": {
+      "additionalProperties": true,
+      "properties": {
+        "count": {
+          "default": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "done": {
+          "title": "Done",
+          "type": "boolean"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Target"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "title",
+        "description",
+        "done"
+      ],
+      "title": "OnboardingStepOut",
+      "type": "object"
+    },
     "OverviewOut": {
       "additionalProperties": true,
       "properties": {
@@ -2800,6 +3513,25 @@
         "items"
       ],
       "title": "PerformanceScenarioIn",
+      "type": "object"
+    },
+    "PlatformCapabilityOut": {
+      "additionalProperties": true,
+      "properties": {
+        "platform": {
+          "title": "Platform",
+          "type": "string"
+        },
+        "supported": {
+          "title": "Supported",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "platform",
+        "supported"
+      ],
+      "title": "PlatformCapabilityOut",
       "type": "object"
     },
     "ProjectRecordOut": {
@@ -4068,6 +4800,47 @@
         "total"
       ],
       "title": "TasksOut",
+      "type": "object"
+    },
+    "WorkspaceOut": {
+      "additionalProperties": true,
+      "properties": {
+        "customized_at": {
+          "title": "Customized At"
+        },
+        "demo_mode": {
+          "default": false,
+          "title": "Demo Mode",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "updated_at": {
+          "title": "Updated At"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "WorkspaceOut",
+      "type": "object"
+    },
+    "WorkspacePatchIn": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "WorkspacePatchIn",
       "type": "object"
     }
   }

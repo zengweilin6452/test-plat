@@ -1,9 +1,13 @@
 /**
- * 页面级复用片段：上下文条（原型 L122）、规划态提示、数据占位。
- * 目的是让 9 个页面骨架风格一致，同时把"无后端数据"的处理收敛到一处。
+ * 页面级复用片段：上下文条、能力不可用提示、数据占位。
+ * 上下文条统一由 EffectiveContextProvider 提供真实项目 / 应用名称，
+ * 不再写死业务名称；规划态文案由服务端能力摘要驱动。
  */
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { SCOPE_OPTIONS } from '../constants'
+import { useEffectiveContext } from '../store/effectiveContext'
+import { isPlatformSupported, usePlatform } from '../store/platform'
 import type { TargetScope } from '../types'
 import { Button } from './Button'
 import { Empty } from './Empty'
@@ -18,46 +22,79 @@ interface ContextBarProps {
   extra?: ReactNode
 }
 
-/** 全站统一的"当前目标端"上下文条 */
+/** 全站统一的上下文条：真实项目 / 应用，或明确的未选择状态 */
 export function ContextBar({ scope, onScopeChange, extra }: ContextBarProps) {
   const label = SCOPE_OPTIONS.find((option) => option.value === scope)?.label ?? '全部目标端'
+  const ctx = useEffectiveContext()
+  const projectLabel = ctx.loading
+    ? '正在加载项目…'
+    : ctx.error
+      ? '上下文不可用'
+      : ctx.allProjects || !ctx.projectId
+        ? '全部项目'
+        : (ctx.project?.name ?? '项目读取失败')
+  const appLabel = ctx.loading
+    ? '正在加载应用…'
+    : ctx.application?.name ?? '未选择应用'
+
   return (
     <div className="context-strip">
       <span className="app-icon">
         <Icon name="layers" size={15} />
       </span>
       <div>
-        <strong style={{ fontSize: 13 }}>星河</strong>
-        <div className="muted" style={{ fontSize: 11 }}>
-          {label}
+        <strong style={{ fontSize: 13 }} className="context-project-name" title={projectLabel}>
+          {projectLabel}
+        </strong>
+        <div className="muted" style={{ fontSize: 11 }} title={appLabel}>
+          {appLabel} · {label}
         </div>
       </div>
       <span className="divider" aria-hidden="true" />
       <span className="muted small">目标端</span>
       <ScopeSelect scope={scope} onChange={onScopeChange} />
       <span className="grow" />
+      {ctx.error ? (
+        <Notice tone="red" title="当前上下文无效">
+          {ctx.error} <Link className="link-btn" to="/apps">前往项目与应用页修正</Link>
+        </Notice>
+      ) : null}
+      {ctx.projectArchived || ctx.applicationArchived ? (
+        <Notice tone="amber" title="只读历史对象">
+          当前项目或应用已归档，仅可查看历史记录；恢复后才能开展新业务。
+        </Notice>
+      ) : null}
       {extra}
     </div>
   )
 }
 
 /**
- * 规划态提示：该端尚未接入执行能力（原型的"规划中"分支）。
- * 用于 iOS / Web —— 不渲染任何伪造数据。
+ * 未接入执行能力的目标端：能力事实来自服务端；读取失败时不声称可用。
  */
 export function PlannedNotice({ scope }: { scope: TargetScope }) {
   const label = SCOPE_OPTIONS.find((option) => option.value === scope)?.label ?? '该目标端'
-  return (
-    <Notice tone="blue" icon="clock" title={label + ' 规划中'}>
-      该目标端尚未接入执行能力。当前只有 Android 具备组件基础，此页保持骨架状态，
-      接入后按同一套接口与展示规则开通，不做占位假数据。
-    </Notice>
-  )
+  const { capabilities, error } = usePlatform()
+  if (scope !== 'all' && capabilities && !isPlatformSupported(capabilities, scope)) {
+    return (
+      <Notice tone="blue" icon="clock" title={label + ' 尚未支持执行'}>
+        该目标端当前没有接入执行能力，历史数据仍可只读查看。请改用 Android，
+        或在帮助页查看接入说明；平台不会生成占位假数据。
+      </Notice>
+    )
+  }
+  if (!capabilities && error) {
+    return (
+      <Notice tone="red" title="能力信息读取失败">
+        无法确认该目标端是否可用，因此不显示可执行入口。请检查 API 后重试。
+      </Notice>
+    )
+  }
+  return null
 }
 
 /**
- * 数据占位：后端未接入时的统一空态。
- * 明确写出"接口未接入"，避免被误读为"确实没有数据"。
+ * 数据占位：读取失败与空态分开，不展示研发阶段文案。
  */
 export function ApiPending({
   title,
@@ -78,7 +115,7 @@ export function ApiPending({
         <>
           {description}
           <div className="muted small" style={{ marginTop: 8 }}>
-            P1 阶段前端骨架已就位，数据接口接入后在此渲染。
+            当前没有可展示的数据；如接口读取失败，上方会显示错误码和下一步。
           </div>
         </>
       }
@@ -87,7 +124,7 @@ export function ApiPending({
   )
 }
 
-/** 工具条 + 搜索框（原型 .toolbar / .search） */
+/** 工具条 + 搜索框 */
 export function Toolbar({ children, search, onSearch }: { children?: ReactNode; search?: string; onSearch?: (value: string) => void }) {
   return (
     <div className="toolbar">
@@ -107,9 +144,8 @@ export function Toolbar({ children, search, onSearch }: { children?: ReactNode; 
   )
 }
 
-/** 页面右上角主操作按钮（原型 heading actions） */
+/** 页面右上角主操作按钮 */
 export function PrimaryAction({ label, icon = 'plus', onClick }: { label: string; icon?: IconName; onClick?: () => void }) {
-  // AC-UX-01：没有接真实结果的动作必须显式"不可用"，不能渲染成点了没反应的按钮
   if (!onClick) {
     return (
       <Button kind="primary" icon={icon} disabled title="该操作尚未开放">

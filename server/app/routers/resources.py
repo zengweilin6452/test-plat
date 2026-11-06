@@ -386,6 +386,11 @@ async def sync_resources(
         raise client_header_required()
     if x_testdock_client.strip().lower() != CLIENT_HEADER_VALUE:
         raise client_header_required()
+    from ..domain import identity as identity_mod
+
+    # 归档守卫（工单 04）：归档项目不允许新增 / 更新业务设备
+    if payload.project_id:
+        await identity_mod.assert_scope_active(session, project_id=payload.project_id)
     return await resource_service.sync_resources(
         session,
         project_id=payload.project_id,

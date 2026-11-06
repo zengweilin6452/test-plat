@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 """演示种子数据（对齐原型 展示的一套数据）。
 
+**仅用于显式演示安装 / 测试**：正式初始化绝不调用本脚本（工单 07）。
+演示安装必须使用独立的数据库和产物目录；本脚本会：
+
+1. 要求显式传入 --demo（或 TESTDOCK_DEMO_MODE=1）以及 --database-url；
+2. 拒绝写入默认正式库（127.0.0.1:55432/testdock）；
+3. 给新建的项目 / 应用打上来源标记 'demo_seed'，供以后识别显式导入的
+   演示数据；**不修改**任何存量行的 origin（规格 §8 不倒填旧数据）。
+
 写入内容（docs/plan/data-model.md §7）:
   - 1 个项目 testdock-demo
   - 3 个应用：Android 星河 / iOS 星河 / Web 星河（后两个仅配置，无适配器）
@@ -10,7 +18,7 @@
   - 3 个性能场景任务（首页滑动 / 商品详情 / 搜索）
   - 1 个基线与 1 套门禁策略
 
-用法: python scripts/seed_demo.py [--database-url ...]
+用法: python scripts/seed_demo.py --demo --database-url <独立演示库连接串>
 幂等：按业务唯一键 upsert，可重复执行。
 """
 
@@ -20,6 +28,14 @@ import argparse
 import os
 import sys
 import uuid
+
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
+from dotenv import load_dotenv
+from app.deployment import is_formal_database
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
 
 PROJECT_ID = "testdock-demo"
 
@@ -33,7 +49,25 @@ def main(argv: list[str]) -> int:
         ),
     )
     parser.add_argument("--dry-run", action="store_true", help="只打印将要写入的内容")
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="确认向**显式演示环境**写入；必须与 --database-url 指向的独立库配套",
+    )
     args = parser.parse_args(argv[1:])
+
+    # 正式库保护：默认连接串是正式库（55432/testdock），无显式 --demo /
+    # 独立库时拒绝写入，防止升级或误操作把演示数据灌进正式环境。
+    if not args.demo and os.environ.get("TESTDOCK_DEMO_MODE", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        print(
+            "拒绝执行：演示数据只能写入显式演示环境。请使用 --demo 并传入独立的 --database-url；"
+            "正式初始化不需要本脚本。",
+            file=sys.stderr,
+        )
+        return 2
+    if is_formal_database(args.database_url):
+        print("拒绝执行：目标库是正式默认库，演示安装必须使用独立数据库。", file=sys.stderr)
+        return 2
 
     plan = build_plan()
     if args.dry_run:
@@ -86,8 +120,8 @@ def write_all(database_url: str, plan: dict[str, list[dict[str, object]]]) -> di
             # 项目（schema: id, code, name, archived_at, created_at）
             cur.execute(
                 """
-                INSERT INTO projects (id, code, name)
-                VALUES (%s, %s, %s)
+                INSERT INTO projects (id, code, name, origin)
+                VALUES (%s, %s, %s, 'demo_seed')
                 ON CONFLICT (id) DO UPDATE SET code = EXCLUDED.code, name = EXCLUDED.name
                 """,
                 (project_uuid, PROJECT_ID, "星河 Demo"),
@@ -98,8 +132,8 @@ def write_all(database_url: str, plan: dict[str, list[dict[str, object]]]) -> di
             for app in plan["applications"]:
                 cur.execute(
                     """
-                    INSERT INTO applications (id, project_id, platform, name, identifier)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO applications (id, project_id, platform, name, identifier, origin)
+                    VALUES (%s, %s, %s, %s, %s, 'demo_seed')
                     ON CONFLICT (id) DO UPDATE
                        SET platform = EXCLUDED.platform,
                            name = EXCLUDED.name,
