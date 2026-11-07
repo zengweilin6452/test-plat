@@ -212,6 +212,8 @@ export interface RunReport {
   reason?: string | null
   reasonText?: string | null
   evaluatedAt?: string | null
+  /** 在线查看报告地址（GET /runs/{id}/report/view，后端拼好）；前端不自己拼路径 */
+  view_url?: string | null
   /** live = 真跑产物；imported = 导入补录 */
   mode?: 'live' | 'imported' | string | null
   vendorReports?: { kind?: string | null; artifact_id?: string | null }[] | null
@@ -237,6 +239,8 @@ export interface RunArtifact {
   created_at?: string | null
   /** 由后端拼接，前端不自己拼路径；仅 available 才有 */
   download_url?: string | null
+  /** 在线查看地址（仅 report_html 且 available；后端拼好，前端不自己拼路径） */
+  view_url?: string | null
   [key: string]: unknown
 }
 

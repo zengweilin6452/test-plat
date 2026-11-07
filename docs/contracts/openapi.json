@@ -1686,6 +1686,38 @@
         }
       }
     },
+    "/api/v1/runs/{run_id}/artifacts/{artifact_id}/view": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
     "/api/v1/runs/{run_id}/cancel": {
       "post": {
         "parameters": [
@@ -1856,6 +1888,33 @@
       }
     },
     "/api/v1/runs/{run_id}/report/export": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/report/view": {
       "get": {
         "parameters": [
           {
@@ -3992,6 +4051,17 @@
             }
           ],
           "title": "Test Type"
+        },
+        "view_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "View Url"
         }
       },
       "required": [

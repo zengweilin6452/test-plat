@@ -536,6 +536,8 @@ class RunRecordOut(BaseModel):
     #: 无组件时为 None（不伪造 0%）
     progress: float | None = None
     resource: str | None = None
+    #: 在线查看报告入口（GET /runs/{id}/report/view）；仅完成的运行非空
+    view_url: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
     created_at: datetime

@@ -7,7 +7,7 @@
  * - junit 未产出（present=false）时显示破折号，不把「没跑」写成 0 个失败；
  * - 证据下载地址由后端 download_url 给出，前端不自己拼路径。
  */
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { describeError } from '../api/client'
@@ -18,6 +18,7 @@ import { Button, LinkButton } from './Button'
 import { Drawer } from './Dialog'
 import { Empty } from './Empty'
 import { Notice } from './Notice'
+import { ReportViewer } from './ReportViewer'
 import { useToast } from './Toast'
 import { DASH, fmtDateTime, fmtDuration, fmtNumber } from '../lib/fmt'
 import { displayStatus } from '../lib/display'
@@ -233,6 +234,12 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
   const runId = run?.id ?? ''
   const toast = useToast()
   const navigate = useNavigate()
+  // 在线查看：iframe 直接渲染报告本体（vendor HTML 或平台渲染页）
+  const [viewing, setViewing] = useState(false)
+  // 抽屉关闭时把查看器一起收掉，避免它残留在顶层
+  useEffect(() => {
+    if (!open) setViewing(false)
+  }, [open])
   const reportQuery = useQuery({
     queryKey: ['run-report', runId],
     queryFn: ({ signal }) => fetchRunReport(runId, signal),
@@ -345,6 +352,9 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
                   <Button disabled={rerunning || !report?.revision} onClick={rerun}>
                     重跑（引用原输入）
                   </Button>
+                  <Button disabled={!report?.view_url} onClick={() => setViewing(true)}>
+                    在线查看报告
+                  </Button>
                   <LinkButton onClick={() => navigate('/perf')}>性能分析 ›</LinkButton>
                   <a className="link-btn" href={`/api/v1/runs/${run.id}/report/export`}>
                     导出 JSON
@@ -455,6 +465,14 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
                                 ) : (
                                   item.logical_key
                                 )}
+                                {item.view_url ? (
+                                  <>
+                                    {' '}
+                                    <a className="small" href={item.view_url} target="_blank" rel="noreferrer">
+                                      在线查看
+                                    </a>
+                                  </>
+                                ) : null}
                               </td>
                               <td className="muted small">{item.kind ?? DASH}</td>
                               <td className="muted small">{state.label}</td>
@@ -472,6 +490,14 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
           ) : null}
         </>
       )}
+
+      <ReportViewer
+        open={viewing && Boolean(report?.view_url)}
+        viewUrl={report?.view_url ?? null}
+        title={run ? `${run.name} · 在线报告` : '在线报告'}
+        description={run ? `${run.display_id} · 报告内容由后端渲染，前端不参与判定` : undefined}
+        onClose={() => setViewing(false)}
+      />
     </Drawer>
   )
 }

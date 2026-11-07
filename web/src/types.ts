@@ -332,6 +332,8 @@ export interface RunRecord {
   /** 由 run_components 完成比例推导；无组件时为 null（不显示 0%） */
   progress: number | null
   resource: string | null
+  /** 在线查看报告地址（GET /runs/{id}/report/view，后端拼好）；仅完成的运行非空 */
+  view_url?: string | null
   started_at: string | null
   ended_at: string | null
   created_at: string

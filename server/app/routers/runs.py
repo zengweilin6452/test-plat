@@ -34,6 +34,7 @@ from ..db import get_session
 from ..domain import artifacts as artifacts_mod
 from ..domain import events as events_mod
 from ..domain import identity as identity_mod
+from ..domain import report_html as report_html_mod
 from ..domain import runs as runs_mod
 from ..errors import device_not_ready, not_found, readiness_incomplete, state_conflict, validation_error
 from ..schemas import RunsOut
@@ -208,6 +209,10 @@ async def list_runs(
                 # 与详情/WS 同一投影；完全没有事件时返回 null（前端显示"无进度数据"）
                 "progress": progress.get(row["id"]),
                 "resource": row["resource_name"],
+                # 在线查看入口也由后端拼（前端不自己拼路径）；只有完成的运行有报告
+                "view_url": f"/api/v1/runs/{row['id']}/report/view"
+                if row["state"] == "completed"
+                else None,
                 "started_at": row["started_at"],
                 "ended_at": row["ended_at"],
                 "created_at": row["created_at"],
@@ -977,7 +982,53 @@ async def list_run_artifacts(
             if item["availability"] == "available"
             else None
         )
+        # HTML 报告产物额外给在线查看入口（浏览器内嵌渲染，不触发下载）
+        item["view_url"] = (
+            f"/api/v1/runs/{run_id}/artifacts/{item['id']}/view"
+            if item["availability"] == "available" and item["kind"] == "report_html"
+            else None
+        )
     return {"items": items, "total": len(items)}
+
+
+#: 在线查看（内联渲染）的安全头。vendor/imported 的 HTML 可能不是平台渲染的
+#: （导入通道允许登记任意目录），CSP sandbox 让脚本 / 表单 / 同源访问全部失效，
+#: 静态报告不受影响；nosniff 防止浏览器嗅探改判 MIME。
+_VIEW_SECURITY_HEADERS = {
+    "Content-Security-Policy": "sandbox",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+def _inline_html_response(path: Path, filename: str) -> Response:
+    """以 Content-Disposition: inline 返回 HTML 文件（浏览器直接渲染）。"""
+    return FileResponse(
+        str(path),
+        media_type="text/html; charset=utf-8",
+        filename=filename,
+        content_disposition_type="inline",
+        headers=_VIEW_SECURITY_HEADERS,
+    )
+
+
+@router.get("/runs/{run_id}/artifacts/{artifact_id}/view")
+async def view_run_artifact(
+    run_id: str, artifact_id: str, session: AsyncSession = Depends(get_session)
+):
+    """在线查看单个 HTML 产物（仅 text/html；其余类型继续走 download 端点）。"""
+    project_id = await _project_of(session, run_id)
+    artifact = await artifacts_mod.get_artifact(
+        session, project_id=project_id, run_id=str(run_id), artifact_id=str(artifact_id)
+    )
+    if artifact is None or artifact.get("availability") != "available":
+        raise not_found("artifact", str(artifact_id))
+    if str(artifact.get("mime_type") or "") != "text/html":
+        raise validation_error(["仅 text/html 产物支持在线查看，其余类型请使用下载端点"])
+    path = artifacts_mod.resolve_storage_path(str(artifact["storage_key"]))
+    if path is None or not path.is_file():
+        raise not_found("artifact", str(artifact_id))
+    return _inline_html_response(path, Path(str(artifact["logical_key"])).name)
 
 
 @router.get("/runs/{run_id}/artifacts/{artifact_id}/download")
@@ -1131,6 +1182,10 @@ async def _report_view(session: AsyncSession, run_id: str) -> dict:
                 "download_url": f"/api/v1/runs/{run_id}/artifacts/{item['id']}/download"
                 if item["availability"] == "available"
                 else None,
+                # HTML 报告产物给在线查看入口（同 download 的三态纪律）
+                "view_url": f"/api/v1/runs/{run_id}/artifacts/{item['id']}/view"
+                if item["availability"] == "available" and item["kind"] == "report_html"
+                else None,
             }
         )
 
@@ -1202,6 +1257,8 @@ async def _report_view(session: AsyncSession, run_id: str) -> dict:
         "reason": view["reason_code"],
         "reasonText": view["not_tested_reason"] or view["reason_code"],
         "evaluatedAt": view["ended_at"],
+        # 在线查看入口（前端不自己拼路径）；没有 HTML 产物时端点会渲染平台报告页
+        "view_url": f"/api/v1/runs/{run_id}/report/view",
         "mode": source.get("mode") or mode,
         "vendorReports": vendor_reports,
         "junit": source.get("junit") or {},
@@ -1214,6 +1271,49 @@ async def get_run_report(
 ) -> dict:
     """平台计算的报告（不是 vendor 报告原样透传）。"""
     return await _report_view(session, run_id)
+
+
+@router.get("/runs/{run_id}/report/view")
+async def view_run_report(
+    run_id: str, session: AsyncSession = Depends(get_session)
+) -> Response:
+    """在线直接查看报告（浏览器内嵌渲染，而不是触发下载）。
+
+    优先内联返回已登记的 report_html 产物（vendor 产出的原始 HTML 报告），
+    产物选择口径与 runtime._report_json_payload 相同：run 级报告优先，
+    嵌套目录（perf-runs/<id>/report.html）是组件级产物，靠后。
+    没有可用 HTML 产物（如 UI 运行只有 report.json / junit.xml）时，用平台
+    报告快照渲染一份自包含 HTML —— 保证任何运行都有可直接打开的报告。
+
+    响应统一带 CSP sandbox：报告可能是导入通道带进来的任意 HTML，内联展示
+    时脚本一律不执行；文件本体下载仍走 download 端点。
+    """
+    project_id = await _project_of(session, run_id)
+    items = await artifacts_mod.list_artifacts(
+        session, project_id=project_id, run_id=str(run_id)
+    )
+    html_items = sorted(
+        (
+            item
+            for item in items
+            if item["kind"] == "report_html" and item["availability"] == "available"
+        ),
+        key=lambda item: (len(str(item["logical_key"])), str(item["logical_key"])),
+    )
+    for item in html_items:
+        path = artifacts_mod.resolve_storage_path(str(item["storage_key"]))
+        if path is not None and path.is_file():
+            return _inline_html_response(path, Path(str(item["logical_key"])).name)
+    report = await _report_view(session, run_id)
+    filename = "TestDock-%s.html" % report["runId"]
+    return Response(
+        content=report_html_mod.render_platform_report_html(report),
+        media_type="text/html; charset=utf-8",
+        headers={
+            **_VIEW_SECURITY_HEADERS,
+            "Content-Disposition": f'inline; filename="{filename}"',
+        },
+    )
 
 
 @router.get("/runs/{run_id}/report/export")

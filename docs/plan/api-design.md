@@ -195,6 +195,8 @@ GET /api/v1/runs/47/events?after=0&limit=200
 | `GET /runs/{id}/artifacts/{aid}/download` | 文件流（缺失 404 + availability=missing 说明） |
 | `GET /runs/{id}/report` | 平台汇总报告（见下） |
 | `GET /runs/{id}/report/export` | 同结构 + `Content-Disposition` |
+| `GET /runs/{id}/report/view` | 在线查看（`text/html` 内联渲染，见下） |
+| `GET /runs/{id}/artifacts/{aid}/view` | 单个 HTML 产物在线查看（仅 `text/html`） |
 
 平台汇总报告（对齐原型 `exportReport`，去掉 `prototype:true`）：
 
@@ -202,6 +204,8 @@ GET /api/v1/runs/47/report/export
 // -> JSON 下载，Content-Disposition 文件名 TestDock-RUN-0047.json；
 //    内容与 GET /report 同一份快照（同一编码器逐字段一致），不含凭据或宿主存储路径。
 ```
+
+在线直接查看（`view` 端点）：响应 `Content-Disposition: inline`，优先内联返回已登记的 `report_html` 产物（run 级报告优先于嵌套目录里的组件级产物，口径与 `metricsSummary` 的 report.json 选择一致）；没有可用 HTML 产物（如 UI 运行只有 report.json / junit.xml）时用报告快照渲染自包含 HTML，任何运行都有可直接打开的报告。响应统一带 `Content-Security-Policy: sandbox`（导入通道可能带进任意 HTML，内联展示时脚本一律不执行）、`X-Content-Type-Options: nosniff`。`view_url` 字段由后端拼好放进 `/runs` 列表项、`/report` 快照与 evidence 条目、`/artifacts` 清单（仅 report_html 且 available），前端不自己拼路径；文件本体下载仍走 `download` 端点。
 
 报告快照可追溯（spec §9.3、AC-REP-04）：`revision`（id/readiness/test_type）、`suite`（套件版本号/source_ref/source_commit 与固定代码副本 `code_copy.{tree_sha256,file_count,root_rel}`）、`build`（version/build_key/source_commit/sha256）、`environmentId`、`resourceProfile`（id/name/fingerprint/spec，来自运行时绑定的不可变档案行）、`components`、`gateEvaluations`（不可变判定行，改策略不回溯）、`evidence`（id/kind/可用性/sha256/`unavailable_reason`；**只有 available 给 download_url**，missing/expired 不提供假入口，并给出 `file_missing`/`retention_expired`/`storage_unresolvable`；storage_key 不出报告）、`collectWindow`（joint 联合采集窗口，见下）。缺失字段一律为 null，不用设备 serial 冒充档案。重跑：`POST /runs` 带 `parent_run_id` 引用原输入并形成新运行，原记录一行不改。
 
@@ -355,6 +359,7 @@ POST   /api/v1/templates/validate      # IMAGE 目标验证 -> { matches[], scor
 | 轮询 | 只在 WS 不可用时降级为 2s 轮询（列表页）；详情页必须用 WS |
 | 缓存 | TanStack Query：列表 `staleTime: 5000`；运行中对象 `staleTime: 0` + WS invalidate |
 | 导出 | `GET /report/export` → 前端 `Blob` 下载，文件名 `TestDock-RUN-<id>.json` |
+| 在线查看 | `view_url`（后端拼好）→ `ReportViewer` iframe（`sandbox` 属性）内嵌渲染；报告抽屉与报告中心卡片都有入口 |
 
 ## 6. 与原型 JSON 导出的差异清单
 

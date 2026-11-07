@@ -10,7 +10,8 @@
  *
  * 数据源：
  *  - 清单：已完成运行（state='completed'）；
- *  - 「查看报告」：GET /runs/{id}/report + GET /runs/{id}/artifacts（ReportDrawer）。
+ *  - 「查看报告」：GET /runs/{id}/report + GET /runs/{id}/artifacts（ReportDrawer）；
+ *  - 「在线查看」：GET /runs/{id}/report/view（ReportViewer，后端 view_url 直接内嵌渲染）。
  */
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -24,6 +25,7 @@ import { ContextBar, Toolbar } from '../components/PageBits'
 import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
 import { ReportDrawer } from '../components/ReportDrawer'
+import { ReportViewer } from '../components/ReportViewer'
 import { TARGET_CATALOG, isPerformanceType } from '../constants'
 import { displayStatus } from '../lib/display'
 import { fmtDateTime } from '../lib/fmt'
@@ -75,6 +77,8 @@ export function ReportsPage() {
   const { targetScope, setTargetScope } = useTargetScope()
   const ctx = useEffectiveContext()
   const [activeRun, setActiveRun] = useState<RunRecord | null>(null)
+  // 在线查看：直接打开后端拼好的 view_url（iframe 沙箱渲染），不经过摘要抽屉
+  const [viewingRun, setViewingRun] = useState<RunRecord | null>(null)
   // 服务端过滤 + 游标分页（工单 10）：q / module / 页栈变化都重新拉取；
   // 过滤条件变化时页栈清零，旧游标带新过滤条件会被服务端 422 拒掉。
   const [keyword, setKeyword] = useState('')
@@ -178,9 +182,14 @@ export function ReportsPage() {
               <p className="mt">{run.outcome === 'not_tested' && run.not_tested_reason ? run.not_tested_reason : conclusionText(run.test_type, run.outcome)}</p>
               <footer>
                 <span className="muted small">{fmtDateTime(run.ended_at)}</span>
-                <LinkButton onClick={() => setActiveRun(run)}>
-                  查看报告 <span aria-hidden="true">›</span>
-                </LinkButton>
+                <span className="flex">
+                  {run.view_url ? (
+                    <LinkButton onClick={() => setViewingRun(run)}>在线查看</LinkButton>
+                  ) : null}
+                  <LinkButton onClick={() => setActiveRun(run)}>
+                    查看报告 <span aria-hidden="true">›</span>
+                  </LinkButton>
+                </span>
               </footer>
             </section>
           ))}
@@ -215,6 +224,16 @@ export function ReportsPage() {
         open={Boolean(activeRun)}
         run={activeRun}
         onClose={() => setActiveRun(null)}
+      />
+
+      <ReportViewer
+        open={Boolean(viewingRun)}
+        viewUrl={viewingRun?.view_url ?? null}
+        title={viewingRun ? `${viewingRun.name} · 在线报告` : '在线报告'}
+        description={
+          viewingRun ? `${viewingRun.display_id} · 报告由后端渲染，页面只做展示，不参与判定` : undefined
+        }
+        onClose={() => setViewingRun(null)}
       />
     </>
   )
