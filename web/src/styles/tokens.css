@@ -359,8 +359,11 @@ dialog.drawer { margin: 0 0 0 auto; width: min(570px, 100vw); height: 100dvh; ma
 .drawer .dialog-body { max-height: calc(100dvh - 185px); }
 .dialog-foot { padding: var(--space-7) var(--space-11); border-top: 1px solid var(--line); display: flex; justify-content: flex-end; align-items: center; gap: var(--space-4); background: #fbfcfe; }
 .dialog-foot .foot-hint { margin-right: auto; color: #909bac; font-size: var(--fs-2xs); }
-/* 在线报告查看器：宽幅对话框，body 不滚动，交给 iframe 填满剩余高度 */
-dialog.viewer { width: min(1100px, calc(100vw - 48px)); height: 92vh; max-height: 92vh; display: flex; flex-direction: column; }
+/* 在线报告查看器：宽幅对话框，body 不滚动，交给 iframe 填满剩余高度。
+   display:flex 只能挂在 [open] 上：否则会覆盖 UA 对未打开 dialog 的 display:none，
+   关闭状态的对话框会一直浮在页面上。 */
+dialog.viewer { width: min(1100px, calc(100vw - 48px)); height: 92vh; max-height: 92vh; }
+dialog.viewer[open] { display: flex; flex-direction: column; }
 dialog.viewer .dialog-head { flex: 0 0 auto; }
 dialog.viewer .dialog-body { flex: 1 1 auto; padding: 0; max-height: none; overflow: hidden; background: #fff; }
 dialog.viewer .dialog-foot { flex: 0 0 auto; }
