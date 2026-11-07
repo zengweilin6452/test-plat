@@ -3,8 +3,11 @@
 覆盖点：
 - 已登记 report_html 产物：/report/view 内联返回 vendor 原始 HTML（inline +
   CSP sandbox），run 级报告优先于嵌套目录里的组件级报告；
+- 脚本策略按运行来源分级：真跑运行放行 allow-scripts（vendor 单文件报告内嵌
+  离线 ECharts，曲线需要脚本，但仍在 opaque origin 与平台隔离）；导入补录
+  （source='import'）保持 sandbox，脚本一律不执行；
 - 没有 HTML 产物（UI 运行只有 report.json / junit.xml）：用平台报告快照渲染
-  自包含 HTML，任何运行都有可直接打开的报告；
+  自包含 HTML（零脚本），任何运行都有可直接打开的报告；
 - /runs 列表与 /artifacts、/report 的 view_url 都由后端拼好（前端不自己拼路径）；
 - 非 text/html 产物不支持在线查看（走下载端点）；不存在的运行/产物 404。
 """
@@ -105,9 +108,40 @@ def test_report_view_serves_registered_html_inline(client, project, make_run, sy
     assert "text/html" in response.headers["content-type"]
     # inline 而不是 attachment：浏览器直接渲染，不触发下载
     assert response.headers["content-disposition"].startswith("inline")
-    # 导入通道可能带进任意 HTML：内联展示时脚本必须被禁用
-    assert response.headers["content-security-policy"] == "sandbox"
+    # 真跑运行放行脚本（vendor 报告内嵌离线 ECharts 的曲线需要），但仍在
+    # sandbox 的 opaque origin 里，不给 allow-same-origin
+    assert response.headers["content-security-policy"] == "sandbox allow-scripts"
     assert "vendor report" in response.text
+
+
+def test_report_view_blocks_scripts_for_imported_run(client, project, make_run, sync_engine):
+    """导入补录的 HTML 不可信：脚本一律不执行（vendor 曲线场景只给真跑运行）。"""
+    run_id = make_run(
+        state="completed",
+        request_key=str(uuid.uuid4()),
+        config_snapshot={"source": "import"},
+    )
+    _add_html_artifact(sync_engine, project, run_id)
+
+    response = client.get(f"/api/v1/runs/{run_id}/report/view")
+    assert response.status_code == 200
+    assert response.headers["content-security-policy"] == "sandbox"
+
+    artifact_view = client.get(f"/api/v1/runs/{run_id}/artifacts/{_any_html_id(sync_engine, project, run_id)}/view")
+    assert artifact_view.status_code == 200
+    assert artifact_view.headers["content-security-policy"] == "sandbox"
+
+
+def _any_html_id(engine, project: dict, run_id: str) -> str:
+    with engine.begin() as conn:
+        row = conn.execute(
+            text(
+                "SELECT id FROM artifacts WHERE run_id = CAST(:rid AS uuid) AND kind = 'report_html' LIMIT 1"
+            ),
+            {"rid": run_id},
+        ).first()
+    assert row is not None
+    return str(row[0])
 
 
 def test_report_view_prefers_run_level_report(client, project, make_run, sync_engine):
@@ -160,7 +194,7 @@ def test_artifact_view_serves_html_inline(client, project, make_run, sync_engine
     response = client.get(f"/api/v1/runs/{run_id}/artifacts/{artifact_id}/view")
     assert response.status_code == 200
     assert response.headers["content-disposition"].startswith("inline")
-    assert response.headers["content-security-policy"] == "sandbox"
+    assert response.headers["content-security-policy"] == "sandbox allow-scripts"
     assert "vendor report" in response.text
 
 

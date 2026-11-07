@@ -4,8 +4,10 @@
  *
  * 硬约束（与报告抽屉同一套纪律）：
  * - URL 一律来自后端 view_url 字段，前端不自己拼路径；
- * - iframe 带 sandbox 属性，与响应头 CSP sandbox 双保险：报告内容可能是
- *   导入通道带进来的任意 HTML，在线展示时脚本一律不执行；
+ * - iframe 带 sandbox 属性，与服务端 CSP sandbox 双保险（脚本色执行需要两边
+ *   同时放行，策略决策点始终在服务端）：真跑运行的 vendor 报告允许脚本
+ *   （内嵌离线 ECharts 曲线），导入补录的报告由服务端禁脚本；一律不给
+ *   allow-same-origin，报告与平台源隔离；
  * - view_url 缺失（运行未完成）时如实说明，不渲染空白框冒充报告。
  */
 import { useEffect, useState } from 'react'
@@ -35,7 +37,7 @@ export function ReportViewer({ open, viewUrl, title, description, onClose }: Rep
       onClose={onClose}
       title={title}
       description={description}
-      footHint="报告在沙箱中只读渲染：脚本不执行；文件下载请在报告抽屉操作"
+      footHint="报告在沙箱中渲染：与平台源隔离，脚本策略由后端按运行来源决定；文件下载请在报告抽屉操作"
       footer={
         <>
           <LinkButton onClick={() => setFrameKey((key) => key + 1)}>重新加载</LinkButton>
@@ -48,7 +50,13 @@ export function ReportViewer({ open, viewUrl, title, description, onClose }: Rep
       }
     >
       {viewUrl ? (
-        <iframe key={frameKey} className="report-frame" src={viewUrl} title="测试报告" sandbox="" />
+        <iframe
+          key={frameKey}
+          className="report-frame"
+          src={viewUrl}
+          title="测试报告"
+          sandbox="allow-scripts"
+        />
       ) : (
         <div className="viewer-fallback">
           <Notice tone="amber" title="该运行没有在线查看地址">

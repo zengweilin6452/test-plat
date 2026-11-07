@@ -991,24 +991,54 @@ async def list_run_artifacts(
     return {"items": items, "total": len(items)}
 
 
-#: 在线查看（内联渲染）的安全头。vendor/imported 的 HTML 可能不是平台渲染的
-#: （导入通道允许登记任意目录），CSP sandbox 让脚本 / 表单 / 同源访问全部失效，
-#: 静态报告不受影响；nosniff 防止浏览器嗅探改判 MIME。
-_VIEW_SECURITY_HEADERS = {
+#: 在线查看（内联渲染）的安全头。nosniff 防止浏览器嗅探改判 MIME。
+#:
+#: 脚本策略按运行来源分级（CSP sandbox 使文档落在 opaque origin，拿不到平台
+#: cookie / 存储 / DOM）：
+#:   * 真跑运行（source != 'import'）的 report_html 由 vendor runner 生成
+#:     （mobile_perf 单文件报告，内嵌离线 ECharts、零外部请求），放行
+#:     `allow-scripts` 让曲线图能渲染；脚本仍在沙箱 origin 里，与平台隔离；
+#:   * 导入补录（source == 'import'）登记的是任意外部目录里的文件，不可信，
+#:     保持 `sandbox`，脚本一律不执行。
+_VIEW_SECURITY_HEADERS_STRICT = {
     "Content-Security-Policy": "sandbox",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
+    # no-cache（存储但每次使用前必须重验证）：策略或产物变化后，缓存里的旧响应
+    # （连同旧 CSP 头）必须被 304 刷新，否则查看器可能拿到过期安全策略。
+    "Cache-Control": "no-cache",
+}
+_VIEW_SECURITY_HEADERS_SCRIPTED = {
+    "Content-Security-Policy": "sandbox allow-scripts",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-cache",
 }
 
 
-def _inline_html_response(path: Path, filename: str) -> Response:
+def _view_security_headers(allow_scripts: bool) -> dict[str, str]:
+    return _VIEW_SECURITY_HEADERS_SCRIPTED if allow_scripts else _VIEW_SECURITY_HEADERS_STRICT
+
+
+async def _run_is_imported(session: AsyncSession, run_id: str) -> bool:
+    """运行是否来自导入补录通道（config_snapshot.source == 'import'）。"""
+    source = (
+        await session.execute(
+            text("SELECT config_snapshot->>'source' FROM test_runs WHERE id::text = :id"),
+            {"id": str(run_id)},
+        )
+    ).scalar_one_or_none()
+    return source == "import"
+
+
+def _inline_html_response(path: Path, filename: str, *, allow_scripts: bool) -> Response:
     """以 Content-Disposition: inline 返回 HTML 文件（浏览器直接渲染）。"""
     return FileResponse(
         str(path),
         media_type="text/html; charset=utf-8",
         filename=filename,
         content_disposition_type="inline",
-        headers=_VIEW_SECURITY_HEADERS,
+        headers=_view_security_headers(allow_scripts),
     )
 
 
@@ -1028,7 +1058,10 @@ async def view_run_artifact(
     path = artifacts_mod.resolve_storage_path(str(artifact["storage_key"]))
     if path is None or not path.is_file():
         raise not_found("artifact", str(artifact_id))
-    return _inline_html_response(path, Path(str(artifact["logical_key"])).name)
+    allow_scripts = not await _run_is_imported(session, run_id)
+    return _inline_html_response(
+        path, Path(str(artifact["logical_key"])).name, allow_scripts=allow_scripts
+    )
 
 
 @router.get("/runs/{run_id}/artifacts/{artifact_id}/download")
@@ -1285,10 +1318,12 @@ async def view_run_report(
     没有可用 HTML 产物（如 UI 运行只有 report.json / junit.xml）时，用平台
     报告快照渲染一份自包含 HTML —— 保证任何运行都有可直接打开的报告。
 
-    响应统一带 CSP sandbox：报告可能是导入通道带进来的任意 HTML，内联展示
-    时脚本一律不执行；文件本体下载仍走 download 端点。
+    响应统一带 CSP sandbox（opaque origin，与平台源隔离）：真跑运行的
+    vendor 报告放行 allow-scripts（内嵌离线 ECharts 的曲线需要脚本）；
+    导入补录的 HTML 不可信，脚本一律不执行。文件本体下载仍走 download 端点。
     """
     project_id = await _project_of(session, run_id)
+    allow_scripts = not await _run_is_imported(session, run_id)
     items = await artifacts_mod.list_artifacts(
         session, project_id=project_id, run_id=str(run_id)
     )
@@ -1303,14 +1338,17 @@ async def view_run_report(
     for item in html_items:
         path = artifacts_mod.resolve_storage_path(str(item["storage_key"]))
         if path is not None and path.is_file():
-            return _inline_html_response(path, Path(str(item["logical_key"])).name)
+            return _inline_html_response(
+                path, Path(str(item["logical_key"])).name, allow_scripts=allow_scripts
+            )
     report = await _report_view(session, run_id)
     filename = "TestDock-%s.html" % report["runId"]
+    # 平台渲染的兜底页面本身零脚本，始终用最严格的 sandbox
     return Response(
         content=report_html_mod.render_platform_report_html(report),
         media_type="text/html; charset=utf-8",
         headers={
-            **_VIEW_SECURITY_HEADERS,
+            **_VIEW_SECURITY_HEADERS_STRICT,
             "Content-Disposition": f'inline; filename="{filename}"',
         },
     )
