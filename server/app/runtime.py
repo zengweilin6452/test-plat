@@ -586,6 +586,16 @@ async def finalize_run(
                 reason=not_tested_reason or reason,
                 actor=actor,
             )
+            if target_state == runs_mod.STATE_COMPLETED and final_outcome in (
+                runs_mod.OUTCOME_PASSED,
+                runs_mod.OUTCOME_FAILED,
+            ):
+                # transition 的 reason_code 用 COALESCE 保留旧值（如派发阶段的
+                # lease_acquired）；通过/失败的运行不应带原因，显式清空。
+                await session.execute(
+                    text("UPDATE test_runs SET reason_code = NULL WHERE id = :rid"),
+                    {"rid": rid},
+                )
             await events_mod.append_event(
                 session, project_id=pid, run_id=rid,
                 source_key=events_mod.SOURCE_RECONCILER if actor == "reconciler" else "runtime",

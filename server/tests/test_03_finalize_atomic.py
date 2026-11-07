@@ -275,6 +275,16 @@ def test_passing_gate_clears_runner_reason_on_run(
         )
 
     run_id = make_run(state="running", request_key="reason-pass-" + uuid.uuid4().hex[:8])
+    # transition 用 COALESCE 保留旧 reason；派发阶段会先写 lease_acquired，
+    # 通过后必须显式清空，不能被 COALESCE 留下。
+    with sync_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE test_runs SET reason_code = 'lease_acquired'"
+                " WHERE id = CAST(:id AS uuid)"
+            ),
+            {"id": run_id},
+        )
     artifacts = _write_artifacts(tmp_path, junit=JUNIT_PASSED, report=PERF_REPORT)
 
     from app import runtime
