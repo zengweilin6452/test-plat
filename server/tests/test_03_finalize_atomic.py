@@ -168,6 +168,139 @@ def test_completed_perf_run_converges_original_component_state_and_event(
     assert finish["artifact_count"] >= 2
 
 
+def test_passing_gate_clears_runner_reason_on_run(
+    project, make_run, sync_engine, tmp_path
+):
+    """回归：门禁通过时 run.reason_code 必须为空，不能沿用 runner 上报的旧原因。
+
+    runner 不认识 API 侧门禁，完成上报恒带 reason=gate_policy_missing；finalize
+    只在 not_tested 分支写 reason，passed/failed 漏清，导致真机出现
+    「已通过 / 原因 gate_policy_missing」的矛盾（RUN-0522）。
+    """
+    _set_test_type(sync_engine, project, "performance")
+    clean_spec = {
+        "os": "Android",
+        "os_version": "13",
+        "screen_resolution": "1080x2400",
+        "model": "Pixel 7 Pro",
+    }
+    with sync_engine.begin() as conn:
+        # 默认 spec 为空会判档案不可比；给一个可规范化的档案
+        conn.execute(
+            text(
+                "UPDATE resource_profiles SET spec = CAST(:s AS jsonb)"
+                " WHERE id = CAST(:id AS uuid)"
+            ),
+            {"s": json.dumps(clean_spec), "id": project["profile_id"]},
+        )
+        baseline_run = make_run(
+            state="completed", request_key="reason-base-" + uuid.uuid4().hex[:8]
+        )
+        baseline_comp = str(uuid.uuid4())
+        conn.execute(
+            text(
+                "INSERT INTO run_components (id, project_id, run_id, kind, adapter_key,"
+                " adapter_version, state, outcome)"
+                " VALUES (CAST(:id AS uuid), CAST(:pid AS uuid), CAST(:run AS uuid),"
+                "         'performance', 'mobile_perf', '1', 'completed', 'passed')"
+            ),
+            {"id": baseline_comp, "pid": project["project_id"], "run": baseline_run},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO metric_summaries (id, project_id, component_id, metric_key,"
+                " metric_version, unit, scope, window_key, statistic, sample_count, value)"
+                " VALUES (gen_random_uuid(), CAST(:pid AS uuid), CAST(:comp AS uuid),"
+                "         'cpu_process_pct', '1.0', '%', 'component', 'w', 'median', 30, 18)"
+            ),
+            {"pid": project["project_id"], "comp": baseline_comp},
+        )
+        snapshot = {
+            "schema": 1,
+            "metrics": [
+                {
+                    "metric_key": "cpu_process_pct",
+                    "statistic": "median",
+                    "value": 18.0,
+                    "sample_count": 30,
+                    "unit": "%",
+                    "source_run_id": baseline_run,
+                    "component_id": baseline_comp,
+                }
+            ],
+        }
+        conn.execute(
+            text(
+                "INSERT INTO baselines (id, project_id, application_id, environment_id,"
+                " suite_version_id, profile_id, source_component_id, name, version,"
+                " metrics_snapshot)"
+                " VALUES (gen_random_uuid(), CAST(:pid AS uuid), CAST(:app AS uuid),"
+                "         CAST(:env AS uuid), CAST(:sv AS uuid), CAST(:prof AS uuid),"
+                "         CAST(:comp AS uuid), 'base', 1, CAST(:snap AS jsonb))"
+            ),
+            {
+                "pid": project["project_id"],
+                "app": project["application_id"],
+                "env": project["environment_id"],
+                "sv": project["suite_version_id"],
+                "prof": project["profile_id"],
+                "comp": baseline_comp,
+                "snap": json.dumps(snapshot),
+            },
+        )
+        conn.execute(
+            text(
+                "INSERT INTO gate_policies"
+                " (id, project_id, application_id, name, version, rules)"
+                " VALUES (gen_random_uuid(), CAST(:pid AS uuid), CAST(:app AS uuid),"
+                "         'default', 1, CAST(:rules AS jsonb))"
+            ),
+            {
+                "pid": project["project_id"],
+                "app": project["application_id"],
+                "rules": json.dumps(
+                    {
+                        "min_samples": 10,
+                        "thresholds": [
+                            {
+                                "metric_key": "cpu_process_pct",
+                                "op": "lt",
+                                "threshold": 30,
+                                "level": "fail",
+                            }
+                        ],
+                    }
+                ),
+            },
+        )
+
+    run_id = make_run(state="running", request_key="reason-pass-" + uuid.uuid4().hex[:8])
+    artifacts = _write_artifacts(tmp_path, junit=JUNIT_PASSED, report=PERF_REPORT)
+
+    from app import runtime
+
+    reset_db_engine(TEST_DB)
+    result = asyncio.run(
+        runtime.finalize_run(
+            run_id=run_id,
+            state="completed",
+            reason="gate_policy_missing",
+            artifacts_dir=artifacts,
+            release_lease_reason="pytest",
+            extra_event={"components": [PERF_COMPONENT], "cases": []},
+        )
+    )
+
+    assert result.state == "completed"
+    assert result.outcome == "passed"
+    row = _row(sync_engine, run_id)
+    assert row["outcome"] == "passed"
+    assert row["reason_code"] is None, "门禁通过时不得保留 runner 上报的旧原因"
+    perf = [c for c in _components(sync_engine, run_id) if c["kind"] == "performance"][0]
+    assert perf["outcome"] == "passed"
+    assert perf["reason_code"] is None
+
+
 def test_gate_failure_rolls_back_everything_then_retry_succeeds(
     project, make_run, sync_engine, tmp_path, monkeypatch
 ):

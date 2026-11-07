@@ -549,6 +549,14 @@ async def finalize_run(
                     else:
                         not_tested_reason = None
 
+            if target_state == runs_mod.STATE_COMPLETED and final_outcome in (
+                runs_mod.OUTCOME_PASSED,
+                runs_mod.OUTCOME_FAILED,
+            ):
+                # 通过/未通过是门禁结论，不能沿用 runner 上报的 not_tested 原因
+                # （runner 不认识 API 侧门禁，恒带 gate_policy_missing）。
+                reason = None
+
             payload: dict[str, Any] = {}
             if extra_event:
                 payload.update({str(k): v for k, v in extra_event.items()})
