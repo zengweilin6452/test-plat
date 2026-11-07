@@ -354,6 +354,68 @@ def test_heartbeat_reports_cancel_from_column(
     assert after.json()["cancel"] is True, "runner 必须能从心跳感知取消受理"
 
 
+def test_repeated_heartbeats_with_static_progress_stay_distinct(
+    client, project, control_token, make_run, sync_engine, monkeypatch
+):
+    """回归：采集窗口内 progress/stage 不变时，周期性心跳不得被幂等键塌缩成一条。
+
+    reconciler 用「最近一条 heartbeat 事件」判心跳超时（reconciler.py _STALE_SQL）。
+    若幂等键只含 (pid, progress, stage)，性能采集窗口里这三个值长时间不变，8 次
+    心跳只会落 1 条事件，60s 后仍在心跳的健康运行被误回收成 lease_expired
+    （真机 RUN-0517/0518）。
+    """
+    from app.routers import internal as internal_router
+
+    run_id = make_run(state="running", request_key=str(uuid.uuid4()))
+    headers = {"X-Control-Token": control_token}
+    with sync_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO resource_leases (id, project_id, resource_id, run_id,"
+                "                             fencing_token, holder_id, expires_at)"
+                " VALUES (gen_random_uuid(), CAST(:pid AS uuid), CAST(:rid AS uuid),"
+                "         CAST(:run AS uuid), 9, 'pytest', now() + interval '120 seconds')"
+            ),
+            {"pid": project["project_id"], "rid": project["resource_id"], "run": run_id},
+        )
+    payload = {"fencing_token": 9, "pid": 4242, "progress": 40, "stage": 2}
+
+    def _beat_count() -> int:
+        with sync_engine.connect() as conn:
+            return conn.execute(
+                text(
+                    "SELECT count(*) FROM run_events"
+                    " WHERE run_id = CAST(:run AS uuid) AND event_type = 'heartbeat'"
+                ),
+                {"run": run_id},
+            ).scalar_one()
+
+    monkeypatch.setattr(internal_router, "_heartbeat_bucket", lambda: 100)
+    assert (
+        client.post(
+            f"/internal/runs/{run_id}/heartbeat", json=payload, headers=headers
+        ).status_code
+        == 200
+    )
+    monkeypatch.setattr(internal_router, "_heartbeat_bucket", lambda: 101)
+    assert (
+        client.post(
+            f"/internal/runs/{run_id}/heartbeat", json=payload, headers=headers
+        ).status_code
+        == 200
+    )
+    assert _beat_count() == 2, "静态 progress/stage 的周期性心跳必须各记一条事件"
+
+    # 同一时间桶内的网络重试仍应幂等，不制造重复事件
+    assert (
+        client.post(
+            f"/internal/runs/{run_id}/heartbeat", json=payload, headers=headers
+        ).status_code
+        == 200
+    )
+    assert _beat_count() == 2, "同一时间桶内的心跳重试必须幂等去重"
+
+
 # --------------------------------------------------------------------------- #
 # 事件分页与投影一致性（AC-CONTRACT-03 / AC-LIVE-01）
 # --------------------------------------------------------------------------- #

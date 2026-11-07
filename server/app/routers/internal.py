@@ -18,6 +18,7 @@ data/control.token（0600），重启即轮换 —— 旧 runner 重放旧 token
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, Header, Request
@@ -37,6 +38,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/internal", tags=["internal"])
 
 CONTROL_TOKEN_HEADER = "X-Control-Token"
+
+#: 心跳事件幂等的时间桶（与 runner 心跳间隔 10s 对齐）。
+#: 同桶内的网络重试仍然去重；跨桶各记一条，供 reconciler 用「最近一条
+#: heartbeat 事件」判存活——采集窗口内 progress/stage 可能长时间不变，
+#: 幂等键若不含时间，周期心跳会塌缩成一条，健康运行会被误判超时回收。
+HEARTBEAT_EVENT_BUCKET_SECONDS = 10
+
+
+def _heartbeat_bucket() -> int:
+    return int(time.time() // HEARTBEAT_EVENT_BUCKET_SECONDS)
 
 
 def _expected_token(request: Request) -> str:
@@ -146,7 +157,9 @@ async def heartbeat_run(
         project_id=str(row["project_id"]),
         run_id=str(run_id),
         source_key=events_mod.SOURCE_CONTROL,
-        source_event_id=events_mod.event_id_for("hb", run_id, pid, progress, stage),
+        source_event_id=events_mod.event_id_for(
+            "hb", run_id, pid, progress, stage, _heartbeat_bucket()
+        ),
         event_type="heartbeat",
         payload={"pid": pid, "progress": progress, "stage": stage},
     )
