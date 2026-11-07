@@ -12,9 +12,11 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import uuid
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -162,6 +164,79 @@ def test_seed_demo_refuses_formal_default_database(monkeypatch) -> None:
 # --------------------------------------------------------------------------- #
 # 02 / 04 / 05 / 06
 # --------------------------------------------------------------------------- #
+def test_new_project_can_create_performance_task_without_environment_id(client: TestClient) -> None:
+    project = _new_project(client)
+    application = _new_app(client, project["id"])
+
+    response = client.post(
+        "/api/v1/tasks",
+        json={
+            "name": "默认环境性能任务",
+            "test_type": "performance",
+            "platform": "android",
+            "application_id": application["id"],
+            "config": {},
+        },
+        headers=CLIENT_HEADERS,
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["test_type"] == "performance"
+    assert body["readiness"] == "draft"
+    assert body["revision"]["environment_id"]
+
+
+def test_default_environment_backfill_preserves_existing_environments(client: TestClient) -> None:
+    project_with_environment = _new_project(client)
+    project_without_environment = _new_project(client)
+    application = _new_app(client, project_without_environment["id"])
+    with _sql_conn() as conn:
+        existing_id = conn.execute(
+            text("SELECT id FROM environments WHERE project_id = CAST(:pid AS uuid)"),
+            {"pid": project_with_environment["id"]},
+        ).scalar_one()
+        conn.execute(
+            text("DELETE FROM environments WHERE project_id = CAST(:pid AS uuid)"),
+            {"pid": project_without_environment["id"]},
+        )
+
+    migration_path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0010_default_environments.py"
+    spec = importlib.util.spec_from_file_location("migration_0010", migration_path)
+    assert spec and spec.loader
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    with _sql_conn() as conn:
+        conn.execute(text(migration.BACKFILL_SQL))
+        conn.execute(text(migration.BACKFILL_SQL))
+
+    response = client.post(
+        "/api/v1/tasks",
+        json={
+            "name": "存量项目性能任务",
+            "test_type": "performance",
+            "platform": "android",
+            "application_id": application["id"],
+            "config": {},
+        },
+        headers=CLIENT_HEADERS,
+    )
+    assert response.status_code == 201, response.text
+    with _sql_conn() as conn:
+        environments = conn.execute(
+            text(
+                "SELECT project_id, id, name FROM environments "
+                "WHERE project_id IN (CAST(:first AS uuid), CAST(:second AS uuid)) "
+                "ORDER BY project_id, name"
+            ),
+            {"first": project_with_environment["id"], "second": project_without_environment["id"]},
+        ).all()
+    assert len(environments) == 2
+    by_project = {str(row.project_id): row for row in environments}
+    assert str(by_project[project_with_environment["id"]].id) == str(existing_id)
+    assert by_project[project_without_environment["id"]].name == "default"
+
+
 def test_project_application_identity_and_rename(client: TestClient) -> None:
     project = _new_project(client)
     # 同身份重复创建：可理解的冲突 + existing_id 指向原对象

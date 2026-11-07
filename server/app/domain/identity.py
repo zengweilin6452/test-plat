@@ -119,6 +119,10 @@ async def create_project(session: AsyncSession, *, code: Any, name: Any) -> dict
             {"id": str(uuid.uuid4()), "code": project_code, "name": display_name},
         )
     ).mappings().one()
+    await session.execute(
+        text("INSERT INTO environments (id, project_id, name) VALUES (:id, :project_id, 'default')"),
+        {"id": str(uuid.uuid4()), "project_id": str(row["id"])},
+    )
     return dict(row)
 
 
