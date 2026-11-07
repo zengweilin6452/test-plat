@@ -26,9 +26,9 @@
     "mobile_perf": {
       "root": "D:\\workspace\\claudecode-test\\moblie-xn",
       "target": "mobile_perf",
-      "git_head": "8df850f31ec08850e02d0b8a24b9c9eb01bbbae1",
-      "files": 217,
-      "bytes": 29182157,
+      "git_head": "9b7159a6d7a632928fea81e6936f452955e787f2",
+      "files": 223,
+      "bytes": 29310150,
       "include": [
         "src/mobile_perf",
         "dist/solopi",
@@ -573,8 +573,8 @@
       "size": 38
     },
     "mobile_perf/README.md": {
-      "sha256": "13296da3b3ea3d962b30a4c8f65f72e76e66b4c967a33ca01e0e1c1fecc988c8",
-      "size": 6283
+      "sha256": "6764298f165b5b770abeb61fdb0d6b1c965d4491cdbf676a87665b37594351c3",
+      "size": 9316
     },
     "mobile_perf/SoloPi/platform-tools/AdbWinApi.dll": {
       "sha256": "c1d653030b4bde65d3e07e4d0b0979e17be56df1436cdd15528630f27808050d",
@@ -1161,8 +1161,8 @@
       "size": 1030900
     },
     "mobile_perf/src/mobile_perf/cli.py": {
-      "sha256": "cd512b21f24488723f148a075ec7e31c79ddb369e3c39baf85ff58c2e27e2945",
-      "size": 21680
+      "sha256": "b567b5adf48b0e5a5407663740c2c49928242c2212e674e429a25acae495476d",
+      "size": 26401
     },
     "mobile_perf/src/mobile_perf/collector.py": {
       "sha256": "69b8e43fc119a8e6c88f7e41704b1c6bf4d28b786615c29895ff168c0b8c96c5",
@@ -1173,12 +1173,16 @@
       "size": 2881
     },
     "mobile_perf/src/mobile_perf/frameinfo.py": {
-      "sha256": "3a9487c242add83436d809e6948699297e57bf83c6b5f79882a662df9803328d",
-      "size": 15584
+      "sha256": "e3841b697099d201ff7474614a87837066798a7cbf9143e863b53c09b8c665a2",
+      "size": 17605
     },
     "mobile_perf/src/mobile_perf/gate.py": {
       "sha256": "399b1c27392db180d79b9a7665cd293fa42f4006a7a3d9e19bec802c19f25dea",
       "size": 6978
+    },
+    "mobile_perf/src/mobile_perf/har_writer.py": {
+      "sha256": "acf544abab4d3f253183199901f6ca939506d8ad793a6b4755049d94bbabfacc",
+      "size": 23563
     },
     "mobile_perf/src/mobile_perf/jank.py": {
       "sha256": "df1ce42da4cf098cb771ecce618061f0f0b1c883479d18849b1e1265ffe69db5",
@@ -1193,8 +1197,8 @@
       "size": 20513
     },
     "mobile_perf/src/mobile_perf/kit.py": {
-      "sha256": "f05ac6aaceee26c21bf26a038f394c6c8af657d90a354f93653c3a83276ae726",
-      "size": 71921
+      "sha256": "b8420efc79806a4884cca38a58ce31a21b423492e6cf6b8a403a4acd0b3c8b62",
+      "size": 78722
     },
     "mobile_perf/src/mobile_perf/leak.py": {
       "sha256": "fa3fd19c2914ee05e4fc19263e769f50bbbaa15a01c19576f763b08eb1122222",
@@ -1209,24 +1213,24 @@
       "size": 13678
     },
     "mobile_perf/src/mobile_perf/netprof.py": {
-      "sha256": "0fca029b4505f5bd2085514106a8fac09d9785f9cc98ed5f5779830c0b99903b",
-      "size": 40042
+      "sha256": "0721b887c4329b543d3709592d059b5e90ac8d9f96afc73502baab4382392ff7",
+      "size": 50296
     },
     "mobile_perf/src/mobile_perf/netproxy_addon.py": {
-      "sha256": "715b04b05f74e90475ffa95f2789cb90e4be5e42597e24604156073fcd084ce7",
-      "size": 10369
+      "sha256": "524854011a2ba1f73c9ce2849d51772b2f4e87299ac9fe41799c1e46662975d4",
+      "size": 15644
     },
     "mobile_perf/src/mobile_perf/pageflow.py": {
-      "sha256": "0e2b27aae0dc0473664d7872669d18c7fd576cde0ef95725e357182cc907138c",
-      "size": 9027
+      "sha256": "e268b3504042880cea8113e311a46e8ad0384003b28a5bdbe265b79a53b0615e",
+      "size": 9519
     },
     "mobile_perf/src/mobile_perf/pytest_plugin.py": {
       "sha256": "1933999ae87aa9aabe44f32dfa257ff31dec824db1db4defa0de5dd5aa2b4551",
       "size": 11187
     },
     "mobile_perf/src/mobile_perf/report.py": {
-      "sha256": "62b75ac946ae8dee35ea7dfdfc3d7e1e38aaf588944dde76eaf1f8a78e2b3c09",
-      "size": 43720
+      "sha256": "6abf2a03e7dbf521b0bb2a1168e8ab7109c1e60b203ed507bf5d9cf4d3de8d97",
+      "size": 46476
     },
     "mobile_perf/src/mobile_perf/session.py": {
       "sha256": "3a683e656ed19220035f59889e51a89ff31fff95dcae270e793325f06efa74cd",
@@ -1340,9 +1344,21 @@
       "sha256": "cea89699ed984cf5cb97d5202360e43edb21c455ea0c5ce21d47ed24d2a0e9c4",
       "size": 2656
     },
+    "mobile_perf/tests/unit/test_capture_cli.py": {
+      "sha256": "d9ff15e1801f7badf63a4573472acc9dde7ce5885b33484228670d61c662d24a",
+      "size": 3601
+    },
+    "mobile_perf/tests/unit/test_capture_kit.py": {
+      "sha256": "ab0a37eac4c7e40dc307c5ae52cca44bc39446c28f2ae2310c5b5ee342526e42",
+      "size": 10293
+    },
+    "mobile_perf/tests/unit/test_capture_report.py": {
+      "sha256": "3483bf6c4fbff5c842666024f07f5c0a624589ebd1c25ecc846758b2228a63a5",
+      "size": 6025
+    },
     "mobile_perf/tests/unit/test_cli.py": {
-      "sha256": "6df36a372530f0e7f609ee1b1d0528bf828a6da00ae3fc1db50acb0e67b8ac83",
-      "size": 30565
+      "sha256": "ccb62286516671916aa96a3372575a5c11ce5ebf358811cffcf6112519f2e49e",
+      "size": 32183
     },
     "mobile_perf/tests/unit/test_collector.py": {
       "sha256": "2b466e84b0c4e7c4605540a20cb90c35abff824875912163ef43895568dd535e",
@@ -1353,12 +1369,16 @@
       "size": 4101
     },
     "mobile_perf/tests/unit/test_frameinfo.py": {
-      "sha256": "722150dfd4be10c358d11a0e2a495959174c605f19acf74f1c12cc266c4d39a4",
-      "size": 10854
+      "sha256": "8d2080c859e34e04f61529ba9f9c4847c784b4dd543bf7b0375679df910c5d10",
+      "size": 13881
     },
     "mobile_perf/tests/unit/test_gate.py": {
       "sha256": "a5d975ec8c2162097190030800e04bf78ea80ee999982ff973c7ae2dd99a070c",
       "size": 6050
+    },
+    "mobile_perf/tests/unit/test_har_writer.py": {
+      "sha256": "2dd38f39aee4930d08ba1d54c89ea425b708f1ca7d460c31309950f0c488be8d",
+      "size": 12050
     },
     "mobile_perf/tests/unit/test_jank.py": {
       "sha256": "07e53e2629676dab1671cdbbe10754b8b4e35514b206f4c32e97ae8f3fed5588",
@@ -1373,8 +1393,8 @@
       "size": 19668
     },
     "mobile_perf/tests/unit/test_kit.py": {
-      "sha256": "f2427391242d2e75d63179fee359691c356f87407787eb75f4ed0c13d2de1cd8",
-      "size": 42373
+      "sha256": "0ff90a84f9d06648e6a2c18792d038181c71d414fd7dcbe5980b24cf1183c055",
+      "size": 50003
     },
     "mobile_perf/tests/unit/test_kit_collect.py": {
       "sha256": "cbd7372c34325d0e04c7ba4ee3cfb61cdaceabe61a9bbab2909e6298d0ec37cd",
@@ -1385,12 +1405,12 @@
       "size": 6015
     },
     "mobile_perf/tests/unit/test_kit_netprof.py": {
-      "sha256": "19d8eac055842359a06a79f38cee5ab94f9746197f33b7052559cc2dd8bcb294",
-      "size": 14585
+      "sha256": "adad5a53d0eea0ad10329dfcffc5fa3075f8e4e85a79b519fe5c4a19c39f175e",
+      "size": 15385
     },
     "mobile_perf/tests/unit/test_kit_pageflow.py": {
-      "sha256": "c708984aa52f51cda518fab0d7758cd01a3cc77c693556cff585d1e518f4d313",
-      "size": 11347
+      "sha256": "d3b1fbe48b57fa3acf09fee554bee430db2f3e4b58a32905319cd60f56c91391",
+      "size": 14195
     },
     "mobile_perf/tests/unit/test_leak.py": {
       "sha256": "e8d188d983479b0d45f0fb7181917dbf51808d72a82305748960089e5d57148d",
@@ -1405,20 +1425,24 @@
       "size": 6130
     },
     "mobile_perf/tests/unit/test_netprof.py": {
-      "sha256": "2fd52c1d44a04cc04d715e1a927d73b8aba819c047457f7f1818320fc4e9e966",
-      "size": 52623
+      "sha256": "6005316da3743bd92c523821fba430fafa56c1854815e4f2a113cc5ff9ac682e",
+      "size": 53358
+    },
+    "mobile_perf/tests/unit/test_netprof_har.py": {
+      "sha256": "a279810037e09d4cc0d633eb78dc82971ac3da0a059e8aeed46d6f82e3f69cca",
+      "size": 16766
     },
     "mobile_perf/tests/unit/test_pageflow.py": {
-      "sha256": "3aeee153b46fd4a53c2ba0669306aeb0654d94fef95850b736b36a5510f083cc",
-      "size": 7709
+      "sha256": "1fa861806ac8b99f3154238746cf45bef477b3eab03fbdeba576e2f55295c74b",
+      "size": 7903
     },
     "mobile_perf/tests/unit/test_pytest_plugin.py": {
       "sha256": "a6e2d0b541b7ba880b8a06179d848ebb2d9be2a251ad0956a7907e7687c0dcbc",
       "size": 10980
     },
     "mobile_perf/tests/unit/test_report.py": {
-      "sha256": "e3580f564edf3e2961434684b06b404fd0fd6422e587a96e4bad96320d701644",
-      "size": 31537
+      "sha256": "7dc1dcdfba54bfa830f41030acb3c3a0f74cbfec0a1e7f29929bcd4d93a1430e",
+      "size": 32277
     },
     "mobile_perf/tests/unit/test_session.py": {
       "sha256": "3040314cf47f77022138039c41895ed2aa9653c1fcbf4622b91d59f5df7152a1",
@@ -1433,8 +1457,8 @@
       "size": 20897
     },
     "mobile_perf/tests/unit/test_store.py": {
-      "sha256": "b8eac21d6cdcf1ba0ef5e724f43b8afeaa726c7b1f1354c5c254030813979ace",
-      "size": 15418
+      "sha256": "d858e276997f0083f1aa7c567cf396efdc889d609c25c1ffeb17e81af5502152",
+      "size": 18168
     },
     "mobile_perf/tests/unit/test_supplement.py": {
       "sha256": "02e0188017435191348777af22cefd83bee8e630fea9f3ab20835cbcdf378032",
