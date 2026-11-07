@@ -534,7 +534,8 @@ async def create_debug_session(
                 SELECT er.id, er.project_id, er.status, er.resource_key
                   FROM execution_resources er
                  WHERE er.resource_key = :serial
-                 ORDER BY er.created_at
+                 -- 同一台真机可能登记在多个项目：优先绑定在线的那条，其次取最新
+                 ORDER BY (er.status = 'ready') DESC, er.created_at DESC
                  LIMIT 1
                 """
             ),
