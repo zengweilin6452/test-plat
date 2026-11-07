@@ -26,6 +26,22 @@ foreach ($Name in @('frontend', 'backend')) {
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
 
+# cmd 包装层被终止后，npx 拉起的 node/vite 会成为孤儿继续占用端口。
+# 按端口反查，且只停命令行同时包含本项目 web 目录与 vite 的进程，避免误杀其他服务。
+$WebPort = if ($env:TESTDOCK_WEB_PORT) { [int]$env:TESTDOCK_WEB_PORT } else { 5173 }
+$viteRoot = Join-Path $RepoRoot 'web'
+Get-NetTCPConnection -LocalPort $WebPort -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty OwningProcess -Unique |
+    ForEach-Object {
+        $orphanPid = $_
+        $orphan = Get-CimInstance Win32_Process -Filter "ProcessId=$orphanPid" -ErrorAction SilentlyContinue
+        if ($orphan -and $orphan.CommandLine -and
+            $orphan.CommandLine -like "*$viteRoot*" -and $orphan.CommandLine -like '*vite*') {
+            Write-Host "[down] 停止孤儿 vite PID=$orphanPid"
+            Stop-Process -Id $orphanPid -Force -ErrorAction SilentlyContinue
+        }
+    }
+
 if (-not $KeepPg) {
     Write-Host "[down] 如需停 PG：powershell -File scripts/pg_portable_setup.ps1 stop"
 }

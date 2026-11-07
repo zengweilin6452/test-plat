@@ -72,23 +72,34 @@ function Stop-PgByPid {
     $pidFile = Join-Path $PgData 'postmaster.pid'
     if (-not (Test-Path $pidFile)) { Write-Host "[pg] 未在运行"; return }
     $pgPid = (Get-Content $pidFile -First 1).Trim()
-    try {
-        $p = Get-Process -Id $pgPid -ErrorAction Stop
-        if ($p.ProcessName -ne 'postgres') { throw "PID $pgPid 不是 postgres，拒绝停止" }
-        # 先发正常终止信号（Windows 无 SIGTERM，用 taskkill 不带 /F 再兜底 /F）
-        taskkill /PID $pgPid 2>$null | Out-Null
-        for ($i = 0; $i -lt 20; $i++) {
-            if (-not (Get-Process -Id $pgPid -ErrorAction SilentlyContinue)) { break }
-            Start-Sleep -Milliseconds 500
-        }
-        if (Get-Process -Id $pgPid -ErrorAction SilentlyContinue) {
-            Write-Host "[pg] 优雅停止超时，强制结束 PID $pgPid"
-            taskkill /F /PID $pgPid | Out-Null
-        }
-        Write-Host "[pg] 已停止"
-    } catch {
-        Write-Host "[pg] 停止失败: $_"
+    $p = Get-Process -Id $pgPid -ErrorAction SilentlyContinue
+    if (-not $p) {
+        # 上一轮被 Ctrl+C / 强杀时 postmaster 来不及清理 pid 文件
+        Remove-Item $pidFile -Force
+        Write-Host "[pg] 未在运行（已清理残留 postmaster.pid，PID $pgPid）"
+        return
     }
+    if ($p.ProcessName -ne 'postgres') {
+        Write-Host "[pg] PID $pgPid 不是 postgres，拒绝停止（pid 文件保留）"
+        return
+    }
+    # 先发正常终止信号（Windows 无 SIGTERM，用 taskkill 不带 /F 再兜底 /F）
+    taskkill /PID $pgPid 2>$null | Out-Null
+    for ($i = 0; $i -lt 20; $i++) {
+        if (-not (Get-Process -Id $pgPid -ErrorAction SilentlyContinue)) { break }
+        Start-Sleep -Milliseconds 500
+    }
+    if (Get-Process -Id $pgPid -ErrorAction SilentlyContinue) {
+        Write-Host "[pg] 优雅停止超时，强制结束 PID $pgPid"
+        taskkill /F /PID $pgPid | Out-Null
+        Start-Sleep -Milliseconds 500
+    }
+    if (Get-Process -Id $pgPid -ErrorAction SilentlyContinue) {
+        Write-Host "[pg] 仍未能停止 PID $pgPid，pid 文件保留"
+        return
+    }
+    Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+    Write-Host "[pg] 已停止"
 }
 
 switch ($Action) {
@@ -119,16 +130,26 @@ switch ($Action) {
         Write-Host "[pg] 完成。下一步: .\scripts\pg_portable_setup.ps1 start"
     }
     'start' {
-        $ready = Join-Path $PgData 'postmaster.pid'
-        if (Test-Path $ready) {
-            Write-Host "[pg] 看起来已在运行（postmaster.pid 存在），如需强启先 stop"
-            return
+        $pidFile = Join-Path $PgData 'postmaster.pid'
+        if (Test-Path $pidFile) {
+            $raw = (Get-Content $pidFile -First 1).Trim()
+            $existing = 0
+            $alive = [int]::TryParse($raw, [ref]$existing) -and
+                     [bool](Get-Process -Id $existing -ErrorAction SilentlyContinue)
+            if ($alive) {
+                Write-Host "[pg] 已在运行（PID $existing），如需重启请先 stop"
+                return
+            }
+            # 进程已退出但 pid 文件残留（回合结束被 Ctrl+C 强杀是最常见的来源）
+            Write-Host "[pg] 清理残留 postmaster.pid（PID $raw 已不存在）"
+            Remove-Item $pidFile -Force
         }
         Start-PgDirect
-        $createdb = Join-Path $Bin 'createdb.exe'
-        & $createdb -h 127.0.0.1 -p $Port -U $DbUser testdock 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "[pg] 数据库 testdock 可能已存在（可忽略）"
+        # EDB 便携包不带 createdb.exe，用 psql 幂等建库
+        $psql = Join-Path $Bin 'psql.exe'
+        $exists = & $psql -h 127.0.0.1 -p $Port -U $DbUser -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='testdock'" 2>$null
+        if ("$exists".Trim() -ne '1') {
+            & $psql -h 127.0.0.1 -p $Port -U $DbUser -d postgres -c 'CREATE DATABASE testdock' 2>$null | Out-Null
         }
         Write-Host "[pg] 已启动: postgresql://$DbUser@127.0.0.1:$Port/testdock"
     }

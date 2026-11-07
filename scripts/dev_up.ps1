@@ -99,8 +99,10 @@ if (-not (Test-Path $WebDir)) {
     Write-Host "[dev] 未找到 web/ 目录，跳过前端"
     return
 }
-if (-not (Test-Path (Join-Path $WebDir 'node_modules'))) {
-    Write-Host "[dev] web/node_modules 缺失，先执行 npm ci ..."
+# 只判断 node_modules 目录存在会被残缺安装骗过（.bin 缺失时 npx vite 报"不是内部或外部命令"）
+$viteShim = Join-Path $WebDir 'node_modules\.bin\vite.cmd'
+if (-not (Test-Path $viteShim)) {
+    Write-Host "[dev] web/node_modules 缺失或不完整（缺 .bin\vite），先执行 npm ci ..."
     Push-Location $WebDir
     try { npm ci } finally { Pop-Location }
 }
