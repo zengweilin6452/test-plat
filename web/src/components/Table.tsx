@@ -67,7 +67,18 @@ export function Table<T>({
             {rows.map((row, index) => (
               <tr
                 key={rowKey(row, index)}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onClick={
+                  onRowClick
+                    ? (event) => {
+                        // 行内按钮/链接等交互元素自行处理点击，不冒泡触发行点击，
+                        // 否则一次点击会同时打开行详情与按钮目标（两层抽屉叠在一起，
+                        // 用户要点多次关闭按钮才能全部关掉）
+                        const target = event.target as HTMLElement | null
+                        if (target && target.closest('button, a, input, select, textarea, label, [role="button"]')) return
+                        onRowClick(row)
+                      }
+                    : undefined
+                }
                 style={onRowClick ? { cursor: 'pointer' } : undefined}
               >
                 {columns.map((col) => (
