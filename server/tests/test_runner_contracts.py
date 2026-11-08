@@ -130,6 +130,43 @@ def test_silent_pytest_is_stopped_at_timeout(tmp_path, monkeypatch):
     assert time.monotonic() - started < 8
 
 
+def test_control_auth_loss_loses_fence(tmp_path):
+    """API 重启轮换 control.token 后，旧 runner 的控制通道一律 401——
+    这是确定性拒绝不是抖动：必须视为丢 fence，让 debug 主循环尽快退出
+    并释放本地设备锁（否则孤儿 runner 占锁，设备调试全部 DeviceBusy）。"""
+    from testdock_runner.protocol import ControlError
+
+    assert ControlError(401, "control_unauthorized", "").auth_lost is True
+    assert ControlError(403, "control_forbidden", "").auth_lost is True
+    assert ControlError(500, "boom", "").auth_lost is False
+    assert ControlError(409, "fence_mismatch", '{"code":"fence_mismatch"}').fence_mismatch is True
+
+    class AuthLostControl:
+        def check_fence(self, token):
+            raise ControlError(401, "control_unauthorized", "")
+
+    context = RunnerContext(
+        run_id="orphan", fencing_token=1, artifacts_dir=tmp_path, control=AuthLostControl()
+    )
+    assert context.check_fence() is False
+    assert context.fence_lost_now() is True
+
+
+def test_control_transient_error_keeps_fence(tmp_path):
+    """网络抖动（URLError/超时）不是丢租约：仍按持有处理，由心跳/对账兜底。"""
+    import urllib.error
+
+    class FlakyControl:
+        def check_fence(self, token):
+            raise urllib.error.URLError("temporarily unreachable")
+
+    context = RunnerContext(
+        run_id="flaky", fencing_token=1, artifacts_dir=tmp_path, control=FlakyControl()
+    )
+    assert context.check_fence() is True
+    assert context.fence_lost_now() is False
+
+
 def test_spawn_works_without_asyncio_subprocess_support(tmp_path, monkeypatch):
     import asyncio
     from app.runner import spawn

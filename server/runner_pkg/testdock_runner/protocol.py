@@ -42,6 +42,18 @@ class ControlError(RuntimeError):
     def fence_mismatch(self) -> bool:
         return self.status == 409 and "fence_mismatch" in (self.body or "")
 
+    @property
+    def auth_lost(self) -> bool:
+        """控制令牌被服务端拒绝（401/403）。
+
+        平台的 control.token 随 API 重启轮换（0600，重启即换）：runner 拿着旧
+        token 打到 401，说明拥有它的那个 API 已经不在了——这是一次性的确定性
+        拒绝，不是网络抖动。此时租约续期与 fence 查询永远不可达，runner 必须
+        自我终止，否则会变成持有本地设备锁的孤儿（进程表随重启丢失，平台也
+        杀不到它）。
+        """
+        return self.status in (401, 403)
+
 
 class ControlClient:
     """`http://host:port/internal/runs/{id}/...` 的最小客户端。"""
