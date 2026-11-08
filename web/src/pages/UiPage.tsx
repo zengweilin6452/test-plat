@@ -198,10 +198,26 @@ export function UiPage() {
     enabled: tab === 'debug',
     retry: false,
   })
-  const readyDevices = useMemo(
-    () => (resourcesQuery.data?.items ?? []).filter((item) => item.status === 'ready' && !item.busy),
-    [resourcesQuery.data],
-  )
+  // 调试设备按 serial 去重：同一物理设备按项目各登记一行（INV-09），
+  // 不去重调试下拉会出现 N 个同 serial 选项；会话按 serial 创建，选哪行等价。
+  // 当前上下文项目的行优先保留，保证会话归属跟随项目过滤。
+  const readyDevices = useMemo(() => {
+    const rows = (resourcesQuery.data?.items ?? []).filter(
+      (item) => item.status === 'ready' && !item.busy,
+    )
+    const byKey = new Map<string, ResourceRecord>()
+    for (const row of rows) {
+      const existing = byKey.get(row.resource_key)
+      if (existing === undefined) {
+        byKey.set(row.resource_key, row)
+        continue
+      }
+      const preferCurrent =
+        ctx.projectId && row.project_id === ctx.projectId && existing.project_id !== ctx.projectId
+      if (preferCurrent) byKey.set(row.resource_key, row)
+    }
+    return [...byKey.values()]
+  }, [resourcesQuery.data, ctx.projectId])
   useEffect(() => {
     if (tab === 'debug' && !debugTarget && readyDevices[0]) setDebugTarget(toDebugTarget(readyDevices[0]))
   }, [tab, debugTarget, readyDevices])
