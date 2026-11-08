@@ -595,11 +595,27 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     }
   }, [])
 
-  /** Esc 关闭（原先是原生 <dialog> 自带的行为） */
+  /**
+   * Esc 关闭（原先是原生 <dialog> 自带的行为）。
+   * 打开的确认框/对话框优先消费 Esc（原生 dialog 自带关闭），不连带销毁调试会话；
+   * 输入控件聚焦时（如定位符输入框打字按 Esc）也不销毁会话。
+   */
   useEffect(() => {
     if (!open) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') handleClose()
+      if (event.key !== 'Escape') return
+      if (document.querySelector('dialog[open]')) return
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return
+      }
+      handleClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -1146,7 +1162,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     },
     onSuccess: (record) => {
       setTemplateError(null)
-      toast.show('模板已登记：' + record.logical + '（v' + String(record.version_id ?? '').slice(0, 8) + '）')
+      toast.show('模板已登记：' + record.logical + '（v' + String(record.version_id ?? '').slice(0, 8) + '）', 'success')
       setNewLogical('')
       setRegion(null)
       // 凭证一次性：用过即失效，再登记必须重新验证
@@ -1312,7 +1328,11 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
             if (id !== null) {
               try {
                 await closeMutation.mutateAsync(id)
-              } catch { return }
+              } catch {
+                // 关闭旧会话失败：不静默中止——用户换了设备却毫无反应会以为页面坏了
+                toast.show('关闭当前调试会话失败，已保留原设备会话；可稍后重试切换。', 'error')
+                return
+              }
               sessionRef.current = null
               teardownSocket()
             }

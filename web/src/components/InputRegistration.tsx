@@ -28,7 +28,7 @@ function Failure({ error }: { error: unknown }) {
   if (!error) return null
   const detail = describeError(error)
   return <div role="alert">{detail.message} ({detail.code}){detail.requestId ? ` · ${detail.requestId}` : ''}
-    {detail.details != null ? <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(detail.details, null, 2)}</pre> : null}</div>
+    {detail.details != null ? <pre className="code-block">{JSON.stringify(detail.details, null, 2)}</pre> : null}</div>
 }
 
 export function canConfirmIdentity(check: IdentityCheck | null): boolean {
@@ -117,7 +117,7 @@ export function BuildRegistration({ applicationId, buildId, resourceId, onRegist
           ? '与构建声明一致。确认后固定基准，运行前按此复核；未确认的构建不会被运行前复核。'
           : '与已固定基准一致，本设备不会改写基准。'}</p> : null}
         <p>{check.verification_note}</p>
-        <details><summary>原始核对记录</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify({ expected: check.expected, observed: check.observed, blocking: check.blocking }, null, 2)}</pre></details>
+        <details><summary>原始核对记录</summary><pre className="code-block">{JSON.stringify({ expected: check.expected, observed: check.observed, blocking: check.blocking }, null, 2)}</pre></details>
         <Button disabled={busy || !canConfirmIdentity(check)} onClick={() => confirm.mutate()}>确认以上身份并固定基准</Button>
       </div> : null}
       {confirm.isSuccess ? <p role="status">身份基准已固定。</p> : null}

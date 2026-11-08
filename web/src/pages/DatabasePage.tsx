@@ -214,7 +214,7 @@ export function DatabasePage() {
               <div key={group.group}>
                 <div className="nav-label" style={{ margin: '10px 0 4px', padding: '0 12px' }}>
                   {group.group}
-                  <span className="badge" style={{ marginLeft: 6 }}>
+                  <span className="badge gray" style={{ marginLeft: 6 }}>
                     <i className="dot" />
                     {group.tables.length}
                   </span>

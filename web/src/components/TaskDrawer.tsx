@@ -186,7 +186,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
       setLastValidated(result)
       const nextLock = (result as { lock_version?: number }).lock_version
       if (typeof nextLock === 'number') setLockVersion(nextLock)
-      toast.show('任务已通过验证：修订 readiness = validated')
+      toast.show('任务已通过验证：修订 readiness = validated', 'success')
       // 列表与修订历史都要反映新状态
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
       void queryClient.invalidateQueries({ queryKey: ['task-revisions', task?.id] })
@@ -205,7 +205,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
       setLastValidated(null)
       setReadinessOverride(updated?.readiness ?? 'draft')
       if (typeof updated?.lock_version === 'number') setLockVersion(updated.lock_version)
-      toast.show('已保存绑定，可执行验证。')
+      toast.show('已保存绑定，可执行验证。', 'success')
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
       void queryClient.invalidateQueries({ queryKey: ['task-revisions', task?.id] })
     },
@@ -213,7 +213,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
       const described = describeError(error)
       if (described.code === 'stale_version') {
         setValidationError(described)
-        toast.show('任务已被他人更新，请关闭抽屉后重新打开再试。')
+        toast.show('任务已被他人更新，请关闭抽屉后重新打开再试。', 'error')
       } else {
         setValidationError(described)
       }
@@ -235,7 +235,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
         request_key: newRequestKey(),
       }),
     onSuccess: (created) => {
-      toast.show('运行已发起：' + created.display_id)
+      toast.show('运行已发起：' + created.display_id, 'success')
       setActiveRunId(created.id)
       void queryClient.invalidateQueries({ queryKey: ['runs'] })
       void queryClient.invalidateQueries({ queryKey: ['overview'] })
@@ -243,7 +243,7 @@ export function TaskDrawer({ open, task, onClose }: TaskDrawerProps) {
     },
     onError: (error) => {
       const described = describeError(error)
-      toast.show('发起运行失败（' + described.code + '）：' + described.message)
+      toast.show('发起运行失败（' + described.code + '）：' + described.message, 'error')
     },
   })
 

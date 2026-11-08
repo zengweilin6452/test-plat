@@ -95,6 +95,7 @@ export function DevicesPage() {
           <PrimaryAction
             label={syncMutation.isPending ? '同步中…' : '同步设备池'}
             icon="plug"
+            busy={syncMutation.isPending}
             onClick={() => syncMutation.mutate()}
           />
         }

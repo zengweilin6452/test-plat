@@ -3,7 +3,7 @@
  * 上下文条统一由 EffectiveContextProvider 提供真实项目 / 应用名称，
  * 不再写死业务名称；规划态文案由服务端能力摘要驱动。
  */
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { SCOPE_OPTIONS } from '../constants'
 import { useEffectiveContext } from '../store/effectiveContext'
@@ -124,16 +124,26 @@ export function ApiPending({
   )
 }
 
-/** 工具条 + 搜索框 */
+/** 工具条 + 搜索框：300ms 防抖，避免每个击键都触发 URL 写入或服务端过滤请求 */
 export function Toolbar({ children, search, onSearch }: { children?: ReactNode; search?: string; onSearch?: (value: string) => void }) {
+  const [draft, setDraft] = useState(search ?? '')
+  const timer = useRef<number | undefined>(undefined)
+  // 外部值变化（清除筛选、URL 恢复）同步进输入框
+  useEffect(() => { setDraft(search ?? '') }, [search])
+  useEffect(() => () => window.clearTimeout(timer.current), [])
   return (
     <div className="toolbar">
       {onSearch ? (
         <label className="search">
           <Icon name="search" size={15} />
           <input
-            value={search ?? ''}
-            onChange={(event) => onSearch(event.target.value)}
+            value={draft}
+            onChange={(event) => {
+              const value = event.target.value
+              setDraft(value)
+              window.clearTimeout(timer.current)
+              timer.current = window.setTimeout(() => onSearch(value), 300)
+            }}
             placeholder="搜索"
             aria-label="搜索"
           />
@@ -145,7 +155,7 @@ export function Toolbar({ children, search, onSearch }: { children?: ReactNode; 
 }
 
 /** 页面右上角主操作按钮 */
-export function PrimaryAction({ label, icon = 'plus', onClick }: { label: string; icon?: IconName; onClick?: () => void }) {
+export function PrimaryAction({ label, icon = 'plus', onClick, disabled, busy }: { label: string; icon?: IconName; onClick?: () => void; disabled?: boolean; busy?: boolean }) {
   if (!onClick) {
     return (
       <Button kind="primary" icon={icon} disabled title="该操作尚未开放">
@@ -153,8 +163,9 @@ export function PrimaryAction({ label, icon = 'plus', onClick }: { label: string
       </Button>
     )
   }
+  // busy 时禁用，防止长操作期间连点重复提交；文案变化由调用方控制
   return (
-    <Button kind="primary" icon={icon} onClick={onClick}>
+    <Button kind="primary" icon={icon} onClick={onClick} disabled={disabled || busy}>
       {label}
     </Button>
   )

@@ -276,12 +276,12 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
         request_key: crypto.randomUUID(),
         parent_run_id: run.id,
       })
-      toast.show('重跑已创建：' + created.display_id + '，可在运行页跟踪')
+      toast.show('重跑已创建：' + created.display_id + '，可在运行页跟踪', 'success')
       onClose()
       navigate('/ui')
     } catch (error) {
       const e = describeError(error)
-      toast.show('重跑失败（' + e.code + '）：' + e.message)
+      toast.show('重跑失败（' + e.code + '）：' + e.message, 'error')
     } finally {
       setRerunning(false)
     }
@@ -356,7 +356,7 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
                     在线查看报告
                   </Button>
                   <LinkButton onClick={() => navigate('/perf')}>性能分析 ›</LinkButton>
-                  <a className="link-btn" href={`/api/v1/runs/${run.id}/report/export`}>
+                  <a className="link-btn" href={`/api/v1/runs/${run.id}/report/export`} download>
                     导出 JSON
                   </a>
                 </div>

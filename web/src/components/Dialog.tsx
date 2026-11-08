@@ -44,13 +44,23 @@ export function Dialog({
     if (!open && el.open) el.close()
   }, [open])
 
-  // Esc 与浏览器关闭都回到 React 状态
+  // Esc 与浏览器关闭都回到 React 状态。
+  // Esc 先触发 cancel：preventDefault 拦下原生关闭，交给 onClose 决定，
+  // 避免「DOM 已关、React open 仍为 true」的失真（提交中按 Esc 后向导会打不开）。
   useEffect(() => {
     const el = ref.current
     if (!el) return
+    const handleCancel = (event: Event) => {
+      event.preventDefault()
+      onClose()
+    }
     const handleClose = () => onClose()
+    el.addEventListener('cancel', handleCancel)
     el.addEventListener('close', handleClose)
-    return () => el.removeEventListener('close', handleClose)
+    return () => {
+      el.removeEventListener('cancel', handleCancel)
+      el.removeEventListener('close', handleClose)
+    }
   }, [onClose])
 
   // 点击 backdrop 关闭

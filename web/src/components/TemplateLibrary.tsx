@@ -22,7 +22,7 @@ export function TemplatePicker({ value, onChange }: { value: TemplatePin[]; onCh
   const current = (query.data?.templates ?? []).filter((item) => item.current)
   return <fieldset className="mb"><legend>固定图像模板（可选）</legend>
     {query.isError ? <Notice tone="amber">模板库读取失败：{describeError(query.error).message}</Notice> : null}
-    {query.isLoading ? <p>正在读取模板库…</p> : null}
+    {query.isLoading ? <Empty loading title="正在读取模板库" description="正在请求已登记的图像模板…" /> : null}
     {!query.isLoading && !query.isError && !current.length ? <p className="muted small">模板库为空，可先在设备调试中登记。</p> : null}
     {current.map((item) => <label key={item.logical} style={{ display: 'block' }}>
       <input type="checkbox" checked={value.some((pin) => pin.logical === item.logical)} onChange={(event) =>
@@ -48,7 +48,7 @@ export function TemplateLibrary() {
     </div>
     <p className="muted small mb">模板跨调试会话保留。新建或重新匹配模板请进入设备调试；查看和复制表达式不锁定版本。</p>
     {query.isError ? <Notice tone="red">模板库读取失败：{describeError(query.error).message}</Notice> : null}
-    {query.isLoading ? <p>正在读取模板库…</p> : !query.isError && !items.length ? <Empty icon="layers" title="没有匹配的模板" description="可在设备调试中冻结画面并保存图像模板。" /> : null}
+    {query.isLoading ? <Empty loading title="正在读取模板库" description="正在请求已登记的图像模板…" /> : !query.isError && !items.length ? <Empty icon="layers" title="没有匹配的模板" description="可在设备调试中冻结画面并保存图像模板。" /> : null}
     <div className="table-wrap"><table className="task-table"><thead><tr><th>逻辑名</th><th>版本</th><th>模板 / 来源尺寸</th><th>摘要</th><th>操作</th></tr></thead>
       <tbody>{items.map((item) => <tr key={item.version_id}>
         <td>{item.logical}</td><td>{item.current ? '当前' : '历史'} · {item.version_id}</td>
