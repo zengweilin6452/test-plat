@@ -428,6 +428,46 @@ def test_image_validate_forwards_to_vendor_template_endpoint(api_client, monkeyp
 
 
 # --------------------------------------------------------------------------- #
+# 终态会话的 detail 带审计关闭原因（前端「重建会话」文案的依据）
+# --------------------------------------------------------------------------- #
+def test_detail_close_reason_after_close(api_client, p3_project, sync_engine):
+    """closed/lost 会话的 detail 返回审计里最新一条关闭原因；写入照 `_audit` 口径。"""
+    from sqlalchemy import text
+
+    session_id = str(uuid.uuid4())
+    resource = p3_project["resources"][0]
+    with sync_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO debug_sessions"
+                " (id, project_id, resource_id, actor_ref, state, expires_at, closed_at)"
+                " VALUES (CAST(:id AS uuid), CAST(:pid AS uuid), CAST(:rid AS uuid),"
+                "         'pytest', 'closed', now() + interval '10 minutes', now())"
+            ),
+            {"id": session_id, "pid": p3_project["project_id"], "rid": resource["id"]},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO audit_events"
+                " (id, project_id, actor_ref, action, entity_type, entity_id, request_id, changes)"
+                " VALUES (CAST(:id AS uuid), CAST(:pid AS uuid), 'pytest',"
+                "         'debug_session_closed', 'debug_session', CAST(:eid AS uuid),"
+                "         :rid, CAST(:changes AS jsonb))"
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "pid": p3_project["project_id"],
+                "eid": session_id,
+                "rid": uuid.uuid4().hex,
+                "changes": json.dumps({"reason": "local_lease_busy"}),
+            },
+        )
+    body = _json(api_client.get(f"/api/v1/debug-sessions/{session_id}"))
+    assert body["state"] == "closed"
+    assert body["close_reason"] == "local_lease_busy"
+
+
+# --------------------------------------------------------------------------- #
 # 静态：debug 路由模块顶层不得 import vendor
 # --------------------------------------------------------------------------- #
 def test_debug_router_no_vendor_import_at_module_level():
