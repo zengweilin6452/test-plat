@@ -35,6 +35,19 @@ export function canConfirmIdentity(check: IdentityCheck | null): boolean {
   return Boolean(check && check.result === 'match' && check.identity_state === 'pending' && check.blocking.length === 0)
 }
 
+/**
+ * joint 版本发布体：契约要求 manifest 顶层带 ui_timeout_s（10–3600 秒，默认 600），
+ * 派发时以版本快照为 UI 执行期限。2026-11-08 联动验收发现页面漏发该字段，
+ * 服务端以 validation_error（joint 清单缺少 ui_timeout_s）拒绝——这里收口为纯函数并锁死形状。
+ */
+export function jointVersionPayload(
+  scenario: Record<string, unknown>,
+  sourceId: string,
+  uiTimeout: string,
+): Record<string, unknown> {
+  return { scenario, source_id: sourceId, ui_timeout_s: Number(uiTimeout) }
+}
+
 /** 后端 blocking.reason -> 可读说明；未知原因码保留原文，不吞信息。 */
 const IDENTITY_BLOCKING_TEXT: Record<string, string> = {
   version_name_mismatch: '设备上的 versionName 与构建声明的版本不一致',
@@ -167,6 +180,9 @@ export function SuiteRegistration({ applicationId, testType, suiteId = '', durat
   const [captureHar, setCaptureHar] = useState(false)
   const [framePoll, setFramePoll] = useState(false)
   const [pageMarksText, setPageMarksText] = useState('')
+  // joint 版本的 UI 执行超时（契约必填：manifest.ui_timeout_s，10–3600，默认 600）；
+  // 2026-11-08 联动验收发现页面发布载荷漏发该字段，服务端 validation_error 拒绝。
+  const [uiTimeout, setUiTimeout] = useState('600')
   const parsedPageMarks = parsePageMarks(pageMarksText)
 
   /** 已启用的高级能力 -> scenario 可选字段（未启用的不写键，保持形状干净） */
@@ -212,12 +228,20 @@ export function SuiteRegistration({ applicationId, testType, suiteId = '', durat
     }
     const version = await api.post<{ id: string }>(`/suites/${id}/${testType === 'ui' ? 'discover' : 'versions'}`, testType === 'ui'
       ? { source_id: source }
-      : { scenario: { duration_s: Number(effectiveDuration), items: effectiveItems, ...capabilityScenarioFields() }, ...(testType === 'joint' ? { source_id: source } : {}) })
+      : (testType === 'joint'
+          ? jointVersionPayload(
+              { duration_s: Number(effectiveDuration), items: effectiveItems, ...capabilityScenarioFields() },
+              source,
+              uiTimeout,
+            )
+          : { scenario: { duration_s: Number(effectiveDuration), items: effectiveItems, ...capabilityScenarioFields() } }))
     return { id, versionId: version.id }
   }, onSuccess: result => { onRegistered(result.id, result.versionId); setCreatedId(''); void refresh() } })
   const capabilityValid = parsedPageMarks.invalid.length === 0
+  const uiTimeoutValid = testType !== 'joint' || (/^\d+$/.test(uiTimeout) && Number(uiTimeout) >= 10 && Number(uiTimeout) <= 3600)
   const valid = (testType === 'performance' || validSource)
     && capabilityValid
+    && uiTimeoutValid
     && (testType === 'ui' || (/^\d+$/.test(effectiveDuration) && Number(effectiveDuration) >= 10 && Number(effectiveDuration) <= 3600 && effectiveItems.length > 0))
   return <details ref={detailsRef}><summary>登记{scenarioLabel} / 发布固定版本</summary><div className="form-grid">
     <label>新{scenarioLabel}名称<input maxLength={200} disabled={Boolean(createdId)} value={name} onChange={e => setName(e.target.value)} /></label>
@@ -251,6 +275,17 @@ export function SuiteRegistration({ applicationId, testType, suiteId = '', durat
             <option value="passthrough">passthrough（不解密）</option>
             <option value="decrypt">decrypt（需设备信任代理 CA）</option>
           </select></label>
+          {testType === 'joint' ? (
+            <label>UI 执行超时（秒，10–3600，默认 600）<input
+              type="number"
+              min={10}
+              max={3600}
+              value={uiTimeout}
+              onChange={e => setUiTimeout(e.target.value)}
+            />
+              <span className="field-hint">锁定该版本的 UI 部分执行期限，派发时以此为准</span>
+            </label>
+          ) : null}
           <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input type="checkbox" checked={captureHar} onChange={e => setCaptureHar(e.target.checked)} />
             抓取 HAR 文件（需宿主安装 mitmproxy，未安装时如实标注未判定）

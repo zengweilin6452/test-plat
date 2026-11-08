@@ -73,3 +73,13 @@ test('来源为空时提示需要宿主配置，且不提供路径输入', () =>
   // 有来源时不提示
   assert.equal(suiteSourceEmptyHint({ items: [{ id: 'a', name: 'A', test_types: ['ui'] }], total: 1 }), null)
 })
+
+test('joint 版本发布体必须带 ui_timeout_s（manifest 契约必填）', () => {
+  const { jointVersionPayload } = require('../src/components/InputRegistration.tsx')
+  const body = jointVersionPayload({ duration_s: 30, items: ['CPU'] }, 'calc-smoke', '600')
+  assert.equal(body.source_id, 'calc-smoke')
+  assert.equal(body.ui_timeout_s, 600)
+  assert.equal(body.scenario.duration_s, 30)
+  // 表单值是字符串：Number 归一，非法值会在 valid 门禁里被拦（10–3600）
+  assert.equal(jointVersionPayload({ duration_s: 30, items: ['CPU'] }, 's', '45').ui_timeout_s, 45)
+})
