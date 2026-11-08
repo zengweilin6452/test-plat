@@ -893,6 +893,22 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         setFrameSize((prev) => (prev && prev.w === size.w && prev.h === size.h ? prev : size))
       },
       onError: (code, message) => {
+        if (code === 'closed-4429') {
+          // 视频信道每会话限一个客户端：另一个页面（或僵死的旧连接）正占着画面。
+          setWsNotice('该会话的视频画面已在另一个页面打开；关闭那边的调试工作区后点「重新连接」。')
+          setPreviewMode('jpeg')
+          setPreviewFps(null)
+          setWsStatus('closed')
+          return
+        }
+        if (code === 'closed-4450') {
+          // 平台到 viewer 的视频通道没起来（runner/viewer 已失效）：重连救不了。
+          setWsNotice('视频通道不可用（设备采集服务已失效）；请点「关闭会话」后重新进入设备调试。')
+          setPreviewMode('jpeg')
+          setPreviewFps(null)
+          setWsStatus('closed')
+          return
+        }
         setPreviewNote('H.264 不可用，已回退 JPEG（' + code + '：' + message + '）')
         setPreviewMode('jpeg')
         setPreviewFps(null)

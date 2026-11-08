@@ -1229,13 +1229,21 @@ async def debug_video_socket(websocket: WebSocket, session_id: str) -> None:
     _VIDEO_CLIENTS[sid] = _VIDEO_CLIENTS.get(sid, 0) + 1
 
     upstream = None
+    upstream_failed = False
     try:
-        upstream = await websockets.connect(
-            f"ws://127.0.0.1:{port}{_viewer_device_path('/api/v1/preview/video', str(row['resource_key']))}",
-            max_size=None,
-            origin=f"http://127.0.0.1:{port}",
-        )
-        await upstream.send(json.dumps({"proto": 1}))
+        try:
+            upstream = await websockets.connect(
+                f"ws://127.0.0.1:{port}{_viewer_device_path('/api/v1/preview/video', str(row['resource_key']))}",
+                max_size=None,
+                origin=f"http://127.0.0.1:{port}",
+            )
+            await upstream.send(json.dumps({"proto": 1}))
+        except Exception:
+            # viewer 通道没起来（runner 被杀 / scrcpy 启动失败等）：用专门的
+            # 关闭码告诉前端「重连救不了，需要关闭会话重进」，而不是 1000
+            # 让前端误判成正常结束。
+            upstream_failed = True
+            raise
 
         async def to_client() -> None:
             while True:
@@ -1276,7 +1284,7 @@ async def debug_video_socket(websocket: WebSocket, session_id: str) -> None:
             with contextlib.suppress(Exception):
                 await upstream.close()
         with contextlib.suppress(Exception):
-            await websocket.close(code=1000)
+            await websocket.close(code=4450 if upstream_failed else 1000)
 
 
 @router.websocket("/ws/debug/{session_id}/gesture")

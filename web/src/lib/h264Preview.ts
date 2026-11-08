@@ -269,9 +269,13 @@ export function createH264Preview(options: H264PreviewOptions): H264PreviewHandl
     socket.onerror = () => {
       // close 一定会跟随；回退决策放在 onclose/fail。
     }
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (closed) return
-      fail('closed', 'H.264 视频信道关闭')
+      // 平台用关闭码区分视频信道失败原因（debug.py）：
+      // 4429 = 该会话的视频画面已有客户端（限 1 个）；4403 = 会话/通道未就绪；
+      // 4404 = 会话不存在。带码上报，前端才能给出可行动的提示而不是无限"连接中"。
+      const code = event?.code ? String(event.code) : 'closed'
+      fail('closed-' + code, 'H.264 视频信道关闭（' + code + '）')
     }
   }
 
