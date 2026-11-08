@@ -131,7 +131,7 @@ class MetricOut(BaseModel):
     unit: str = ""
     scope: str | None = None
     window_key: str | None = None
-    statistic: Literal["median", "p95", "mean", "min", "max"]
+    statistic: Literal["median", "p95", "p90", "mean", "min", "max"]
     sample_count: int
     value: float | None = None
     supported: bool = True
@@ -310,14 +310,50 @@ class SuiteCreateIn(BaseModel):
     source_commit: str | None = None
 
 
+class NetOverridesIn(BaseModel):
+    """vendor net_profile=custom 的整形参数（四项必须齐全、非负）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    latency_ms: float = Field(ge=0)
+    down_kbps: float = Field(ge=0)
+    up_kbps: float = Field(ge=0)
+    loss_pct: float = Field(ge=0, le=100)
+
+
+class PageMarkIn(BaseModel):
+    """页面打标：相对采集窗口起点 at_s 秒时对 page 页计一次整页加载起点。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    page: str = Field(min_length=1, max_length=200)
+    at_s: float = Field(ge=0)
+
+
 class PerformanceScenarioIn(BaseModel):
-    """声明式性能场景：固定采集时长 + 实际支持的采集项（不是 pytest 用例）。"""
+    """声明式性能场景：固定采集时长 + 实际支持的采集项（不是 pytest 用例）。
+
+    可选能力字段（2026-11 性能能力接入，缺省即不启用）：
+    start_mode 启动编排（cold/warm）、capture_har 抓 HAR、net_profile/net_tier/
+    net_port/net_mitmdump/net_overrides 网络剖面与代理、frame_poll 逐帧统计、
+    page_marks 页面打标（→ page_load_ms）。取值域在 domain.scenario_problems
+    与 runner perf_config 两端镜像校验。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     duration_s: int = Field(ge=10, le=3600)
     items: list[str] = Field(min_length=1)
     app_package: str | None = None
+    start_mode: Literal["cold", "warm"] | None = None
+    capture_har: bool | None = None
+    net_profile: Literal["none", "4g", "3g", "weak", "custom"] | None = None
+    net_tier: Literal["passthrough", "decrypt"] | None = None
+    net_port: int | None = Field(default=None, ge=1, le=65535)
+    net_mitmdump: str | None = Field(default=None, max_length=500)
+    net_overrides: NetOverridesIn | None = None
+    frame_poll: bool | None = None
+    page_marks: list[PageMarkIn] | None = Field(default=None, max_length=50)
 
 
 class SuiteVersionPublishIn(BaseModel):

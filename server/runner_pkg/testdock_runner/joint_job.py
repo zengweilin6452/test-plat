@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import contextlib
 import os
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +29,10 @@ from typing import Any
 from . import EXIT_INFRA_ERROR
 from .artifacts import collect_layout, write_report_json
 from .env import RunnerContext, ensure_vendor_on_path, fake_enabled
+from .perf_config import (
+    collect_kwargs_from_scenario,
+    page_marks_from_scenario,
+)
 from .perf_recovery import clear_stale_perf_recording
 from .protocol import emit_stage, emit_text
 from .ui_job import (
@@ -80,14 +86,17 @@ def _start_perf_collect(options: UiJobOptions):
 
     返回 CollectScope：with 语义由调用方手动 finalize——性能采集窗口必须
     包围同一次 UI 执行（D8），UI 一返回就 finalize 停采。
-    采集项来自 perf 配置 items，缺省 PSS / 进程 CPU / FPS 三项。
+    采集项来自 perf 配置 items，缺省 CPU / Memory / FPS 三组（items 是
+    SoloPi 分组名，vendor 不做 metric key 归一化）。
+    能力字段（启动编排 / HAR / 网络剖面 / 逐帧）按场景透传，未启用不传。
     """
     ensure_vendor_on_path(options.vendor_dir)
     from mobile_perf.kit import PerfKit
-    from mobile_perf.session import SessionSpec
 
     perf = options.perf or {}
-    items = [str(item) for item in (perf.get("items") or ["mem_pss_mb", "cpu_process_pct", "fps_frame"])]
+    # items 是 SoloPi 采集项**分组名**（CPU/Memory/...）：vendor 不做 metric key
+    # 归一化，传 mem_pss_mb 这类 key 会静默采不到任何数据。
+    items = [str(item) for item in (perf.get("items") or ["CPU", "Memory", "FPS"])]
     if not options.app_package:
         raise ValueError("joint 运行缺少 app_package：采集需要目标前台应用")
     runs_dir = options.artifacts_dir / "perf-runs"
@@ -113,22 +122,56 @@ def _start_perf_collect(options: UiJobOptions):
             adb_path=Path(kit_adb),
             repo_root=repo_root,
         )
-    spec = SessionSpec(
+    # collect() 只构造作用域；真正的 perf-start 在 __enter__ 里发生。不进入就
+    # 直接交给 finalize，会在 UI 跑完后报 "'NoneType' object has no attribute
+    # 'stop'"——采集从未启动，报告却以为性能组件已执行（真机验收发现）。
+    scope = kit.collect(
         target=str(options.app_package),
         items=items,
         host_run_id=str(options.run_id),
         runs_dir=str(runs_dir),
+        **collect_kwargs_from_scenario(perf),
     )
-    # collect() 只构造作用域；真正的 perf-start 在 __enter__ 里发生。不进入就
-    # 直接交给 finalize，会在 UI 跑完后报 "'NoneType' object has no attribute
-    # 'stop'"——采集从未启动，报告却以为性能组件已执行（真机验收发现）。
-    scope = kit.collect(spec)
     try:
         return scope.__enter__()
     except Exception:
         with contextlib.suppress(Exception):
             scope.finalize()
         raise
+
+
+def _start_page_marks(
+    scope: Any, page_marks: list[tuple[float, str]]
+) -> tuple[threading.Event | None, list[str]]:
+    """joint 运行期间按 at_s 偏移调度 scope.mark_page（整页耗时 → page_load_ms）。
+
+    UI 执行阻塞主线程，打标只能由后台线程按时间驱动；失败原因收集进列表，
+    停表后由主线程统一 emit（避免线程内写 stdout 交错损坏协议行）。
+    返回 (stop_event, 错误列表引用)；没有打标任务时返回 (None, errors)。
+    """
+    errors: list[str] = []
+    if not page_marks:
+        return None, errors
+    started = time.monotonic()
+    stop = threading.Event()
+
+    def _run() -> None:
+        next_index = 0
+        while next_index < len(page_marks) and not stop.is_set():
+            at_s, page = page_marks[next_index]
+            remaining = at_s - (time.monotonic() - started)
+            if remaining > 0:
+                if stop.wait(min(remaining, 0.5)):
+                    return
+                continue
+            try:
+                scope.mark_page(page)
+            except Exception as exc:  # noqa: BLE001 - 单页打标失败不吞其余打标
+                errors.append(f"{page}: {exc}"[:200])
+            next_index += 1
+
+    threading.Thread(target=_run, name="joint-page-marks", daemon=True).start()
+    return stop, errors
 
 
 def _ui_window_timeout(options: UiJobOptions) -> int:
@@ -185,6 +228,29 @@ def _write_joint_report(
     if isinstance(vendor_report, dict):
         report_data["metricsSummary"] = vendor_report.get("metricsSummary") or {}
         report_data["thresholdsAtRun"] = vendor_report.get("thresholdsAtRun") or {}
+        # 能力块透传：启动编排 / 整页 / 网络（含 HAR 摘要）/ 接口级 / 卡顿 /
+        # 逐帧与时间轴序列。平台报告端点按 report.json 全量回读，缺了这些块
+        # 前端就无法呈现对应能力（joint 与 perf-only 口径一致）。
+        for key in (
+            "items",
+            "deviceProfile",
+            "serial",
+            "startedAt",
+            "stoppedAt",
+            "durationS",
+            "startup",
+            "pages",
+            "network",
+            "api",
+            "jank",
+            "frames",
+            "series",
+            "marks",
+            "events",
+        ):
+            value = vendor_report.get(key)
+            if value is not None:
+                report_data[key] = value
     write_report_json(options.artifacts_dir, report_data)
 
 
@@ -250,11 +316,15 @@ def run_joint_job(options: UiJobOptions, context: RunnerContext) -> JointJobResu
 
     emit_stage("perf_collect_start", 10, stage=1)
     collect_started_at = _now()
+    page_marks = page_marks_from_scenario(options.perf or {})
 
     scope = None
+    mark_stop: threading.Event | None = None
+    mark_errors: list[str] = []
     if not fake:
         try:
             scope = _start_perf_collect(options)
+            mark_stop, mark_errors = _start_page_marks(scope, page_marks)
         except Exception as exc:  # noqa: BLE001 - 采集启动失败按矩阵收敛为 errored
             emit_text("perf_collect_start_failed", detail=str(exc)[:300])
             return JointJobResult(
@@ -298,6 +368,12 @@ def run_joint_job(options: UiJobOptions, context: RunnerContext) -> JointJobResu
     }
 
     # UI 一返回立即停采：正常结束与超时都必须先收口（不补采、不等样本，D11）。
+    # 先停页面打标线程再 finalize，避免收口后线程还向 scope 打标。
+    if mark_stop is not None:
+        mark_stop.set()
+        time.sleep(0)  # 让已到点的 mark_page 有机会执行完（线程内不再有长阻塞）
+    for detail in mark_errors:
+        emit_text("page_mark_failed", detail=detail)
     vendor_report, perf_stop_error = _stop_collection(scope)
     collect_stopped_at = _now()
     emit_stage("perf_collect_stop", 90, stage=2)

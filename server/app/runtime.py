@@ -754,6 +754,12 @@ def _report_json_payload(run_id: str) -> dict[str, Any]:
             # 之前只挑 4 个键，采集窗口在全链路上被丢掉（工单 07 缺陷 4）。
             if isinstance(loaded.get("collectWindow"), dict):
                 picked["collectWindow"] = loaded["collectWindow"]
+            # 能力块透传（2026-11 性能能力接入）：启动编排 / 整页 / 网络（含 HAR
+            # 摘要）/ 接口级 / 卡顿分级 / 逐帧。报告端点据此呈现对应能力；
+            # vendor 未产出时picked 里没有键 -> 报告视图为 null（通道未启用）。
+            for block in ("startup", "pages", "network", "api", "jank", "frames"):
+                if isinstance(loaded.get(block), dict):
+                    picked[block] = loaded[block]
 
     # junit.xml 是证据里的权威用例计数，report.json 未必带；缺的时候从这里补，
     # 报告页才能显示"跑了几个用例 / 几个失败"。

@@ -1287,6 +1287,15 @@ async def _report_view(session: AsyncSession, run_id: str) -> dict:
         # joint 的采集窗口（真实时间戳）：窗口必须覆盖 UI 执行窗，
         # 报告页据此说明"采集确实包围了这次 UI 执行"。
         "collectWindow": source.get("collectWindow"),
+        # 能力块透传（2026-11 性能能力接入）：启动编排 / 整页 / 网络（含 HAR
+        # 摘要）/ 接口级 / 卡顿分级 / 逐帧统计。vendor 未产出对应块时为 null，
+        # 前端据此区分「通道未启用」与「启用但 not_tested」。
+        "startup": source.get("startup"),
+        "pages": source.get("pages"),
+        "network": source.get("network"),
+        "api": source.get("api"),
+        "jank": source.get("jank"),
+        "frames": source.get("frames"),
         "reason": view["reason_code"],
         "reasonText": view["not_tested_reason"] or view["reason_code"],
         "evaluatedAt": view["ended_at"],

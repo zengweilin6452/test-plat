@@ -100,6 +100,9 @@ def classify(path: Path, relative_key: str) -> str:
         return "log"
     if suffix in (".zip", ".trace", ".perfetto", ".jsonl.gz"):
         return "trace"
+    if suffix == ".har":
+        # vendor mobile_perf 的 HAR 1.2 抓包文件（migration 0011 起 kind 枚举含 har）
+        return "har"
     if suffix in (".csv", ".parquet") and ("metric" in name or "perf" in name):
         return "metric_series"
     if suffix == ".html":
@@ -114,6 +117,8 @@ def classify(path: Path, relative_key: str) -> str:
 
 
 def mime_for(path: Path) -> str:
+    if path.suffix.lower() == ".har":
+        return "application/json"  # HAR 1.2 是 JSON；mimetypes 不认识 .har
     guessed, _ = mimetypes.guess_type(str(path))
     if guessed:
         return guessed
