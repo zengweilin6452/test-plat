@@ -186,6 +186,67 @@ def test_dispatch_happy_path_passes_suite_root_and_verifies_identity(
     assert not {"install", "tcpip", "connect", "push", "reboot"} & set(tokens)
 
 
+def test_dispatch_records_started_at_and_finalize_keeps_started_before_ended(
+    client, project, make_run, sync_engine, spawns, fake_adb, tmp_path
+):
+    """领取阶段写 started_at，收敛 completed 后 started_at < ended_at。
+
+    2026-11-08 真机验收（release-readiness 02）发现：started_at 留空到收敛，
+    由 finalize 在同一事务里回填 now()，与 ended_at 同值——报告耗时恒为 0s，
+    started_at 也不再反映真实执行起点。
+    """
+    _learn_identity(sync_engine, project, "1.0.0")
+    fake_adb.configure(
+        devices=[{"serial": project["resources"][0]["serial"]}],
+        packages={
+            f"com.example.p3{project['suffix']}": {"versionName": "1.0.0"}
+        },
+    )
+    import asyncio
+
+    from app.scheduler.dispatcher import dispatch_one
+
+    run_id = make_run(state="queued", request_key=str(uuid.uuid4()))
+    outcome = asyncio.run(dispatch_one(run_id=run_id))
+    assert outcome.ok is True, outcome.reason
+
+    with sync_engine.connect() as conn:
+        started = conn.execute(
+            text("SELECT started_at FROM test_runs WHERE id = CAST(:id AS uuid)"),
+            {"id": run_id},
+        ).scalar_one()
+    assert started is not None, "领取（lease_acquired）必须写入 started_at"
+
+    # 模拟 runner 退出后的收敛事务（独立的、晚于领取的收敛事务）
+    from app import runtime
+
+    artifacts = tmp_path / "artifacts-started-at"
+    artifacts.mkdir()
+    (artifacts / "junit.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<testsuites><testsuite name="pytest" tests="1" failures="0" errors="0" skipped="0">'
+        '<testcase classname="t" name="test_a" time="0.1"/>'
+        "</testsuite></testsuites>\n",
+        encoding="utf-8",
+    )
+    reset_db_engine(TEST_DB)
+    asyncio.run(
+        runtime.finalize_run(
+            run_id=run_id,
+            state="completed",
+            artifacts_dir=artifacts,
+            release_lease_reason="pytest",
+        )
+    )
+    with sync_engine.connect() as conn:
+        ended = conn.execute(
+            text("SELECT ended_at FROM test_runs WHERE id = CAST(:id AS uuid)"),
+            {"id": run_id},
+        ).scalar_one()
+    assert ended is not None
+    assert started < ended, "收敛事务晚于领取事务，ended_at 必须严格晚于 started_at"
+
+
 def test_identity_mismatch_blocks_dispatch(client, project, make_run, sync_engine, spawns, fake_adb):
     """设备上的 versionName 与固定基准不一致：errored(identity_mismatch)，不 spawn。"""
     _learn_identity(sync_engine, project, "9.9.9")

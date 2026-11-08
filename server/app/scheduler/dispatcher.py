@@ -34,6 +34,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
@@ -503,6 +504,10 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
                 config["suite_sha256"] = execution_copy.tree_sha256
             lease_details = lease.as_details()
             # acquire_lease 已在同一事务内绑定资源，随后迁移状态。
+            # started_at 必须在领取阶段写实值：收敛链路在一个事务里连跳
+            # DISPATCHING→COMPLETED，若留给 runtime 的 started_at IS NULL
+            # 兜底回填，started_at 会拿到收敛事务的 now()，与 ended_at 同值
+            # （2026-11-08 真机验收实证：报告耗时恒为 0s）。
             await runs_mod.transition(
                 session,
                 rid,
@@ -510,6 +515,7 @@ async def dispatch_one(run_id: str | uuid.UUID | None = None) -> DispatchOutcome
                 runs_mod.STATE_DISPATCHING,
                 reason="lease_acquired",
                 actor=holder,
+                extras={"started_at": datetime.now(UTC)},
             )
             await events_mod.append_event(
                 session,
