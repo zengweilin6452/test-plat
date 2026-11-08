@@ -185,6 +185,51 @@ export function preferredLocator(node: SnapshotTreeNode): { by: LocatorBy; value
   return null
 }
 
+const U2_SHORT_CLASS = (className: string | null | undefined) => {
+  const full = (className ?? '').trim()
+  if (!full) return ''
+  return full.split('.').pop() || full
+}
+
+/**
+ * 按定位方式从选中节点生成对应形态的定位值（vendor selectors.py 契约）：
+ * u2_selector 必须是白名单 JSON object（resourceId/text/description/className
+ * 等字符串字段），xpath 是表达式——切类型不复用原文，否则验证必然
+ * InvalidTarget（如 u2 选择器拿到纯文本）。节点给不出该形态时返回空串，
+ * 由调用方如实留空提示，不猜值。
+ */
+export function locatorValueForNode(by: LocatorBy, node: SnapshotTreeNode | null): string {
+  if (!node) return ''
+  const text = (node.text ?? '').trim()
+  switch (by) {
+    case 'resource_id':
+      return (node.resource_id ?? '').trim()
+    case 'text':
+      return text
+    case 'accessibility_id':
+      return (node.content_desc ?? '').trim()
+    case 'u2_selector': {
+      if ((node.resource_id ?? '').trim()) {
+        return JSON.stringify({ resourceId: (node.resource_id ?? '').trim() })
+      }
+      if (text) return JSON.stringify({ text })
+      if ((node.content_desc ?? '').trim()) {
+        return JSON.stringify({ description: (node.content_desc ?? '').trim() })
+      }
+      const shortClass = U2_SHORT_CLASS(node.class_name)
+      return shortClass ? JSON.stringify({ className: shortClass }) : ''
+    }
+    case 'xpath': {
+      const shortClass = U2_SHORT_CLASS(node.class_name)
+      if (!shortClass) return ''
+      if (text) return `//${shortClass}[@text='${text.replace(/'/g, "\\'")}']`
+      return `//${shortClass}`
+    }
+    case 'image':
+      return ''
+  }
+}
+
 /** 层级树节点：vendor 用 children 存下标，渲染前先按 index 建表 */
 export function buildTreeIndex(nodes: SnapshotTreeNode[]): {
   byIndex: Map<number, SnapshotTreeNode>
@@ -1667,7 +1712,14 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                       定位方式
                       <select
                         value={locatorBy}
-                        onChange={(event) => setLocatorBy(event.target.value as LocatorBy)}
+                        onChange={(event) => {
+                          const nextBy = event.target.value as LocatorBy
+                          setLocatorBy(nextBy)
+                          // 切换定位方式时按选中节点生成该形态的定位值：
+                          // u2 selector 需要 JSON、xpath 需要表达式，直接沿用
+                          // 上一形态的原文会被 vendor 判 InvalidTarget。
+                          setLocator(locatorValueForNode(nextBy, selected))
+                        }}
                       >
                         {LOCATOR_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>{option.label}</option>
@@ -1679,8 +1731,20 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                       <input
                         value={locator}
                         onChange={(event) => setLocator(event.target.value)}
-                        placeholder={locatorBy === 'image' ? '模板逻辑名，如 buttons/confirm.png' : '文本 / resource-id / xpath'}
+                        placeholder={
+                          locatorBy === 'image'
+                            ? '模板逻辑名，如 buttons/confirm.png'
+                            : locatorBy === 'u2_selector'
+                              ? 'JSON，如 {"text": "登录"}'
+                              : '文本 / resource-id / xpath'
+                        }
                       />
+                      {locatorBy === 'u2_selector' ? (
+                        <span className="field-hint">u2 selector 需为 JSON object（resourceId/text/description/className 等白名单字段）；选中节点后切换会自动生成</span>
+                      ) : null}
+                      {locatorBy === 'xpath' ? (
+                        <span className="field-hint">xpath 为表达式（如 //TextView[@text='首页']）；选中节点后切换会自动生成</span>
+                      ) : null}
                     </label>
                     {locatorBy === 'image' ? (
                       <label className="full">
