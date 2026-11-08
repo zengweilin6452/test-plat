@@ -102,6 +102,11 @@ class RunnerContext:
                     if getattr(exc, "fence_mismatch", False):
                         with self._lock:
                             self.fence_lost = True
+                    # 401/403 = 平台已不认这个 runner（API 重启换 token）：不是
+                    # 抖动，续租永远不可达，标记 fence 丢失让主流程尽快退出。
+                    if getattr(exc, "auth_lost", False):
+                        with self._lock:
+                            self.fence_lost = True
                     continue
                 if isinstance(reply, dict):
                     if reply.get("cancel"):
@@ -136,7 +141,7 @@ class RunnerContext:
         try:
             reply = self.control.check_fence(self.fencing_token)  # type: ignore[attr-defined]
         except Exception as exc:  # noqa: BLE001
-            if getattr(exc, "fence_mismatch", False):
+            if getattr(exc, "fence_mismatch", False) or getattr(exc, "auth_lost", False):
                 with self._lock:
                     self.fence_lost = True
                 return False

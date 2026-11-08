@@ -1,5 +1,5 @@
 /**
- * 页签（原型 .tabs 下划线式 + .pill-tabs 胶囊式）。
+ * 页签（原型 .tabs 下划线式）。
  * 受控组件：当前值由父级持有，切换时回调。
  */
 import type { ReactNode } from 'react'
@@ -15,7 +15,6 @@ interface TabsProps<T extends string> {
   items: readonly TabItem<T>[]
   active: T
   onChange: (value: T) => void
-  variant?: 'line' | 'pill'
   /** 页签栏右侧的操作区 */
   action?: ReactNode
   /** 无障碍标签 */
@@ -26,12 +25,11 @@ export function Tabs<T extends string>({
   items,
   active,
   onChange,
-  variant = 'line',
   action,
   ariaLabel,
 }: TabsProps<T>) {
   const bar = (
-    <div className={variant === 'pill' ? 'pill-tabs' : 'tabs'} role="tablist" aria-label={ariaLabel}>
+    <div className="tabs" role="tablist" aria-label={ariaLabel}>
       {items.map((item) => {
         const on = item.value === active
         return (
@@ -52,7 +50,7 @@ export function Tabs<T extends string>({
   )
   if (!action) return bar
   return (
-    <div className="between" style={{ marginBottom: variant === 'pill' ? 12 : 0 }}>
+    <div className="between">
       {bar}
       <div className="flex">{action}</div>
     </div>

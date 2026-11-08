@@ -9,6 +9,7 @@
  * 硬约束：断言结果与失败现场都来自后端，接口未接入时只显示空态。
  */
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import {
@@ -166,7 +167,7 @@ export function UiPage() {
   function openTaskOfRun(run: RunRecord) { setActiveRunId(run.id) }
 
   function handleCreated(created: CreateTaskResponse) {
-    toast.show('任务已创建：' + created.display_id + '（编号 ' + created.id + '）')
+    toast.show('任务已创建：' + created.display_id + '（编号 ' + created.id + '）', 'success')
     setWizardOpen(false)
     void queryClient.invalidateQueries({ queryKey: ['tasks'] })
     void queryClient.invalidateQueries({ queryKey: ['runs'] })
@@ -197,10 +198,26 @@ export function UiPage() {
     enabled: tab === 'debug',
     retry: false,
   })
-  const readyDevices = useMemo(
-    () => (resourcesQuery.data?.items ?? []).filter((item) => item.status === 'ready' && !item.busy),
-    [resourcesQuery.data],
-  )
+  // 调试设备按 serial 去重：同一物理设备按项目各登记一行（INV-09），
+  // 不去重调试下拉会出现 N 个同 serial 选项；会话按 serial 创建，选哪行等价。
+  // 当前上下文项目的行优先保留，保证会话归属跟随项目过滤。
+  const readyDevices = useMemo(() => {
+    const rows = (resourcesQuery.data?.items ?? []).filter(
+      (item) => item.status === 'ready' && !item.busy,
+    )
+    const byKey = new Map<string, ResourceRecord>()
+    for (const row of rows) {
+      const existing = byKey.get(row.resource_key)
+      if (existing === undefined) {
+        byKey.set(row.resource_key, row)
+        continue
+      }
+      const preferCurrent =
+        ctx.projectId && row.project_id === ctx.projectId && existing.project_id !== ctx.projectId
+      if (preferCurrent) byKey.set(row.resource_key, row)
+    }
+    return [...byKey.values()]
+  }, [resourcesQuery.data, ctx.projectId])
   useEffect(() => {
     if (tab === 'debug' && !debugTarget && readyDevices[0]) setDebugTarget(toDebugTarget(readyDevices[0]))
   }, [tab, debugTarget, readyDevices])
@@ -445,7 +462,7 @@ export function UiPage() {
         />
         {tab === 'runs' ? (
           <>
-            <div style={{ padding: '0 20px' }}>
+            <div style={{ padding: '0 var(--space-9)' }}>
               <Toolbar search={keyword} onSearch={setKeyword}>
                 <span className="muted small">按运行名称或编号搜索</span>
               </Toolbar>
@@ -459,6 +476,13 @@ export function UiPage() {
                 icon="phone"
                 title={runsEmptyCopy.title}
                 description={runsEmptyCopy.description}
+                actions={
+                  planned ? null : (
+                    <Link className="btn" to="/tasks">
+                      前往任务中心发起运行
+                    </Link>
+                  )
+                }
               />
             ) : (
               <Table
@@ -477,7 +501,7 @@ export function UiPage() {
           <>
             {currentApp ? <div className="panel-pad"><SuiteRegistration key={currentApp.id} applicationId={currentApp.id} testType="ui" onRegistered={(id) => { setSuiteId(id); void queryClient.invalidateQueries({ queryKey: ['suites'] }); void queryClient.invalidateQueries({ queryKey: ['suite-versions'] }) }} /></div> : null}
             {suitesError ? (
-              <div className="mb" style={{ padding: '0 20px' }}>
+              <div className="mb" style={{ padding: '0 var(--space-9)' }}>
                 <Notice tone="red" title={'套件列表获取失败（' + suitesError.code + '）'}>
                   {suitesError.message}
                 </Notice>
@@ -523,21 +547,21 @@ export function UiPage() {
           <>
             <div className="panel-pad"><Button size="small" onClick={() => setTab('suites')}>返回测试套件</Button></div>
             {suitesError ? (
-              <div className="mb" style={{ padding: '0 20px' }}>
+              <div className="mb" style={{ padding: '0 var(--space-9)' }}>
                 <Notice tone="red" title={'套件列表获取失败（' + suitesError.code + '）'}>
                   {suitesError.message}
                 </Notice>
               </div>
             ) : null}
             {versionsError ? (
-              <div className="mb" style={{ padding: '0 20px' }}>
+              <div className="mb" style={{ padding: '0 var(--space-9)' }}>
                 <Notice tone="red" title={'套件版本获取失败（' + versionsError.code + '）'}>
                   {versionsError.message}
                 </Notice>
               </div>
             ) : null}
             {activeSuiteId ? (
-              <div style={{ padding: '0 20px' }}>
+              <div style={{ padding: '0 var(--space-9)' }}>
                 <Toolbar>
                   <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     套件
@@ -583,7 +607,7 @@ export function UiPage() {
               </div>
             ) : null}
             {copyNotice ? (
-              <div className="mb" style={{ padding: '0 20px' }}>
+              <div className="mb" style={{ padding: '0 var(--space-9)' }}>
                 <Notice tone="amber" title={'v' + (activeVersion?.version ?? '') + ' 没有固定代码副本'}>
                   {copyNotice}
                 </Notice>

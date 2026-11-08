@@ -91,8 +91,8 @@ export function RunDrawer({ open, runId, onClose }: { open: boolean; runId: stri
         {run.cancel_requested ? <p role="status">已受理取消请求，最终状态以执行停止后的结果为准。</p> : null}
       </section>
       <section className="drawer-section"><h3>执行组件</h3>{run.components.length ? run.components.map(component => <p key={component.kind}>{component.kind} · <StatusBadge status={displayStatus(component.state, component.outcome)} /></p>) : <p className="muted">暂无组件</p>}</section>
-      <section className="drawer-section"><h3>执行时间线</h3>{tracking.data!.events.length ? <ol>{tracking.data!.events.map(event => <li key={event.sequence}><strong>#{event.sequence} {event.event_type}</strong> · {fmtDateTime(event.occurred_at)}<pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(event.payload, null, 2)}</pre></li>)}</ol> : <p className="muted">暂无执行事件</p>}</section>
-      <section className="drawer-section"><h3>固定执行配置</h3><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(run.config_snapshot, null, 2)}</pre></section>
+      <section className="drawer-section"><h3>执行时间线</h3>{tracking.data!.events.length ? <ol>{tracking.data!.events.map(event => <li key={event.sequence}><strong>#{event.sequence} {event.event_type}</strong> · {fmtDateTime(event.occurred_at)}<pre className="code-block">{JSON.stringify(event.payload, null, 2)}</pre></li>)}</ol> : <p className="muted">暂无执行事件</p>}</section>
+      <section className="drawer-section"><h3>固定执行配置</h3><pre className="code-block">{JSON.stringify(run.config_snapshot, null, 2)}</pre></section>
     </> : null}
     <section className="drawer-section"><h3>运行证据</h3>{artifacts.isError ? <Notice tone="red" title="证据读取失败">{describeError(artifacts.error).message}</Notice> : artifacts.isLoading ? <p>正在加载证据…</p> : !artifacts.data?.items.length ? <p className="muted">暂无可用证据</p> : artifacts.data.items.map(item => <p key={item.id}>{item.availability === 'available' && item.download_url ? <a href={item.download_url}>{item.logical_key}</a> : <span>{item.logical_key} · {item.availability}</span>}</p>)}</section>
   </Drawer>

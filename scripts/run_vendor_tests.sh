@@ -26,6 +26,10 @@ if [ "$MODE" = "pathonly" ]; then
   export PYTHONPATH="$REPO_ROOT/vendor/mobile_auto/src:$REPO_ROOT/vendor/mobile_perf/src${PYTHONPATH:+:$PYTHONPATH}"
 fi
 
+# 包根也进 PYTHONPATH：mobile_perf 新测试跨模块导入 tests.unit.test_kit，
+# 需要能以 tests 包解析 vendor/<pkg>/tests（与源仓库在其根目录跑 pytest 同构）。
+export PYTHONPATH="$REPO_ROOT/vendor/mobile_auto:$REPO_ROOT/vendor/mobile_perf${PYTHONPATH:+:$PYTHONPATH}"
+
 # 临时目录收进仓库内（F17）；宿主上也可安全使用
 RUNTIME="$REPO_ROOT/.runtime"
 export TMP="$RUNTIME/tmp"

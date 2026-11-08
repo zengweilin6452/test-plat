@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from . import ui_job
 from .artifacts import collect_layout, write_report_json
 from .env import Deadline, RunnerContext, ensure_vendor_on_path, fake_enabled
-from .perf_config import scenario_problems
+from .perf_config import collect_kwargs_from_scenario, page_marks_from_scenario, scenario_problems
 from .perf_recovery import clear_stale_perf_recording
 from .protocol import emit_stage, emit_text
 from .ui_job import UiJobOptions, UiJobResult
@@ -132,10 +132,28 @@ def run_perf_job(options: UiJobOptions, context: RunnerContext) -> UiJobResult:
         context.set_stage("ready", 20, stage=1)
         context.set_stage("collect", 40, stage=2)
         emit_stage("collect", 40)
+        # 能力字段（启动编排 / HAR / 网络剖面 / 逐帧统计）按场景透传给 vendor；
+        # 未启用的不传，保持 vendor 默认。mitmdump 缺失等运行时问题由 vendor
+        # 如实降级为 notTested + hint，不会让采集失败。
+        collect_kwargs = collect_kwargs_from_scenario(perf)
+        page_marks = page_marks_from_scenario(perf)
         with kit.collect(target=options.app_package, items=items, host_run_id=options.run_id,
-                         runs_dir=artifacts_dir / "perf") as scope:
-            stop_at = time.monotonic() + duration
+                         runs_dir=artifacts_dir / "perf", **collect_kwargs) as scope:
+            window_started = time.monotonic()
+            stop_at = window_started + duration
+            next_mark = 0
             while time.monotonic() < stop_at:
+                # 页面打标：到达 at_s 即向 vendor 记一次整页加载起点（page_load_ms）。
+                # 打标失败如实留事件，不中断采集（vendor 侧会按缺帧/超时给 notTested）。
+                while next_mark < len(page_marks):
+                    at_s, page = page_marks[next_mark]
+                    if time.monotonic() - window_started < at_s:
+                        break
+                    try:
+                        scope.mark_page(page)
+                    except Exception as exc:  # noqa: BLE001 - 打标失败不吞采集
+                        emit_text("page_mark_failed", detail=f"{page}: {exc}"[:200])
+                    next_mark += 1
                 if context.cancelled():
                     interrupted = UiJobResult(4, "cancelled", cancelled=True)
                     break

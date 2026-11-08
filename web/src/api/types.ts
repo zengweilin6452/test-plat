@@ -17,6 +17,8 @@ export interface DebugSessionRecord {
   purpose?: string | null
   created_at?: string | null
   closed_at?: string | null
+  /** 终态时后端从审计回填的关闭原因（client_closed / runner_exit / local_lease_busy…） */
+  close_reason?: string | null
 }
 
 /** POST /api/v1/debug-sessions/{id}/control —— 控制权状态（token 永不下发） */
@@ -209,9 +211,53 @@ export interface RunReport {
     ui: { started_at: string; ended_at: string; timeout_s: number }
   } | null
   thresholdsAtRun?: Record<string, unknown> | null
+  /**
+   * 能力块透传（2026-11 性能能力接入，报告端点原样回读 report.json）：
+   * startup 启动编排、pages 整页耗时、network 网络剖面（含 HAR 摘要）、
+   * api 接口级指标。vendor 未产出对应块时为 null —— 表示通道未启用，
+   * 与「启用但 not_tested」区分。
+   */
+  startup?: {
+    mode?: string | null
+    metricKey?: string | null
+    ms?: number | null
+    status?: string | null
+    error?: string | null
+    msSource?: string | null
+    launchState?: string | null
+  } | null
+  pages?: {
+    status?: string | null
+    pages?: Array<{
+      page?: string | null
+      status?: string | null
+      pageLoadMs?: number | null
+      reason?: string | null
+    }> | null
+    notTestedReason?: string | null
+  } | null
+  network?: {
+    profile?: string | null
+    tier?: string | null
+    har?: {
+      status?: string | null
+      entries?: number | null
+      sizeBytes?: number | null
+      path?: string | null
+      notTestedReason?: string | null
+    } | null
+  } | null
+  api?: {
+    status?: string | null
+    notTestedReason?: string | null
+    reqCount?: number | null
+    errorRatePct?: number | null
+  } | null
   reason?: string | null
   reasonText?: string | null
   evaluatedAt?: string | null
+  /** 在线查看报告地址（GET /runs/{id}/report/view，后端拼好）；前端不自己拼路径 */
+  view_url?: string | null
   /** live = 真跑产物；imported = 导入补录 */
   mode?: 'live' | 'imported' | string | null
   vendorReports?: { kind?: string | null; artifact_id?: string | null }[] | null
@@ -237,6 +283,8 @@ export interface RunArtifact {
   created_at?: string | null
   /** 由后端拼接，前端不自己拼路径；仅 available 才有 */
   download_url?: string | null
+  /** 在线查看地址（仅 report_html 且 available；后端拼好，前端不自己拼路径） */
+  view_url?: string | null
   [key: string]: unknown
 }
 
@@ -491,6 +539,17 @@ export interface RunAnalysis {
   components?: { id: string; kind?: string | null; state?: string | null; outcome?: string | null; reason_code?: string | null }[] | null
   evaluations?: AnalysisEvaluation[] | null
   baseline_options?: BaselineOption[] | null
+  /** 泄漏趋势（vendor leak 同口径）：performance/joint 才有，样本不足时 slopeMbPerDay=null */
+  leakTrend?: {
+    metric?: string | null
+    slopeMbPerDay?: number | null
+    confidence?: 'ok' | 'low' | 'insufficient' | string | null
+    confidenceReason?: string | null
+    runCount?: number | null
+    spanHours?: number | null
+    firstMedian?: number | null
+    lastMedian?: number | null
+  } | null
   trial?: unknown
   [key: string]: unknown
 }

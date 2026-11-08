@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { RunDrawer } from '../components/RunDrawer'
 import { TaskWizard } from '../components/TaskWizard'
 /**
@@ -22,7 +23,7 @@ import { Icon } from '../components/Icon'
 import { Notice } from '../components/Notice'
 import { Progress } from '../components/Progress'
 import { StatCard } from '../components/StatCard'
-import { TargetCardGrid } from '../components/TargetCard'
+import { TargetChipRow } from '../components/TargetCard'
 import { moduleName, SCOPE_OPTIONS, TARGET_CATALOG } from '../constants'
 import { DASH, fmtDateTime } from '../lib/fmt'
 import { displayStatus } from '../lib/display'
@@ -152,12 +153,13 @@ export function OverviewPage() {
         extra={<span className="muted small">仅展示当前目标端的数据</span>}
       />
 
+      {/* 渐进式披露：目标端从三张大卡压缩为一行 chips，能力说明收进 chip 内 */}
       <div className="mb">
-        <div className="between" style={{ marginBottom: 12 }}>
+        <div className="between" style={{ marginBottom: 8 }}>
           <h2>目标端</h2>
           <span className="muted small">当前：{scopeLabel}</span>
         </div>
-        <TargetCardGrid scope={targetScope} onSelect={setTargetScope} />
+        <TargetChipRow scope={targetScope} onSelect={setTargetScope} />
       </div>
 
       {overviewError ? (
@@ -186,9 +188,9 @@ export function OverviewPage() {
           value={overview ? overview.needs_attention : null}
           foot={overview ? `未通过 ${overview.failed} + 未判定 ${overview.not_tested}` : '未通过 + 未判定'}
           extra={
-            <a className="link-btn" href="#/reports" aria-label="查看需要关注的报告">
+            <Link className="link-btn" to="/reports" aria-label="查看需要关注的报告">
               查看报告 ›
-            </a>
+            </Link>
           }
         />
         <StatCard
@@ -257,6 +259,11 @@ export function OverviewPage() {
               icon="tasks"
               title={recentRunsCopy('empty').title}
               description={recentRunsCopy('empty').description}
+              actions={
+                <Button kind="primary" icon="plus" onClick={() => setWizardOpen(true)}>
+                  新建测试任务
+                </Button>
+              }
             />
           ) : (
             <ul className="run-mini-list">
@@ -285,7 +292,7 @@ export function OverviewPage() {
           <div className="muted small">
             目标端：Android / iOS / Web · 已接入：Android UI 自动化与性能采集
           </div>
-          <a className="link-btn" href="#/ui">进入 UI 自动化 ›</a>
+          <Link className="link-btn" to="/ui">进入 UI 自动化 ›</Link>
         </Panel>
         <Panel>
           <PanelHead title="性能测试" hint="门禁判定全部由后端完成" />
@@ -295,7 +302,7 @@ export function OverviewPage() {
           <div className="muted small">
             <Icon name="pulse" size={13} /> 指标：内存 / CPU / 帧率 / GPU
           </div>
-          <a className="link-btn" href="#/perf">进入性能测试 ›</a>
+          <Link className="link-btn" to="/perf">进入性能测试 ›</Link>
         </Panel>
       </div>
 

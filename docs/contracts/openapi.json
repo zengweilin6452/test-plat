@@ -1686,6 +1686,38 @@
         }
       }
     },
+    "/api/v1/runs/{run_id}/artifacts/{artifact_id}/view": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
     "/api/v1/runs/{run_id}/cancel": {
       "post": {
         "parameters": [
@@ -1856,6 +1888,33 @@
       }
     },
     "/api/v1/runs/{run_id}/report/export": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true
+          }
+        ],
+        "request": null,
+        "responses": {
+          "200": {},
+          "400": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "422": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          },
+          "500": {
+            "$ref": "#/components/schemas/ErrorEnvelope"
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{run_id}/report/view": {
       "get": {
         "parameters": [
           {
@@ -3346,6 +3405,41 @@
       "title": "LegacyApplyIn",
       "type": "object"
     },
+    "NetOverridesIn": {
+      "additionalProperties": false,
+      "description": "vendor net_profile=custom 的整形参数（四项必须齐全、非负）。",
+      "properties": {
+        "down_kbps": {
+          "minimum": 0.0,
+          "title": "Down Kbps",
+          "type": "number"
+        },
+        "latency_ms": {
+          "minimum": 0.0,
+          "title": "Latency Ms",
+          "type": "number"
+        },
+        "loss_pct": {
+          "maximum": 100.0,
+          "minimum": 0.0,
+          "title": "Loss Pct",
+          "type": "number"
+        },
+        "up_kbps": {
+          "minimum": 0.0,
+          "title": "Up Kbps",
+          "type": "number"
+        }
+      },
+      "required": [
+        "latency_ms",
+        "down_kbps",
+        "up_kbps",
+        "loss_pct"
+      ],
+      "title": "NetOverridesIn",
+      "type": "object"
+    },
     "OnboardingStatusOut": {
       "additionalProperties": true,
       "properties": {
@@ -3478,9 +3572,32 @@
       "title": "OverviewOut",
       "type": "object"
     },
+    "PageMarkIn": {
+      "additionalProperties": false,
+      "description": "页面打标：相对采集窗口起点 at_s 秒时对 page 页计一次整页加载起点。",
+      "properties": {
+        "at_s": {
+          "minimum": 0.0,
+          "title": "At S",
+          "type": "number"
+        },
+        "page": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Page",
+          "type": "string"
+        }
+      },
+      "required": [
+        "page",
+        "at_s"
+      ],
+      "title": "PageMarkIn",
+      "type": "object"
+    },
     "PerformanceScenarioIn": {
       "additionalProperties": false,
-      "description": "声明式性能场景：固定采集时长 + 实际支持的采集项（不是 pytest 用例）。",
+      "description": "声明式性能场景：固定采集时长 + 实际支持的采集项（不是 pytest 用例）。\n\n可选能力字段（2026-11 性能能力接入，缺省即不启用）：\nstart_mode 启动编排（cold/warm）、capture_har 抓 HAR、net_profile/net_tier/\nnet_port/net_mitmdump/net_overrides 网络剖面与代理、frame_poll 逐帧统计、\npage_marks 页面打标（→ page_load_ms）。取值域在 domain.scenario_problems\n与 runner perf_config 两端镜像校验。",
       "properties": {
         "app_package": {
           "anyOf": [
@@ -3493,11 +3610,33 @@
           ],
           "title": "App Package"
         },
+        "capture_har": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Capture Har"
+        },
         "duration_s": {
           "maximum": 3600.0,
           "minimum": 10.0,
           "title": "Duration S",
           "type": "integer"
+        },
+        "frame_poll": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Frame Poll"
         },
         "items": {
           "items": {
@@ -3506,6 +3645,104 @@
           "minItems": 1,
           "title": "Items",
           "type": "array"
+        },
+        "net_mitmdump": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Net Mitmdump"
+        },
+        "net_overrides": {
+          "anyOf": [
+            {
+              "$ref": "#/components/schemas/NetOverridesIn"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "net_port": {
+          "anyOf": [
+            {
+              "maximum": 65535.0,
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Net Port"
+        },
+        "net_profile": {
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "4g",
+                "3g",
+                "weak",
+                "custom"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Net Profile"
+        },
+        "net_tier": {
+          "anyOf": [
+            {
+              "enum": [
+                "passthrough",
+                "decrypt"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Net Tier"
+        },
+        "page_marks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/components/schemas/PageMarkIn"
+              },
+              "maxItems": 50,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Page Marks"
+        },
+        "start_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "cold",
+                "warm"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Start Mode"
         }
       },
       "required": [
@@ -3753,6 +3990,17 @@
           "title": "Project Id",
           "type": "string"
         },
+        "project_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Project Name"
+        },
         "resource_key": {
           "title": "Resource Key",
           "type": "string"
@@ -3992,6 +4240,17 @@
             }
           ],
           "title": "Test Type"
+        },
+        "view_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "View Url"
         }
       },
       "required": [

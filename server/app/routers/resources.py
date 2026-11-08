@@ -603,12 +603,14 @@ async def list_resources(
                r.profile_id, r.last_seen_at,
                l.run_id AS lease_run_id, l.debug_session_id AS lease_debug_id,
                l.check_id AS lease_check_id,
-               p.name AS profile_name, p.spec
+               p.name AS profile_name, p.spec,
+               pj.name AS project_name
           FROM execution_resources r
           LEFT JOIN resource_leases l
                  ON l.resource_id = r.id AND l.released_at IS NULL
           LEFT JOIN resource_profiles p
                  ON p.id = r.profile_id AND p.project_id = r.project_id
+          LEFT JOIN projects pj ON pj.id = r.project_id
     """
     conditions = []
     if status is not None:
@@ -630,6 +632,9 @@ async def list_resources(
             {
                 "id": row["id"],
                 "project_id": row["project_id"],
+                # 同物理设备按项目各登记一行（设计如此）；项目名让前端能区分
+                # 「N 台设备」和「1 台设备 × N 个项目」
+                "project_name": row["project_name"],
                 "node_id": row["node_id"],
                 "name": row["resource_key"],
                 "resource_key": row["resource_key"],

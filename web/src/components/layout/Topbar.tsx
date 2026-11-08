@@ -23,7 +23,8 @@ export function Topbar({ current, onToggleMenu }: TopbarProps) {
   return (
     <header className="topbar">
       <div className="flex">
-        <span className="menu-toggle" style={{ display: 'none' }}>
+        {/* 显隐由 tokens.css 的 760px 媒体查询控制；内联样式会永久压过它，移动端导航将无法打开 */}
+        <span className="menu-toggle">
           <Button iconOnly icon="menu" aria-label="打开导航" onClick={onToggleMenu} />
         </span>
         <nav className="breadcrumb" aria-label="面包屑">

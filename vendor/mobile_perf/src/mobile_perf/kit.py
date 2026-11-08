@@ -13,6 +13,7 @@ from typing import Any, Protocol
 from . import collector, solo
 from . import frameinfo as frameinfo_module
 from . import jank as jank_module
+from . import judge as judge_module
 from . import leak as leak_module
 from . import metrics as metrics_module
 from . import netprof as netprof_module
@@ -22,6 +23,7 @@ from . import startup as startup_module
 from . import supplement as supplement_module
 from .adb import default_repo_root, resolve_adb
 from .gate import DeviceGate, FileLockGate
+from .har_writer import CaptureOptions
 from .judge import JudgeSpec, Verdict
 from .judge import judge as _judge_report
 from .keeper import (
@@ -43,6 +45,16 @@ DEFAULT_KEEP_DAYS = 30.0
 
 # collect() kwargs 的未传哨兵：与 SessionSpec 字段区分"显式覆盖"与"沿用 spec/默认"
 _UNSET: Any = object()
+
+
+def _resolve_capture_options(
+    capture_har: bool, capture_options: CaptureOptions | None
+) -> CaptureOptions:
+    """合并开关与细项选项；任意一个开启即生效，默认返回关闭态。"""
+    options = capture_options if capture_options is not None else CaptureOptions()
+    if capture_har and not options.enabled:
+        options = dataclasses.replace(options, enabled=True)
+    return options if options.enabled else CaptureOptions()
 
 
 class CollectError(RuntimeError):
@@ -104,6 +116,14 @@ def _net_tier_of(session: dict[str, Any]) -> str | None:
         return net_profile.get("name")
     if isinstance(net_profile, str):
         return net_profile
+    return None
+
+
+def _report_net_tier(report: dict[str, Any]) -> str | None:
+    """报告的网络档位名（无弱网 run 的 network 段为空，归 None 档）。"""
+    profile = (report.get("network") or {}).get("profile")
+    if isinstance(profile, dict):
+        return profile.get("name")
     return None
 
 
@@ -181,6 +201,7 @@ class CollectScope:
         net_tier: str = netprof_module.TIER_PASSTHROUGH,
         net_mitmdump: str | None = None,
         net_port: int = netprof_module.DEFAULT_PORT,
+        capture: CaptureOptions | None = None,
     ):
         self._kit = kit
         self.target = target
@@ -194,6 +215,10 @@ class CollectScope:
         self._net_tier = net_tier
         self._net_mitmdump = net_mitmdump
         self._net_port = net_port
+        self._capture = capture if capture is not None else CaptureOptions()
+        # 抓包与弱网正交：没有显式档位时仅内部用 none+decrypt 起代理，
+        # sessions.net_profile 仍写 None，报告用 captureOnly 标注
+        self._capture_only = False
         self._net_profiler: netprof_module.NetProfiler | None = None
         self._start_mode = start_mode
         self._jank_thresholds_ms = (
@@ -242,7 +267,9 @@ class CollectScope:
         if kit.foreground_restore:
             self.foreground_before = kit._read_foreground_state()
         # 网络剖面（ticket 17）：在采集窗口开始前施加，代理不可用/端口占用等
-        # 情况不抛错——如实降级，由 finalize 落 not_tested 原因与事件
+        # 情况不抛错——如实降级，由 finalize 落 not_tested 原因与事件。
+        # APP 抓包（正交）：即使没有弱网档位也要起代理，内部用 none+decrypt，
+        # 但不写 sessions.net_profile、报告用 captureOnly 标注。
         if self._net_profile is not None:
             self._net_profiler = kit._start_net_profile(
                 self._net_profile,
@@ -250,6 +277,17 @@ class CollectScope:
                 self._net_mitmdump,
                 self._net_port,
                 self._net_tier,
+                self._capture,
+            )
+        elif self._capture.enabled:
+            self._capture_only = True
+            self._net_profiler = kit._start_net_profile(
+                netprof_module.build_profile("none"),
+                self._run_dir,
+                self._net_mitmdump,
+                self._net_port,
+                netprof_module.TIER_DECRYPT,
+                self._capture,
             )
         self._session = CollectSession(
             target=self.target,
@@ -272,7 +310,12 @@ class CollectScope:
         # 逐帧采集（ticket 15）：reset 清零窗口后按间隔增量读 framestats，
         # 独立线程、不持 gate 设备权；失败如实降级为事件，不阻断采集闭环
         self._frame_poller = kit._start_frame_poll(
-            self._frame_poll, self._frame_interval_s, self.target
+            self._frame_poll,
+            self._frame_interval_s,
+            self.target,
+            # 与页面打标同一条时间轴（会话相对秒）：锚点的宿主侧若不是这个
+            # 口径，换算出来的帧时刻就落在另一个时间原点，整页耗时会整段偏
+            elapsed=self._session.elapsed_s,
         )
         self._watcher = kit._start_crash_watch(self.target, self._watch_warnings)
         kit._guard_foreground(self, phase="after_start")
@@ -427,19 +470,14 @@ class CollectScope:
                     self._artifacts_dir / "frames_gfxinfo.csv", frame_result.samples
                 )
         # 整页加载耗时（ticket 19）：页面打标 + 帧完成时刻 → 末帧稳定口径。
-        # 帧时刻在设备时钟域（CLOCK_MONOTONIC），用一次括号式 uptime 测量换算到
-        # 会话时间轴；测不到偏移就不换算，如实 not_tested（不拿错位的时刻硬算）
+        # 帧时刻在设备单调时钟域（CLOCK_MONOTONIC），偏移由逐帧轮询自身的锚点
+        # 估计（frameinfo.estimate_clock_offset）；没有帧锚点就不换算，如实
+        # not_tested（不拿错位的时刻硬算）
         page_results: list[pageflow_module.PageLoad] = []
         page_meta: dict[str, Any] | None = None
         page_marks = self._session.page_marks()
         if page_marks:
-            offset = (
-                frameinfo_module.measure_clock_offset(
-                    kit._channel, kit.serial, elapsed=self._session.elapsed_s
-                )
-                if frame_result is not None
-                else None
-            )
+            offset = frame_result.offset if frame_result is not None else None
             observed_until_s = self._session.elapsed_s()
             if (
                 offset is not None
@@ -466,11 +504,14 @@ class CollectScope:
                 # 时钟换算的可信度必须写出来：没换算 ≠ 没页面
                 "clockOffsetS": None if offset is None else round(offset["offsetS"], 6),
                 "clockOffsetSource": (
-                    "uptime_bracket"
+                    "frame_anchor"
                     if offset is not None
-                    else ("no_frame_poll" if frame_result is None else "no_uptime_offset")
+                    else ("no_frame_poll" if frame_result is None else "no_frames_anchor")
                 ),
-                "clockRttMs": None if offset is None else offset["rttMs"],
+                "clockAnchorCount": None if offset is None else offset["anchors"],
+                "clockSpreadMs": None if offset is None else offset["spreadMs"],
+                # 可信度：半个 adb 往返，整页耗时上的常数偏置不超过它
+                "clockPrecisionMs": None if offset is None else offset["precisionMs"],
                 "pages": [result.as_dict() for result in page_results],
             }
             if page_results:
@@ -488,6 +529,10 @@ class CollectScope:
         api_breakdown: dict[str, Any] | None = None
         if net_session is not None:
             net_meta = net_session.as_dict()
+            if self._capture_only:
+                # 不伪称用户选择了弱网档位：profile 留空，只标 captureOnly
+                net_meta["profile"] = None
+                net_meta["captureOnly"] = True
             if net_session.effective:
                 net_aggregates = netprof_module.conn_duration_rows(net_session.log_summary)
                 net_meta["connSamples"] = len(net_session.log_summary.conn_durations_ms)
@@ -585,7 +630,7 @@ class CollectScope:
                     netprof_module.TRUST_HINT
                 )
 
-        # 整页耗时不可用（未打页面 / 未开逐帧 / 无 uptime 锚点 / 全部页面超时）时
+        # 整页耗时不可用（未打页面 / 未开逐帧 / 无帧锚点 / 全部页面超时）时
         # 如实 not_tested：写明是哪一页、哪种原因，不用空值让人以为"没测"
         if page_meta is not None:
             if not page_aggregates:
@@ -665,6 +710,14 @@ class CollectScope:
                 "solo_session_id": record.session_id,
                 "serial": kit.serial,
                 "device_profile": kit.device_profile,
+                # 网络档位（工单 20）：本 run 用了哪个档位（名+参数），与是否
+                # 生效无关——"跑了但没生效"也是该档位下的 run。仅抓包时
+                # （captureOnly）不写档位，保持趋势/基线的可比性维度不变
+                "net_profile": (
+                    None
+                    if net_session is None or self._capture_only
+                    else net_session.profile
+                ),
                 "target": self.target,
                 "items": self.items,
                 "started_at": record.started_at,
@@ -676,7 +729,11 @@ class CollectScope:
             }
         )
         store.record_metrics(self._run_id, merged_aggregates)
-        store.record_run_artifacts(self._run_id, [str(self._artifacts_dir), str(self._run_dir)])
+        run_artifacts = [str(self._artifacts_dir), str(self._run_dir)]
+        har_detail = (net_meta or {}).get("har") or {}
+        if har_detail.get("path"):
+            run_artifacts.append(str(har_detail["path"]))
+        store.record_run_artifacts(self._run_id, run_artifacts)
         for degraded in supplement_info.get("degraded", []):
             detail = {
                 "key": degraded["key"],
@@ -718,7 +775,7 @@ class CollectScope:
                 kind="page_load",
                 detail={**result.as_dict(), "quietGapMs": pageflow_module.QUIET_GAP_MS},
             )
-        # 打了页面标却算不出结论（没开逐帧 / 取不到 uptime 锚点）：如实记降级，
+        # 打了页面标却算不出结论（没开逐帧 / 取不到帧锚点）：如实记降级，
         # 否则报告里只会看到"没有 page_load_ms"，看不出是漏测还是不可判定
         if page_meta is not None and not page_results:
             store.record_event(
@@ -726,7 +783,7 @@ class CollectScope:
                 kind="page_load_degraded",
                 detail={
                     "reason": page_meta.get("clockOffsetSource"),
-                    "clockRttMs": page_meta.get("clockRttMs"),
+                    "clockAnchorCount": page_meta.get("clockAnchorCount"),
                     "pages": [mark.label for mark in page_marks],
                 },
             )
@@ -763,6 +820,14 @@ class CollectScope:
                     "apiSamples": net_meta.get("apiSamples", 0),
                 },
             )
+        # APP 抓包事件（仅显式开启时）：HAR 摘要随事件入库，便于不翻 meta 就能
+        # 看出状态、条目数与降级原因；默认关闭时零新增事件
+        if self._capture.enabled and net_meta is not None:
+            har_detail = net_meta.get("har")
+            if har_detail is not None:
+                store.record_event(
+                    self._run_id, kind="capture_har", detail=dict(har_detail)
+                )
         # crash/ANR 事件入统一时间轴（ts 已由 logwatch 用 keeper 偏移换算）
         for event in watch_events:
             store.record_event(
@@ -1282,14 +1347,18 @@ class PerfKit:
         mitmdump: str | None,
         port: int,
         tier: str = netprof_module.TIER_PASSTHROUGH,
+        capture: CaptureOptions | None = None,
     ) -> netprof_module.NetProfiler:
         """施加网络剖面（采集窗口之前）：代理 → reverse → 系统代理。
 
         失败不抛错：``NetSession`` 里带着原因，finalize 据此把
         ``net_conn_duration_ms`` 标 not_tested 并落事件。代理日志与 stdout
         落在 run 目录下（artifacts 之外），便于事后核查代理是否真的看到流量。
-        ``tier=decrypt`` 时额外产出接口级指标（工单 18）。
+        ``tier=decrypt`` 时额外产出接口级指标（工单 18）；``capture`` 显式
+        开启时再注入 HAR 配置并产出 ``network/app.har``。
         """
+        if capture is not None and not capture.enabled:
+            capture = None
         profiler = netprof_module.NetProfiler(
             adb_path=str(self.adb_path),
             serial=self.serial,
@@ -1297,19 +1366,24 @@ class PerfKit:
             port=port,
             tier=tier,
             call_device=self._channel,
+            capture=capture,
         )
         profiler.start(profile, work_dir=run_dir / "network")
         return profiler
 
     def _start_frame_poll(
-        self, enabled: bool, interval_s: float, target: str
+        self,
+        enabled: bool,
+        interval_s: float,
+        target: str,
+        elapsed: Callable[[], float] | None = None,
     ) -> frameinfo_module.FramePoller | None:
         """构造并启动逐帧轮询器（紧随 session.start，窗口与采集窗口对齐）。
 
         与补采轮询同构：独立线程、单次 adb 短事务、不持 gate 设备权。
         reset 失败只记录（窗口起点不可信），轮询照常，结论随 meta 如实标注。
-        帧时刻的设备时钟换算不在这里做——那要在会话末尾测一次偏移
-        （``frameinfo.measure_clock_offset``），见 finalize 的整页耗时段。
+        帧时刻的设备时钟换算不在这里做——轮询器自己记录锚点，stop() 时给出
+        偏移估计（``frameinfo.estimate_clock_offset``），见 finalize 的整页耗时段。
         """
         if not enabled:
             return None
@@ -1319,6 +1393,7 @@ class PerfKit:
             target=target,
             interval_s=interval_s,
             call_device=self._channel,
+            elapsed=elapsed or self._clock,
         )
         poller.start()
         return poller
@@ -1397,11 +1472,48 @@ class PerfKit:
 
         基线不存在或无数据时以空解析结果传入，纯函数按前置不满足判 not_tested；
         宿主持有的 JudgeSpec 不被修改（解析结果经 resolved 副本注入）。
+
+        网络档位（工单 20）不进 JudgeSpec：从 baseline 来源 run 与报告的
+        network 段解析后在这里比对，档位不同 → not_tested（口径不可比）。
         """
         rows = self.store.fetch_baseline(spec.baseline)
         profile = next(
             (row.get("device_profile") for row in rows if row.get("device_profile")), None
         )
+        # baseline 的网络档位来自其来源 run：基线是哪个档位下测的，就得在
+        # 同档位下复测才有可比性。来源 run 查不到（老基线）不参与判断；
+        # 来源 run 跨多个档位（含"有 run 但没记档位"这一档）时基线本身口径
+        # 含糊，直接 not_tested（不猜该信哪一条）
+        baseline_tiers: set[str | None] = set()
+        for row in rows:
+            run_id = row.get("source_run_id")
+            if not run_id:
+                continue
+            session = self.store.fetch_session(run_id)
+            if session is None:
+                continue
+            baseline_tiers.add(_net_tier_of(session))
+        if len(baseline_tiers) > 1:
+            shown = ", ".join(sorted(str(item) for item in baseline_tiers))
+            return Verdict(
+                verdict=judge_module.VERDICT_NOT_TESTED,
+                baseline=spec.baseline,
+                reason=(
+                    f"baseline {spec.baseline!r} 的来源 run 跨多个网络档位（{shown}），"
+                    "口径不可比，无法判定"
+                ),
+            )
+        baseline_tier = next(iter(baseline_tiers), None)
+        report_tier = _report_net_tier(report)
+        if baseline_tier is not None and report_tier != baseline_tier:
+            return Verdict(
+                verdict=judge_module.VERDICT_NOT_TESTED,
+                baseline=spec.baseline,
+                reason=(
+                    f"网络档位不匹配：baseline {spec.baseline!r} 来源 run 为 "
+                    f"{baseline_tier!r}，本次 run 为 {report_tier!r}（口径不可比）"
+                ),
+            )
         data = {
             row["metric_key"]: {
                 "value": row.get("value"),
@@ -1427,9 +1539,11 @@ class PerfKit:
         frame_interval_s: float = frameinfo_module.DEFAULT_INTERVAL_S,
         net_profile: str | netprof_module.NetProfile | None = None,
         net_overrides: dict[str, float] | None = None,
-        net_tier: str = netprof_module.TIER_PASSTHROUGH,
+        net_tier: str | None = None,
         net_mitmdump: str | None = None,
         net_port: int = netprof_module.DEFAULT_PORT,
+        capture_har: bool = False,
+        capture_options: CaptureOptions | None = None,
     ) -> CollectScope:
         """打开交互式采集窗口（设计方案 §6.2）：with 块内 UI 驱动 + mark。
 
@@ -1482,6 +1596,19 @@ class PerfKit:
             if isinstance(net_profile, netprof_module.NetProfile) or net_profile is None
             else netprof_module.build_profile(net_profile, net_overrides)
         )
+        resolved_capture = _resolve_capture_options(capture_har, capture_options)
+        if net_tier is None:
+            # 未显式指定：抓包需要解密，否则沿用既有直通默认
+            net_tier = (
+                netprof_module.TIER_DECRYPT
+                if resolved_capture.enabled
+                else netprof_module.TIER_PASSTHROUGH
+            )
+        if resolved_capture.enabled and net_tier != netprof_module.TIER_DECRYPT:
+            raise ValueError(
+                "APP 抓包需要解密档：请显式传 net_tier='decrypt'"
+                "（不会自动改显式档位）"
+            )
         return CollectScope(
             self,
             target=target,
@@ -1498,6 +1625,7 @@ class PerfKit:
             net_tier=net_tier,
             net_mitmdump=net_mitmdump,
             net_port=net_port,
+            capture=resolved_capture,
         )
 
     def run_collect(
@@ -1516,9 +1644,11 @@ class PerfKit:
         frame_interval_s: float = frameinfo_module.DEFAULT_INTERVAL_S,
         net_profile: str | netprof_module.NetProfile | None = None,
         net_overrides: dict[str, float] | None = None,
-        net_tier: str = netprof_module.TIER_PASSTHROUGH,
+        net_tier: str | None = None,
         net_mitmdump: str | None = None,
         net_port: int = netprof_module.DEFAULT_PORT,
+        capture_har: bool = False,
+        capture_options: CaptureOptions | None = None,
     ) -> dict[str, Any]:
         """一次完整采集闭环：巡检 → 启动 → 计时 → 停止 → pull → 校验 → 落盘 → 入库。
 
@@ -1556,6 +1686,8 @@ class PerfKit:
             net_tier=net_tier,
             net_mitmdump=net_mitmdump,
             net_port=net_port,
+            capture_har=capture_har,
+            capture_options=capture_options,
         ) as scope:
             self._sleep(duration_s)
         # with 退出已无条件 finalize（幂等），直接用 scope.report，避免双收口

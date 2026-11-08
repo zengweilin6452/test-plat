@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useLocation } from 'react-router-dom'
 import { fetchOnboardingStatus } from './api/endpoints'
@@ -49,14 +50,26 @@ function InitialRoute() {
   return <Navigate to={{ pathname: onboardingDestination(query.data.complete, onboardingSkipped()), search: location.search }} replace />
 }
 
+/** 路由切换时回到页面顶部：长页切页不再停留在上一次的滚动位置 */
+function ScrollToTop() {
+  const { pathname } = useLocation()
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [pathname])
+  return null
+}
+
 export function AppRoutes() {
   return (
-    <Routes>
-      <Route path="/" element={<InitialRoute />} />
-      {ROUTES.map(({ path, Page }) => (
-        <Route key={path} path={path} element={<Page />} />
-      ))}
-      <Route path="*" element={<NotFoundPage />} />
-    </Routes>
+    <>
+      <ScrollToTop />
+      <Routes>
+        <Route path="/" element={<InitialRoute />} />
+        {ROUTES.map(({ path, Page }) => (
+          <Route key={path} path={path} element={<Page />} />
+        ))}
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </>
   )
 }

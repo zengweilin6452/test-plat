@@ -15,12 +15,14 @@
  * 联动（joint）运行同样产出性能组件与门禁结论，因此一并列出。
  */
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { request, describeError } from '../api/client'
 import { createGateEvaluation, fetchAnalysis, fetchRuns } from '../api/endpoints'
 import { Badge, StatusBadge } from '../components/Badge'
 import { Button } from '../components/Button'
 import { PageHeading, Panel, PanelHead } from '../components/Card'
+import { Disclosure } from '../components/Disclosure'
 import { ContextBar, PlannedNotice, PrimaryAction } from '../components/PageBits'
 import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
@@ -47,7 +49,27 @@ const METRIC_LABELS: Record<string, string> = {
   mem_pss_mb: 'PSS 内存',
   cpu_process_pct: '进程 CPU',
   fps_frame: '帧率',
-  gpu_usage_pct: 'GPU 占用',
+  gpu_util_pct: 'GPU 占用',
+  gpu_mem_mb: 'GPU 显存',
+  temp_battery_c: '电池温度',
+  net_rx_total_kb: '网络累计收',
+  net_tx_total_kb: '网络累计发',
+  net_conn_duration_ms: '连接建立耗时',
+  app_cold_start_ms: '冷启动耗时',
+  app_warm_start_ms: '热启动耗时',
+  page_load_ms: '整页加载耗时',
+  api_req_duration_ms: '接口请求耗时',
+  api_req_count: '接口请求数',
+  api_error_rate_pct: '接口错误率',
+  api_payload_kb: '接口载荷',
+  app_jank_light_count: '轻微卡顿数',
+  app_jank_heavy_count: '重度卡顿数',
+  app_jank_severe_count: '严重卡顿数',
+  app_frame_p50_ms: '帧耗时 P50',
+  app_frame_p90_ms: '帧耗时 P90',
+  app_frame_p99_ms: '帧耗时 P99',
+  app_frame_jank_ratio_pct: '卡顿帧占比',
+  app_frame_count: '帧总数',
 }
 
 const OP_TEXT: Record<string, string> = { lt: '<', le: '≤', gt: '>', ge: '≥' }
@@ -100,7 +122,7 @@ function ScopedPerfPage() {
   function openTaskOfRun(run: RunRecord) { setActiveRunId(run.id) }
 
   function handleCreated(created: CreateTaskResponse) {
-    toast.show('任务已创建：' + created.display_id + '（编号 ' + created.id + '）')
+    toast.show('任务已创建：' + created.display_id + '（编号 ' + created.id + '）', 'success')
     setWizardOpen(false)
     void queryClient.invalidateQueries({ queryKey: ['tasks'] })
     void queryClient.invalidateQueries({ queryKey: ['runs'] })
@@ -156,12 +178,12 @@ function ScopedPerfPage() {
     onSuccess: (result) => {
       const id = result.evaluation_id ?? result.id
       setEvaluationId(id)
-      toast.show('试算完成：' + verdictText(result.verdict) + '（未改写历史报告）')
+      toast.show('试算完成：' + verdictText(result.verdict) + '（未改写历史报告）', 'success')
       void queryClient.invalidateQueries({ queryKey: ['analysis', currentRunId] })
     },
     onError: (mutationError) => {
       const described = describeError(mutationError)
-      toast.show('试算失败（' + described.code + '）：' + described.message)
+      toast.show('试算失败（' + described.code + '）：' + described.message, 'error')
     },
   })
 
@@ -230,11 +252,14 @@ function ScopedPerfPage() {
         </div>
       ) : null}
 
+      {/* 渐进式披露：判定规则的完整说明默认收起，首屏只留一行入口（规则 1/4） */}
       <div className="mb">
-        <Notice tone="blue" icon="alert" title="门禁结论不在前端计算">
-          性能结论由后端根据阈值与基线评估后写入 gate_evaluations。样本不足或基线不可比时结论为「未判定」，
-          页面不会把它显示成未通过或已通过；指标缺失会显示具体原因，而不是 0。
-        </Notice>
+        <Disclosure title="为什么结论可能是「未判定」？" summary="判定规则说明">
+          <Notice tone="blue" icon="alert" title="门禁结论不在前端计算">
+            性能结论由后端根据阈值与基线评估后写入 gate_evaluations。样本不足或基线不可比时结论为「未判定」，
+            页面不会把它显示成未通过或已通过；指标缺失会显示具体原因，而不是 0。
+          </Notice>
+        </Disclosure>
       </div>
 
       {error ? (
@@ -256,7 +281,7 @@ function ScopedPerfPage() {
           hint="指标取 median；门禁逐项来自后端 checks，试算只新增判定行"
           actions={
             currentRunId ? (
-              <a className="link-btn" href={`/api/v1/runs/${currentRunId}/report/export`}>
+              <a className="link-btn" href={`/api/v1/runs/${currentRunId}/report/export`} download>
                 导出报告 JSON
               </a>
             ) : null
@@ -308,7 +333,7 @@ function ScopedPerfPage() {
             ) : analysis ? (
               <>
                 <VerdictNotice analysis={analysis} />
-                {tab === 'analysis' ? <><MetricCards analysis={analysis} /><ChecksTable analysis={analysis} /></> : null}
+                {tab === 'analysis' ? <><MetricCards analysis={analysis} /><LeakTrendCard analysis={analysis} /><ChecksTable analysis={analysis} /></> : null}
                 <div className="content-grid mt">
                   <ContextCard analysis={analysis} />
                   <TrialCard
@@ -339,6 +364,13 @@ function ScopedPerfPage() {
               <Empty
                 title={runsEmptyCopy.title}
                 description={runsEmptyCopy.description}
+                actions={
+                  planned ? null : (
+                    <Link className="btn" to="/tasks">
+                      前往任务中心发起运行
+                    </Link>
+                  )
+                }
               />
             )
           ) : (
@@ -416,6 +448,36 @@ function MetricCards({ analysis }: { analysis: RunAnalysis }) {
           <MetricCard key={metric.metric_key} metric={metric} check={check} />
         )
       })}
+    </div>
+  )
+}
+
+const LEAK_CONFIDENCE_LABELS: Record<string, string> = {
+  ok: '可信',
+  low: '仅供参考',
+  insufficient: '样本不足',
+}
+
+/** 泄漏趋势：vendor leak 同口径的平台侧实现（OLS 斜率，只展示不判定门禁） */
+function LeakTrendCard({ analysis }: { analysis: RunAnalysis }) {
+  const trend = analysis.leakTrend
+  if (!trend) return null
+  const confidence = typeof trend.confidence === 'string' ? trend.confidence : 'insufficient'
+  const label = LEAK_CONFIDENCE_LABELS[confidence] ?? confidence
+  const slope = typeof trend.slopeMbPerDay === 'number' ? trend.slopeMbPerDay : null
+  return (
+    <div className="mb">
+      <Notice tone={confidence === 'ok' ? 'blue' : 'amber'} title={`内存泄漏趋势 · ${label}`}>
+        {slope !== null ? (
+          <>mem_pss_mb 中位数历史序列 OLS 斜率 <strong className="mono">{slope} MB/天</strong>（{trend.runCount} 次运行，跨度 {trend.spanHours} 小时）。</>
+        ) : (
+          <>{trend.confidenceReason ?? '历史样本不足，无法估计趋势。'}</>
+        )}
+        {slope !== null && typeof trend.confidenceReason === 'string' ? (
+          <div className="muted small">{trend.confidenceReason}</div>
+        ) : null}
+        <div className="muted small">趋势只做参考展示；门禁结论仍由后端 gate_evaluations 判定，本卡片不参与判定。</div>
+      </Notice>
     </div>
   )
 }

@@ -209,7 +209,7 @@ def test_joint_start_collect_recovers_before_perf_start(tmp_path, monkeypatch):
         def __init__(self, **kwargs):
             events.append("init")
 
-        def collect(self, spec):
+        def collect(self, spec=None, **kwargs):
             events.append("collect")
             return FakeScope()
 

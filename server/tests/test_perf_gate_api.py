@@ -537,6 +537,47 @@ def test_metric_summaries_check_rejects_null_value_without_reason(seed):
         )
 
 
+def test_p90_statistic_accepted_after_migration_0011(seed):
+    """migration 0011：metric_summaries.statistic 枚举含 p90（vendor p90 不再被丢弃）。"""
+    _exec_sql(
+        """
+        INSERT INTO metric_summaries
+            (id, project_id, component_id, metric_key, metric_version, unit,
+             scope, window_key, statistic, sample_count, value)
+        VALUES (CAST(:id AS uuid), CAST(:pid AS uuid), CAST(:comp AS uuid),
+                'mem_pss_mb', '1.0', 'MB', 'component', 'w-p90', 'p90', 12, 300.0)
+        """,
+        {
+            "id": str(uuid.uuid4()),
+            "pid": seed["project_id"],
+            "comp": seed["components"]["head"],
+        },
+    )
+    _exec_sql("DELETE FROM metric_summaries WHERE window_key = 'w-p90' AND project_id = CAST(:pid AS uuid)",
+              {"pid": seed["project_id"]})
+
+
+def test_har_kind_accepted_after_migration_0011(seed):
+    """migration 0011：artifacts.kind 枚举含 har（vendor HAR 抓包可按类型登记）。"""
+    _exec_sql(
+        """
+        INSERT INTO artifacts
+            (id, project_id, run_id, logical_key, kind, storage_key, mime_type,
+             byte_size, sha256)
+        VALUES (CAST(:id AS uuid), CAST(:pid AS uuid), CAST(:rid AS uuid),
+                'network/app.har', 'har', 'network/app.har', 'application/json', 2, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+        """,
+        {
+            "id": str(uuid.uuid4()),
+            "pid": seed["project_id"],
+            "rid": seed["runs"]["head"],
+        },
+    )
+    # 自清理：seed 收尾按 project 删 runs，先删掉本行避免挡住级联
+    _exec_sql("DELETE FROM artifacts WHERE logical_key = 'network/app.har' AND project_id = CAST(:pid AS uuid)",
+              {"pid": seed["project_id"]})
+
+
 # ---------------------------------------------------------------------------
 # 门禁判定三态
 # ---------------------------------------------------------------------------

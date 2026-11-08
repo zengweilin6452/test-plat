@@ -16,9 +16,9 @@ DB CHECK（server/alembic/versions/0001_initial.py:474）：
 映射口径
 --------
 - 每个指标按 `(min, median, mean, max, p90)` 展开成 5 行 metric_summaries，
-  statistic 取 DB 允许的枚举值 subset：median / mean / min / max
-  （CHECK: statistic IN ('median','p95','mean','min','max')，**没有 p90**，
-  所以 vendor 的 p90 不进表；需要时另开 ticket）。
+  statistic 取 DB 允许的枚举值：median / mean / min / max / p90
+  （CHECK: statistic IN ('median','p95','p90','mean','min','max')；
+  migration 0010 起 p90 进入枚举，vendor 聚合的 p90 不再被丢弃）。
 - `metric_version` = `<vendor SCHEMA_VERSION>.<指标字典版本>`，口径变更时递增，
   趋势查询按 metric_version 分组，避免新旧口径混算。
 - `scope` = `component`（一份报告对应一个 run_component），
@@ -64,8 +64,8 @@ __all__ = [
     "summaries_from_report",
 ]
 
-# metric_summaries.statistic 的 DB 枚举（server/alembic/versions/0001_initial.py:469）
-DB_STATISTICS = ("min", "median", "mean", "max")
+# metric_summaries.statistic 的 DB 枚举（migration 0010 起 p90 入枚举）
+DB_STATISTICS = ("min", "median", "mean", "max", "p90")
 
 # metric_summaries.missing_reason 的平台枚举（P4 新增，见 docstring）
 MISSING_METRIC_ABSENT = "metric_absent"
@@ -81,8 +81,17 @@ METRIC_VERSION_LEGACY = "1.0"
 DEFAULT_ITEMS: dict[str, tuple[str, ...]] = {
     "CPU": ("cpu_process_pct", "cpu_global_pct"),
     "Memory": ("mem_pss_mb", "mem_privdirty_mb", "mem_global_mb"),
-    "FPS": ("fps_frame", "frame_delay_ratio_pct", "frame_delay_count", "frame_delay_max_ms"),
-    "Network": ("net_rx_kbps", "net_tx_kbps"),
+    "FPS": (
+        "fps_frame",
+        "frame_delay_ratio_pct",
+        "frame_delay_count",
+        "frame_delay_max_ms",
+        # FPS 选了就该有的派生分级（vendor finalize 无条件从 FPS 数据派生）
+        "app_jank_light_count",
+        "app_jank_heavy_count",
+        "app_jank_severe_count",
+    ),
+    "Network": ("net_rx_kbps", "net_tx_kbps", "net_rx_total_kb", "net_tx_total_kb"),
     "Battery": (
         "battery_current_ma",
         "battery_current_avg_ma",
@@ -90,9 +99,17 @@ DEFAULT_ITEMS: dict[str, tuple[str, ...]] = {
         "battery_power_avg_mw",
         "battery_pct",
     ),
-    # GPU 是「设备可能不支持」的代表项：即使报告里没有，也要落一行 missing，
-    # 否则前端无法区分「没这个指标」和「这个指标是 0」。
-    "GPU": ("gpu_util_pct",),
+    # 补采通道默认自动采集的两族：设备可能不支持，缺失也要落行
+    "GPU": ("gpu_util_pct", "gpu_mem_mb"),
+    "Temperature": ("temp_battery_c",),
+}
+
+# 编排/代理通道开启后报告才会出现的指标块 -> 期望 key（_expected_keys 用）
+CHANNEL_BLOCK_KEYS: dict[str, tuple[str, ...]] = {
+    "startup": (),  # 按 report["startup"]["metricKey"] / mode 动态推导
+    "pages": ("page_load_ms",),
+    "network": ("net_conn_duration_ms",),
+    "api": ("api_req_duration_ms", "api_req_count", "api_error_rate_pct", "api_payload_kb"),
 }
 
 # vendor 指标字典里已知「只有补采 / 编排才有」的指标：设备侧不支持时单独标注
@@ -100,6 +117,7 @@ SUPPLEMENT_KEYS = frozenset(
     {
         "temp_battery_c",
         "gpu_util_pct",
+        "gpu_mem_mb",
         "app_frame_p50_ms",
         "app_frame_p90_ms",
         "app_frame_p99_ms",
@@ -341,6 +359,22 @@ def _expected_keys(report: dict[str, Any], dictionary: dict[str, Any]) -> list[s
             keys.extend(group)
         elif str(item) in dictionary:
             keys.append(str(item))
+    # 编排/代理通道开启（报告出现对应块）时，块内指标即使 notTested 也要有
+    # 「有这个指标但没值」的行——否则前端无法区分「通道没开」和「没这个指标」。
+    for block, block_keys in CHANNEL_BLOCK_KEYS.items():
+        if not isinstance(report.get(block), dict):
+            continue
+        if block == "startup":
+            startup = report.get("startup") or {}
+            metric_key = startup.get("metricKey")
+            if isinstance(metric_key, str) and metric_key:
+                keys.append(metric_key)
+            elif startup.get("mode") in ("cold", "warm"):
+                keys.append(f"app_{startup['mode']}_start_ms")
+            continue
+        for key in block_keys:
+            if key not in keys:
+                keys.append(key)
     # 采集项没覆盖到、但报告真实产出的指标（派生 / 补采 / 编排指标）也要入表
     for key in (report.get("metricsSummary") or {}):
         if key not in keys:

@@ -335,8 +335,9 @@ def test_joint_perf_kit_writes_sqlite_under_artifacts(tmp_path, monkeypatch):
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
-        def collect(self, spec):
+        def collect(self, spec=None, **kwargs):
             captured["spec"] = spec
+            captured["collect_kwargs"] = kwargs
             return FakeScope()
 
     class FakeScope:
@@ -1058,7 +1059,7 @@ def test_perf_collect_scope_is_entered_before_ui_runs(monkeypatch, tmp_path):
         def __init__(self, **kwargs):
             calls.append("kit")
 
-        def collect(self, spec):
+        def collect(self, spec=None, **kwargs):
             calls.append("collect")
             return FakeScope()
 

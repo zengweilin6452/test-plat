@@ -7,7 +7,7 @@
  * - junit 未产出（present=false）时显示破折号，不把「没跑」写成 0 个失败；
  * - 证据下载地址由后端 download_url 给出，前端不自己拼路径。
  */
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { describeError } from '../api/client'
@@ -18,6 +18,7 @@ import { Button, LinkButton } from './Button'
 import { Drawer } from './Dialog'
 import { Empty } from './Empty'
 import { Notice } from './Notice'
+import { ReportViewer } from './ReportViewer'
 import { useToast } from './Toast'
 import { DASH, fmtDateTime, fmtDuration, fmtNumber } from '../lib/fmt'
 import { displayStatus } from '../lib/display'
@@ -191,10 +192,88 @@ export function collectWindowRows(report: RunReport | undefined): CollectWindowV
   }
 }
 
+/** 能力块是否至少出现一个（都不在 = 通道未启用，整节不渲染，不留空壳） */
+export function hasCapabilityBlocks(report: RunReport | undefined): boolean {
+  return Boolean(report?.startup || report?.pages || report?.network || report?.api)
+}
+
+const STARTUP_MODE_LABELS: Record<string, string> = { cold: '冷启动', warm: '热启动' }
+
+/**
+ * 能力块 -> 展示行。所有取值来自 vendor 报告原样透传；缺失/未判定写原因，
+ * 不猜数值、不把 notTested 画成 0（平台纪律在前端同样成立）。
+ */
+export function capabilityRows(report: RunReport | undefined): { label: string; value: string }[] {
+  const rows: { label: string; value: string }[] = []
+  const startup = report?.startup
+  if (startup) {
+    const mode = typeof startup.mode === 'string' ? STARTUP_MODE_LABELS[startup.mode] ?? startup.mode : null
+    const ms = asNumber(startup.ms)
+    const status = typeof startup.status === 'string' && startup.status !== 'ok' ? `（${startup.status}）` : ''
+    rows.push({
+      label: `启动耗时${mode ? ` · ${mode}` : ''}${status}`,
+      value: ms !== null ? `${fmtNumber(ms, 0)} ms` : (typeof startup.error === 'string' && startup.error ? startup.error : '未判定'),
+    })
+  }
+  const pages = report?.pages
+  if (pages) {
+    const list = Array.isArray(pages.pages) ? pages.pages : []
+    if (list.length === 0) {
+      rows.push({
+        label: '整页加载耗时',
+        value: typeof pages.notTestedReason === 'string' && pages.notTestedReason ? pages.notTestedReason : '未判定',
+      })
+    } else {
+      for (const page of list) {
+        const ms = asNumber(page?.pageLoadMs)
+        const pageStatus = typeof page?.status === 'string' && page.status !== 'ok' ? `（${page.status}）` : ''
+        rows.push({
+          label: `整页加载 · ${typeof page?.page === 'string' ? page.page : '未命名页面'}${pageStatus}`,
+          value: ms !== null ? `${fmtNumber(ms, 0)} ms` : (typeof page?.reason === 'string' && page.reason ? page.reason : '未判定'),
+        })
+      }
+    }
+  }
+  const network = report?.network
+  if (network) {
+    const tier = typeof network.tier === 'string' ? network.tier : null
+    const profile = typeof network.profile === 'string' ? network.profile : null
+    rows.push({
+      label: `网络剖面${tier ? ` · ${tier}` : ''}`,
+      value: profile ?? (tier ? `仅抓包（整形档位未启用）` : '未启用'),
+    })
+    const har = network.har
+    if (har) {
+      const entries = asNumber(har.entries)
+      const harStatus = typeof har.status === 'string' ? har.status : 'unknown'
+      rows.push({
+        label: 'HAR 抓包',
+        value:
+          harStatus === 'complete' || harStatus === 'partial'
+            ? `${harStatus} · ${entries !== null ? entries : '?'} 条${harStatus === 'partial' ? '（部分覆盖）' : ''}`
+            : (typeof har.notTestedReason === 'string' && har.notTestedReason ? har.notTestedReason : harStatus),
+      })
+    }
+  }
+  const api = report?.api
+  if (api) {
+    const count = asNumber(api.reqCount)
+    rows.push({
+      label: '接口级指标',
+      value:
+        typeof api.notTestedReason === 'string' && api.notTestedReason
+          ? api.notTestedReason
+          : count !== null
+            ? `${fmtNumber(count, 0)} 个请求`
+            : '未判定',
+    })
+  }
+  return rows
+}
+
 const AVAILABILITY_LABELS: Record<string, string> = {
   available: '可用',
-  missing: '缺失',
-  expired: '已过期',
+  missing: '缺失',  expired: '已过期',
 }
 
 const UNAVAILABLE_REASON_LABELS: Record<string, string> = {
@@ -233,6 +312,12 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
   const runId = run?.id ?? ''
   const toast = useToast()
   const navigate = useNavigate()
+  // 在线查看：iframe 直接渲染报告本体（vendor HTML 或平台渲染页）
+  const [viewing, setViewing] = useState(false)
+  // 抽屉关闭时把查看器一起收掉，避免它残留在顶层
+  useEffect(() => {
+    if (!open) setViewing(false)
+  }, [open])
   const reportQuery = useQuery({
     queryKey: ['run-report', runId],
     queryFn: ({ signal }) => fetchRunReport(runId, signal),
@@ -269,12 +354,12 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
         request_key: crypto.randomUUID(),
         parent_run_id: run.id,
       })
-      toast.show('重跑已创建：' + created.display_id + '，可在运行页跟踪')
+      toast.show('重跑已创建：' + created.display_id + '，可在运行页跟踪', 'success')
       onClose()
       navigate('/ui')
     } catch (error) {
       const e = describeError(error)
-      toast.show('重跑失败（' + e.code + '）：' + e.message)
+      toast.show('重跑失败（' + e.code + '）：' + e.message, 'error')
     } finally {
       setRerunning(false)
     }
@@ -345,8 +430,11 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
                   <Button disabled={rerunning || !report?.revision} onClick={rerun}>
                     重跑（引用原输入）
                   </Button>
+                  <Button disabled={!report?.view_url} onClick={() => setViewing(true)}>
+                    在线查看报告
+                  </Button>
                   <LinkButton onClick={() => navigate('/perf')}>性能分析 ›</LinkButton>
-                  <a className="link-btn" href={`/api/v1/runs/${run.id}/report/export`}>
+                  <a className="link-btn" href={`/api/v1/runs/${run.id}/report/export`} download>
                     导出 JSON
                   </a>
                 </div>
@@ -422,6 +510,23 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
                 )}
               </div>
 
+              {hasCapabilityBlocks(report) ? (
+                <div className="drawer-section">
+                  <h3>能力详情（启动 / 整页 / 网络）</h3>
+                  <dl className="summary-dl">
+                    {capabilityRows(report).map((row) => (
+                      <Fragment key={row.label}>
+                        <dt>{row.label}</dt>
+                        <dd className="mono">{row.value}</dd>
+                      </Fragment>
+                    ))}
+                  </dl>
+                  {report?.network?.har?.status === 'complete' || report?.network?.har?.status === 'partial' ? (
+                    <p className="muted small">HAR 文件在下方证据链中（kind=har），available 状态可直接下载。</p>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="drawer-section">
                 <h3>证据链</h3>
                 {artifactsError ? (
@@ -455,6 +560,14 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
                                 ) : (
                                   item.logical_key
                                 )}
+                                {item.view_url ? (
+                                  <>
+                                    {' '}
+                                    <a className="small" href={item.view_url} target="_blank" rel="noreferrer">
+                                      在线查看
+                                    </a>
+                                  </>
+                                ) : null}
                               </td>
                               <td className="muted small">{item.kind ?? DASH}</td>
                               <td className="muted small">{state.label}</td>
@@ -472,6 +585,14 @@ export function ReportDrawer({ open, run, onClose }: ReportDrawerProps) {
           ) : null}
         </>
       )}
+
+      <ReportViewer
+        open={viewing && Boolean(report?.view_url)}
+        viewUrl={report?.view_url ?? null}
+        title={run ? `${run.name} · 在线报告` : '在线报告'}
+        description={run ? `${run.display_id} · 报告内容由后端渲染，前端不参与判定` : undefined}
+        onClose={() => setViewing(false)}
+      />
     </Drawer>
   )
 }

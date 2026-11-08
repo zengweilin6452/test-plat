@@ -28,7 +28,7 @@ function Failure({ error }: { error: unknown }) {
   if (!error) return null
   const detail = describeError(error)
   return <div role="alert">{detail.message} ({detail.code}){detail.requestId ? ` · ${detail.requestId}` : ''}
-    {detail.details != null ? <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(detail.details, null, 2)}</pre> : null}</div>
+    {detail.details != null ? <pre className="code-block">{JSON.stringify(detail.details, null, 2)}</pre> : null}</div>
 }
 
 export function canConfirmIdentity(check: IdentityCheck | null): boolean {
@@ -117,13 +117,25 @@ export function BuildRegistration({ applicationId, buildId, resourceId, onRegist
           ? '与构建声明一致。确认后固定基准，运行前按此复核；未确认的构建不会被运行前复核。'
           : '与已固定基准一致，本设备不会改写基准。'}</p> : null}
         <p>{check.verification_note}</p>
-        <details><summary>原始核对记录</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify({ expected: check.expected, observed: check.observed, blocking: check.blocking }, null, 2)}</pre></details>
+        <details><summary>原始核对记录</summary><pre className="code-block">{JSON.stringify({ expected: check.expected, observed: check.observed, blocking: check.blocking }, null, 2)}</pre></details>
         <Button disabled={busy || !canConfirmIdentity(check)} onClick={() => confirm.mutate()}>确认以上身份并固定基准</Button>
       </div> : null}
       {confirm.isSuccess ? <p role="status">身份基准已固定。</p> : null}
       <Failure error={register.error || identity.error || confirm.error} />
     </div>
   </details>
+}
+
+/** 解析页面打标输入：每行 `页面名@秒`；无法解析的行原样返回（就地提示，不静默丢弃） */
+function parsePageMarks(text: string): { marks: { page: string; at_s: number }[]; invalid: string[] } {
+  const marks: { page: string; at_s: number }[] = []
+  const invalid: string[] = []
+  for (const raw of text.split('\n').map(line => line.trim()).filter(Boolean)) {
+    const match = /^(.+?)@(\d+(?:\.\d+)?)$/.exec(raw)
+    if (match) marks.push({ page: match[1].trim(), at_s: Number(match[2]) })
+    else invalid.push(raw)
+  }
+  return { marks, invalid }
 }
 
 export function SuiteRegistration({ applicationId, testType, suiteId = '', duration, items, expandSignal = 0, onRegistered }: {
@@ -146,6 +158,35 @@ export function SuiteRegistration({ applicationId, testType, suiteId = '', durat
   const effectiveDuration = duration ?? ownDuration
   const effectiveItems = normalizePerfItems(items ?? DEFAULT_PERF_ITEMS)
   const scenarioLabel = testType === 'performance' ? '性能场景' : '套件'
+  // 能力字段（可选，缺省即不启用）：启动编排 / 网络剖面 / HAR / 逐帧 / 页面打标。
+  // 注意 net_mitmdump 是宿主可执行路径，浏览器不传（spec §9.2），由运维通过
+  // MOBILE_PERF_MITMDUMP 环境变量提供。
+  const [startMode, setStartMode] = useState('')
+  const [netProfile, setNetProfile] = useState('')
+  const [netTier, setNetTier] = useState('')
+  const [captureHar, setCaptureHar] = useState(false)
+  const [framePoll, setFramePoll] = useState(false)
+  const [pageMarksText, setPageMarksText] = useState('')
+  const parsedPageMarks = parsePageMarks(pageMarksText)
+
+  /** 已启用的高级能力 -> scenario 可选字段（未启用的不写键，保持形状干净） */
+  const capabilityScenarioFields = () => ({
+    ...(startMode ? { start_mode: startMode } : {}),
+    ...(netProfile ? { net_profile: netProfile } : {}),
+    ...(netTier ? { net_tier: netTier } : {}),
+    ...(captureHar ? { capture_har: true } : {}),
+    ...(framePoll ? { frame_poll: true } : {}),
+    ...(parsedPageMarks.marks.length ? { page_marks: parsedPageMarks.marks } : {}),
+  })
+  const capabilitySummary = () => {
+    const parts: string[] = []
+    if (startMode) parts.push(startMode === 'cold' ? '冷启动' : '热启动')
+    if (netProfile) parts.push(`网络 ${netProfile}`)
+    if (captureHar) parts.push('HAR')
+    if (framePoll) parts.push('逐帧')
+    if (parsedPageMarks.marks.length) parts.push(`打标 ${parsedPageMarks.marks.length} 页`)
+    return parts.join(' · ')
+  }
 
   useEffect(() => {
     if (!expandSignal) return
@@ -171,10 +212,12 @@ export function SuiteRegistration({ applicationId, testType, suiteId = '', durat
     }
     const version = await api.post<{ id: string }>(`/suites/${id}/${testType === 'ui' ? 'discover' : 'versions'}`, testType === 'ui'
       ? { source_id: source }
-      : { scenario: { duration_s: Number(effectiveDuration), items: effectiveItems }, ...(testType === 'joint' ? { source_id: source } : {}) })
+      : { scenario: { duration_s: Number(effectiveDuration), items: effectiveItems, ...capabilityScenarioFields() }, ...(testType === 'joint' ? { source_id: source } : {}) })
     return { id, versionId: version.id }
   }, onSuccess: result => { onRegistered(result.id, result.versionId); setCreatedId(''); void refresh() } })
+  const capabilityValid = parsedPageMarks.invalid.length === 0
   const valid = (testType === 'performance' || validSource)
+    && capabilityValid
     && (testType === 'ui' || (/^\d+$/.test(effectiveDuration) && Number(effectiveDuration) >= 10 && Number(effectiveDuration) <= 3600 && effectiveItems.length > 0))
   return <details ref={detailsRef}><summary>登记{scenarioLabel} / 发布固定版本</summary><div className="form-grid">
     <label>新{scenarioLabel}名称<input maxLength={200} disabled={Boolean(createdId)} value={name} onChange={e => setName(e.target.value)} /></label>
@@ -184,8 +227,48 @@ export function SuiteRegistration({ applicationId, testType, suiteId = '', durat
       duration === undefined ? (
         <label>固定采集时长（秒，10 至 3600）<input type="number" min={10} max={3600} value={ownDuration} onChange={e => setOwnDuration(e.target.value)} />采集项：{perfItemsLabel(effectiveItems) || '未选择'}</label>
       ) : (
-        <p className="muted small">将发布场景：{effectiveDuration} 秒 · {perfItemsLabel(effectiveItems) || '未选择采集项'}（与上方采集配置一致）</p>
+        <p className="muted small">将发布场景：{effectiveDuration} 秒 · {perfItemsLabel(effectiveItems) || '未选择采集项'}（与上方采集配置一致）{capabilitySummary() ? ` · ${capabilitySummary()}` : ''}</p>
       )
+    ) : null}
+    {testType !== 'ui' ? (
+      <fieldset className="mb">
+        <legend>高级能力（可选，缺省不启用）</legend>
+        <div className="form-grid">
+          <label>启动编排<select value={startMode} onChange={e => setStartMode(e.target.value)}>
+            <option value="">不编排启动</option>
+            <option value="cold">冷启动（force-stop 后拉起并计时）</option>
+            <option value="warm">热启动（退后台后拉起并计时）</option>
+          </select></label>
+          <label>网络档位<select value={netProfile} onChange={e => setNetProfile(e.target.value)}>
+            <option value="">不动网络</option>
+            <option value="none">none（代理直通对照）</option>
+            <option value="4g">4G</option>
+            <option value="3g">3G</option>
+            <option value="weak">弱网</option>
+          </select></label>
+          <label>代理模式<select value={netTier} onChange={e => setNetTier(e.target.value)}>
+            <option value="">自动（抓 HAR 用解密，其余直通）</option>
+            <option value="passthrough">passthrough（不解密）</option>
+            <option value="decrypt">decrypt（需设备信任代理 CA）</option>
+          </select></label>
+          <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={captureHar} onChange={e => setCaptureHar(e.target.checked)} />
+            抓取 HAR 文件（需宿主安装 mitmproxy，未安装时如实标注未判定）
+          </label>
+          <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={framePoll} onChange={e => setFramePoll(e.target.checked)} />
+            逐帧统计（P50 / P90 / P99 帧耗时与卡顿帧占比）
+          </label>
+          <label>页面打标（每行一条：页面名@秒，如 home@5）<textarea
+            rows={3}
+            value={pageMarksText}
+            onChange={e => setPageMarksText(e.target.value)}
+            placeholder={'home@5\ndetail@20'}
+          />
+            {parsedPageMarks.invalid.length > 0 ? <span className="field-error" role="alert">无法解析：{parsedPageMarks.invalid.join('；')}（格式 页面名@秒）</span> : null}
+          </label>
+        </div>
+      </fieldset>
     ) : null}
     <Button disabled={save.isPending || !applicationId || !name.trim() || !valid} onClick={() => save.mutate(false)}>{createdId ? '重试发布已登记套件的版本' : `登记${scenarioLabel}并发布版本`}</Button>
     <Button disabled={save.isPending || !suiteId || !valid} onClick={() => save.mutate(true)}>{testType === 'ui' ? '为所选套件重新发现并发布版本' : `为所选${scenarioLabel}发布版本`}</Button>

@@ -24,6 +24,7 @@ baselines / gate_evaluations），不依赖 P3 的 domain/runs.py 是否就绪�
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -121,6 +122,116 @@ def _profile_of(spec: dict[str, Any] | None) -> tuple[str | None, str | None]:
         return normalize_profile(spec), None
     except ProfileNormalizationError as exc:
         return None, str(exc)
+
+
+#: 泄漏趋势的指标固定为 PSS 中位数（vendor mobile_perf leak 模块同口径）
+LEAK_METRIC_KEY = "mem_pss_mb"
+LEAK_MIN_RUNS = 3
+
+
+def _ols_slope_mb_per_day(points: list[tuple[float, float]]) -> float | None:
+    """普通最小二乘斜率（x=小时，y=MB）→ MB/天；x 全相等时返回 None。"""
+    n = len(points)
+    if n < 2:
+        return None
+    mean_x = sum(x for x, _ in points) / n
+    mean_y = sum(y for _, y in points) / n
+    denominator = sum((x - mean_x) ** 2 for x, _ in points)
+    if denominator <= 0:
+        return None
+    slope_per_hour = sum((x - mean_x) * (y - mean_y) for x, y in points) / denominator
+    return slope_per_hour * 24.0
+
+
+async def _leak_trend(
+    session: AsyncSession, run: dict[str, Any], device_profile: str | None
+) -> dict[str, Any] | None:
+    """内存泄漏趋势（vendor mobile_perf leak 模块的平台侧等价实现）。
+
+    vendor 的 `PerfKit.leak_trend` 读自己的 SQLite store，而平台每次运行的
+    store 都落在各自产物目录里（互相看不到），跨 run 序列只能从
+    metric_summaries 取：同应用 + 同设备档案的历史 mem_pss_mb median 做 OLS。
+    置信度三态与 vendor 一致：<3 次 insufficient、跨度 0 insufficient、
+    <24h low、其余 ok。斜率只做参考展示，门禁结论仍由 gate_evaluations 给。
+    """
+    if not device_profile:
+        return None
+    rows = (
+        await session.execute(
+            text(
+                "SELECT tr.started_at, ms.value, rp.spec AS profile_spec"
+                "  FROM metric_summaries ms"
+                "  JOIN run_components rc ON rc.project_id = ms.project_id"
+                "    AND rc.id = ms.component_id"
+                "  JOIN test_runs tr ON tr.project_id = rc.project_id AND tr.id = rc.run_id"
+                "  JOIN resource_profiles rp ON rp.id = tr.profile_id"
+                " WHERE ms.metric_key = :key AND ms.statistic = 'median'"
+                "   AND ms.value IS NOT NULL AND ms.missing_reason IS NULL"
+                "   AND tr.application_id = :app AND rc.kind = 'performance'"
+                "   AND tr.state = 'completed'"
+                " ORDER BY tr.started_at, tr.id"
+            ),
+            {"key": LEAK_METRIC_KEY, "app": str(run["application_id"])},
+        )
+    ).mappings().all()
+
+    points: list[tuple[float, float]] = []
+    profile_mismatch = 0
+    first_ts: datetime | None = None
+    for row in rows:
+        started_at = row["started_at"]
+        if not started_at:
+            continue
+        # 档案不可比的历史点不参与（vendor 同口径：跨档默认 ProfileMismatch）
+        row_profile, _ = _profile_of(row["profile_spec"] if isinstance(row["profile_spec"], dict) else None)
+        if row_profile is not None and row_profile != device_profile:
+            profile_mismatch += 1
+            continue
+        if first_ts is None:
+            first_ts = started_at
+        hours = (started_at - first_ts).total_seconds() / 3600.0
+        points.append((hours, float(row["value"])))
+
+    run_count = len(points)
+    if run_count < LEAK_MIN_RUNS:
+        return {
+            "metric": "mem_pss_slope_mb_per_day",
+            "slopeMbPerDay": None,
+            "confidence": "insufficient",
+            "confidenceReason": f"同档案历史运行不足 {LEAK_MIN_RUNS} 次（当前 {run_count} 次），无法估计趋势",
+            "runCount": run_count,
+            "spanHours": 0.0,
+            "profileMismatchRuns": profile_mismatch or None,
+        }
+    span_hours = points[-1][0]
+    slope = _ols_slope_mb_per_day(points)
+    if slope is None:
+        return {
+            "metric": "mem_pss_slope_mb_per_day",
+            "slopeMbPerDay": None,
+            "confidence": "insufficient",
+            "confidenceReason": "历史运行时间跨度为 0，无法估计趋势",
+            "runCount": run_count,
+            "spanHours": span_hours,
+            "profileMismatchRuns": profile_mismatch or None,
+        }
+    confidence = "low" if span_hours < 24 else "ok"
+    reason = (
+        "时间跨度不足 24 小时，斜率仅供参考"
+        if confidence == "low"
+        else "同档案历史运行 ≥3 次且跨度 ≥24 小时"
+    )
+    return {
+        "metric": "mem_pss_slope_mb_per_day",
+        "slopeMbPerDay": round(slope, 4),
+        "confidence": confidence,
+        "confidenceReason": reason,
+        "runCount": run_count,
+        "spanHours": round(span_hours, 2),
+        "firstMedian": points[0][1],
+        "lastMedian": points[-1][1],
+        "profileMismatchRuns": profile_mismatch or None,
+    }
 
 
 def _reason_text_from_checks(checks: Any) -> str | None:
@@ -329,6 +440,12 @@ async def _analysis_for_run(
             for row in evaluations
         ],
         "baseline_options": await _baseline_options(session, run, device_profile),
+        # 泄漏趋势（vendor leak 同口径的平台侧实现）：性能/联动运行才有关注点
+        "leakTrend": (
+            await _leak_trend(session, run, device_profile)
+            if run["test_type"] in ("performance", "joint")
+            else None
+        ),
         "trial": None,
     }
 

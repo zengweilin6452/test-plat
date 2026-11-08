@@ -1,37 +1,90 @@
 /**
  * 轻提示（原型 toast()，L117）。
  *
- * 提供 ToastProvider + useToast()：页面调用 toast.show('...') 即可，
- * 组件自己负责 2.6s 后自动隐藏，并且用 key 重置计时。
+ * 提供 ToastProvider + useToast()：页面调用 toast.show('...') 即可。
+ *
+ * 为什么渲染成非模态原生 <dialog>：showModal 打开的对话框处于浏览器 top layer，
+ * 普通 fixed 元素再高的 z-index 也盖不过去（抽屉里保存绑定/发起运行的提示会被整块遮挡）；
+ * dialog.show() 同样进入 top layer 但不阻断页面交互，提示在任何弹层状态下都可见。
+ *
+ * 支持 tone（info/success/error）与多槽位：连续操作（先失败后成功）不再互相覆盖，
+ * 最新一条在最下方，各自计时 2.6s 后消失。
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-interface ToastApi {
-  show: (message: string) => void
+export type ToastTone = 'info' | 'success' | 'error'
+
+interface ToastItem {
+  id: number
+  message: string
+  tone: ToastTone
 }
+
+interface ToastApi {
+  show: (message: string, tone?: ToastTone) => void
+}
+
+const TOAST_DURATION = 2600
+const MAX_SLOTS = 3
 
 const ToastContext = createContext<ToastApi | null>(null)
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [message, setMessage] = useState<string | null>(null)
-  const timer = useRef<number | undefined>(undefined)
+  const [items, setItems] = useState<ToastItem[]>([])
+  const nextId = useRef(0)
+  const timers = useRef(new Map<number, number>())
 
-  const show = useCallback((next: string) => {
-    setMessage(next)
-    window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => setMessage(null), 2600)
+  const dismiss = useCallback((id: number) => {
+    window.clearTimeout(timers.current.get(id))
+    timers.current.delete(id)
+    setItems((current) => current.filter((item) => item.id !== id))
   }, [])
 
-  useEffect(() => () => window.clearTimeout(timer.current), [])
+  const show = useCallback(
+    (message: string, tone: ToastTone = 'info') => {
+      const id = nextId.current++
+      setItems((current) => {
+        // 超出槽位时淘汰最旧的一条，避免弹层堆积
+        const trimmed = [...current, { id, message, tone }].slice(-MAX_SLOTS)
+        for (const item of current.slice(0, Math.max(0, current.length - MAX_SLOTS + 1))) {
+          window.clearTimeout(timers.current.get(item.id))
+          timers.current.delete(item.id)
+        }
+        return trimmed
+      })
+      timers.current.set(id, window.setTimeout(() => dismiss(id), TOAST_DURATION))
+    },
+    [dismiss],
+  )
+
+  useEffect(() => {
+    const pending = timers.current
+    return () => {
+      for (const id of pending.values()) window.clearTimeout(id)
+      pending.clear()
+    }
+  }, [])
 
   const api = useMemo<ToastApi>(() => ({ show }), [show])
 
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div className={'toast' + (message ? ' show' : '')} role="status" aria-live="polite">
-        {message}
-      </div>
+      {items.map((item, index) => (
+        // 每条 toast 一个非模态 dialog：top layer 保证盖过 showModal 的抽屉/对话框
+        <dialog
+          key={item.id}
+          ref={(el) => {
+            if (el && !el.open) el.show()
+          }}
+          className={'toast ' + item.tone}
+          style={{ bottom: 28 + (items.length - 1 - index) * 52 }}
+          role="status"
+          aria-live="polite"
+        >
+          {item.message}
+        </dialog>
+      ))}
     </ToastContext.Provider>
   )
 }

@@ -32,6 +32,9 @@ export const NAV_ITEMS: NavItem[] = [
   // 兼容旧深链接：不在主导航重复显示，findNavItem 仍能找到标题
   { path: '/integration', label: '接入说明', icon: 'plug', title: '接入说明', description: '外部系统如何把测试定义与结果写入平台' },
   { path: '/database', label: '数据设计', icon: 'layers', title: '数据设计', description: '实体关系、字段字典与写入流程' },
+  // 非导航页（从顶栏/设置进入）：补标题让面包屑第二段不再回落成品牌名
+  { path: '/about', label: '关于', icon: 'plug', title: '关于', description: '产品版本、构建标识与本机使用边界' },
+  { path: '/legacy-review', label: '旧数据预览', icon: 'layers', title: '旧数据预览', description: '旧演示数据的逐项处理预览' },
 ]
 
 export const NAV_GROUPS: NavGroup[] = [

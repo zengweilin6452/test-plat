@@ -10,10 +10,12 @@
  *
  * 数据源：
  *  - 清单：已完成运行（state='completed'）；
- *  - 「查看报告」：GET /runs/{id}/report + GET /runs/{id}/artifacts（ReportDrawer）。
+ *  - 「查看报告」：GET /runs/{id}/report + GET /runs/{id}/artifacts（ReportDrawer）；
+ *  - 「在线查看」：GET /runs/{id}/report/view（ReportViewer，后端 view_url 直接内嵌渲染）。
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { describeError } from '../api/client'
 import { fetchRuns } from '../api/endpoints'
 import { useEffectiveContext } from '../store/effectiveContext'
@@ -24,6 +26,7 @@ import { ContextBar, Toolbar } from '../components/PageBits'
 import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
 import { ReportDrawer } from '../components/ReportDrawer'
+import { ReportViewer } from '../components/ReportViewer'
 import { TARGET_CATALOG, isPerformanceType } from '../constants'
 import { displayStatus } from '../lib/display'
 import { fmtDateTime } from '../lib/fmt'
@@ -75,6 +78,8 @@ export function ReportsPage() {
   const { targetScope, setTargetScope } = useTargetScope()
   const ctx = useEffectiveContext()
   const [activeRun, setActiveRun] = useState<RunRecord | null>(null)
+  // 在线查看：直接打开后端拼好的 view_url（iframe 沙箱渲染），不经过摘要抽屉
+  const [viewingRun, setViewingRun] = useState<RunRecord | null>(null)
   // 服务端过滤 + 游标分页（工单 10）：q / module / 页栈变化都重新拉取；
   // 过滤条件变化时页栈清零，旧游标带新过滤条件会被服务端 422 拒掉。
   const [keyword, setKeyword] = useState('')
@@ -108,6 +113,32 @@ export function ReportsPage() {
   const emptyCopy = reportsEmptyCopy(listPhase, filtered)
   const nextCursor = runsQuery.data?.next_cursor ?? null
   const pageNo = pages.length + 1
+
+  // 深链 #/reports?run=<id>（归档阻塞提示等入口）：定位并打开该运行的报告。
+  // 第一页找不到时按编号走服务端 q 过滤再试一次；仍找不到如实提示，不静默。
+  const location = useLocation()
+  const navigate = useNavigate()
+  const deepLinkRunId = new URLSearchParams(location.search).get('run')
+  const [deepLinkMiss, setDeepLinkMiss] = useState(false)
+  useEffect(() => {
+    if (!deepLinkRunId || runsQuery.isLoading) return
+    const found = completed.find((run) => run.id === deepLinkRunId)
+    if (found) {
+      setActiveRun(found)
+      navigate('/reports', { replace: true })
+      return
+    }
+    if (!keyword && completed.length > 0 && !filtered) {
+      setKeyword(deepLinkRunId)
+      return
+    }
+    if (keyword && !runsQuery.isFetching) setDeepLinkMiss(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkRunId, runsQuery.isLoading, runsQuery.isFetching, keyword, filtered, completed, navigate])
+  useEffect(() => {
+    // 清空搜索或重新输入时清除「未找到」提示
+    if (!deepLinkRunId) setDeepLinkMiss(false)
+  }, [deepLinkRunId, keyword])
 
 
   return (
@@ -153,13 +184,43 @@ export function ReportsPage() {
           </Notice>
         </div>
       ) : null}
+      {deepLinkMiss && !error ? (
+        <div className="mb">
+          <Notice tone="amber" title="没有定位到该运行的完成报告">
+            链接里的运行（{deepLinkRunId}）当前不在已完成清单中；它可能尚未完成或已不可用，可从任务中心查看运行状态。
+          </Notice>
+        </div>
+      ) : null}
 
       {listPhase === 'loading' ? (
         <Empty loading title={emptyCopy.title} description={emptyCopy.description} />
       ) : listPhase === 'error' ? (
         <Empty title={emptyCopy.title} description={emptyCopy.description} />
       ) : completed.length === 0 ? (
-        <Empty icon="report" title={emptyCopy.title} description={emptyCopy.description} />
+        <Empty
+          icon="report"
+          title={emptyCopy.title}
+          description={emptyCopy.description}
+          actions={
+            filtered ? (
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  setKeyword('')
+                  setModule('')
+                  setPages([])
+                }}
+              >
+                清除搜索与筛选
+              </button>
+            ) : (
+              <Link className="btn" to="/tasks">
+                前往任务中心
+              </Link>
+            )
+          }
+        />
       ) : (
         <div className="resource-grid">
           {completed.map((run) => (
@@ -178,9 +239,14 @@ export function ReportsPage() {
               <p className="mt">{run.outcome === 'not_tested' && run.not_tested_reason ? run.not_tested_reason : conclusionText(run.test_type, run.outcome)}</p>
               <footer>
                 <span className="muted small">{fmtDateTime(run.ended_at)}</span>
-                <LinkButton onClick={() => setActiveRun(run)}>
-                  查看报告 <span aria-hidden="true">›</span>
-                </LinkButton>
+                <span className="flex">
+                  <LinkButton onClick={() => setActiveRun(run)}>
+                    查看报告 <span aria-hidden="true">›</span>
+                  </LinkButton>
+                  {run.view_url ? (
+                    <LinkButton onClick={() => setViewingRun(run)}>在线查看</LinkButton>
+                  ) : null}
+                </span>
               </footer>
             </section>
           ))}
@@ -215,6 +281,16 @@ export function ReportsPage() {
         open={Boolean(activeRun)}
         run={activeRun}
         onClose={() => setActiveRun(null)}
+      />
+
+      <ReportViewer
+        open={Boolean(viewingRun)}
+        viewUrl={viewingRun?.view_url ?? null}
+        title={viewingRun ? `${viewingRun.name} · 在线报告` : '在线报告'}
+        description={
+          viewingRun ? `${viewingRun.display_id} · 报告由后端渲染，页面只做展示，不参与判定` : undefined
+        }
+        onClose={() => setViewingRun(null)}
       />
     </>
   )

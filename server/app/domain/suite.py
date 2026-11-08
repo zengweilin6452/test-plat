@@ -171,15 +171,20 @@ def validate_manifest(manifest: Any, *, test_type: str) -> list[str]:
 
 
 def scenario_problems(scenario: Any) -> list[str]:
-    """声明式场景的必需字段：duration_s（10–3600 整数）与 items（非空字符串列表）。
+    """声明式场景的必需与可选字段校验。
 
-    套件发布、修订 readiness、派发合并都用这一份规则；runner 侧
-    ``testdock_runner.perf_config`` 是同一口径的镜像（跨进程不共享模块，
-    由 tests/test_issue06_perf_scenario.py 的边界用例锁死不漂移）。
+    必需：duration_s（10–3600 整数）、items（非空字符串列表）。
+    可选能力字段（与 runner 侧 testdock_runner.perf_config 同一口径镜像，
+    由 tests/test_issue06_perf_scenario.py 锁死不漂移）：start_mode、
+    capture_har、net_profile/net_tier/net_port/net_mitmdump/net_overrides、
+    frame_poll、page_marks、ui_timeout_s（joint 兼容位）。未知字段一律拒绝。
     """
     if not isinstance(scenario, dict) or not scenario:
         return ["缺少声明式性能场景（duration_s 与采集项）"]
     problems: list[str] = []
+    unknown = sorted(set(scenario) - set(_SCENARIO_KEYS))
+    if unknown:
+        problems.append("场景包含未知字段：" + "、".join(unknown))
     duration = scenario.get("duration_s")
     if not isinstance(duration, int) or isinstance(duration, bool):
         problems.append("性能场景 duration_s 必须是整数秒")
@@ -192,6 +197,95 @@ def scenario_problems(scenario: Any) -> list[str]:
         isinstance(item, str) and item.strip() for item in items
     ):
         problems.append("性能场景采集项 items 必须是非空字符串列表")
+    start_mode = scenario.get("start_mode")
+    if start_mode is not None and (not isinstance(start_mode, str) or start_mode not in _STARTUP_MODES):
+        problems.append(f"start_mode 只支持 {'/'.join(_STARTUP_MODES)} 或不填")
+    for flag, label in (("capture_har", "capture_har"), ("frame_poll", "frame_poll")):
+        value = scenario.get(flag)
+        if value is not None and not isinstance(value, bool):
+            problems.append(f"{label} 必须是布尔值")
+    problems.extend(_net_problems(scenario))
+    problems.extend(_page_mark_problems(scenario))
+    ui_timeout = scenario.get("ui_timeout_s")
+    if ui_timeout is not None and (
+        not isinstance(ui_timeout, int) or isinstance(ui_timeout, bool) or ui_timeout <= 0
+    ):
+        problems.append("ui_timeout_s 必须是正整数")
+    return problems
+
+
+#: 与 vendor netprof.PROFILE_NAMES / startup.STARTUP_MODES 对齐
+_NET_PROFILES = ("none", "4g", "3g", "weak", "custom")
+_NET_TIERS = ("passthrough", "decrypt")
+_STARTUP_MODES = ("cold", "warm")
+_SCENARIO_KEYS = (
+    "duration_s",
+    "items",
+    "start_mode",
+    "capture_har",
+    "net_profile",
+    "net_tier",
+    "net_port",
+    "net_mitmdump",
+    "net_overrides",
+    "frame_poll",
+    "page_marks",
+    "ui_timeout_s",
+)
+
+
+def _net_problems(scenario: dict[str, Any]) -> list[str]:
+    problems: list[str] = []
+    profile = scenario.get("net_profile")
+    if profile is not None:
+        if not isinstance(profile, str) or profile not in _NET_PROFILES:
+            problems.append(f"net_profile 只支持 {'/'.join(_NET_PROFILES)} 或不填")
+    tier = scenario.get("net_tier")
+    if tier is not None and (not isinstance(tier, str) or tier not in _NET_TIERS):
+        problems.append(f"net_tier 只支持 {'/'.join(_NET_TIERS)} 或不填")
+    port = scenario.get("net_port")
+    if port is not None and (
+        not isinstance(port, int) or isinstance(port, bool) or not (1 <= port <= 65535)
+    ):
+        problems.append("net_port 必须是 1–65535 的整数")
+    mitmdump = scenario.get("net_mitmdump")
+    if mitmdump is not None and (not isinstance(mitmdump, str) or not mitmdump.strip()):
+        problems.append("net_mitmdump 必须是 mitmdump 可执行文件路径")
+    overrides = scenario.get("net_overrides")
+    if overrides is not None:
+        if not isinstance(overrides, dict):
+            problems.append("net_overrides 必须是对象（latency_ms/down_kbps/up_kbps/loss_pct）")
+        else:
+            for name in ("latency_ms", "down_kbps", "up_kbps", "loss_pct"):
+                value = overrides.get(name)
+                if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+                    problems.append(f"net_overrides.{name} 必须是非负数字")
+                elif name == "loss_pct" and value > 100:
+                    problems.append("net_overrides.loss_pct 不能超过 100")
+        if profile == "custom" and len(overrides) < 4:
+            problems.append("net_profile=custom 必须提供全部四个 net_overrides 参数")
+    if profile == "custom" and overrides is None:
+        problems.append("net_profile=custom 必须提供 net_overrides")
+    return problems
+
+
+def _page_mark_problems(scenario: dict[str, Any]) -> list[str]:
+    marks = scenario.get("page_marks")
+    if marks is None:
+        return []
+    if not isinstance(marks, list) or not marks:
+        return ["page_marks 必须是非空的 {page, at_s} 列表"]
+    problems: list[str] = []
+    for index, mark in enumerate(marks):
+        if not isinstance(mark, dict):
+            problems.append(f"page_marks[{index}] 必须是 {{\"page\": \"页面名\", \"at_s\": 秒}}")
+            continue
+        page = mark.get("page")
+        at_s = mark.get("at_s")
+        if not isinstance(page, str) or not page.strip():
+            problems.append(f"page_marks[{index}].page 必须是非空字符串")
+        if not isinstance(at_s, (int, float)) or isinstance(at_s, bool) or at_s < 0:
+            problems.append(f"page_marks[{index}].at_s 必须是不小于 0 的数字（相对采集窗口起点秒）")
     return problems
 
 

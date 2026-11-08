@@ -26,6 +26,7 @@ import {
   fetchSuites,
 } from '../api/endpoints'
 import { MODULE_NAMES, TARGET_CATALOG } from '../constants'
+import { Disclosure } from './Disclosure'
 import { useEffectiveContext } from '../store/effectiveContext'
 import { DASH } from '../lib/fmt'
 import {
@@ -444,12 +445,28 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
    */
   const fieldErrors = useMemo<WizardErrors>(() => {
     const live = validateStep(step, form)
-    const shown = touched ? errors : live
-    const merged: WizardErrors = { ...live, ...shown }
-    for (const key of Object.keys(merged) as (keyof WizardForm)[]) {
-      if (!live[key]) delete merged[key]
+    if (touched) {
+      // 已交互：展示该步的显式校验结果（含空值提示）
+      const merged: WizardErrors = { ...live, ...errors }
+      for (const key of Object.keys(merged) as (keyof WizardForm)[]) {
+        if (!live[key]) delete merged[key]
+      }
+      return merged
     }
-    return merged
+    // 未交互时不因必填项为空就报红（渐进式披露：错误就地提示，但等用户动手后）；
+    // 格式确实非法的（如已填但包名不合法）仍然提示。
+    const filtered: WizardErrors = {}
+    for (const key of Object.keys(live) as (keyof WizardForm)[]) {
+      const value = form[key]
+      const isEmpty =
+        typeof value === 'string'
+          ? value.trim() === ''
+          : Array.isArray(value)
+            ? value.length === 0
+            : value == null
+      if (!isEmpty && live[key]) filtered[key] = live[key]
+    }
+    return filtered
   }, [step, form, touched, errors])
 
   function update<K extends keyof WizardForm>(key: K, value: WizardForm[K]) {
@@ -555,7 +572,8 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
         <div className="form-grid">
           <div className="field">
             <span className="field-label">目标端</span>
-            <div className="choice-grid three">
+            {/* 渐进式披露：选择项压缩为一行 chips（规则 1），行为与原大卡一致 */}
+            <div className="choice-row">
               {PLATFORMS.map((platform) => (
                 <button
                   key={platform}
@@ -583,7 +601,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
 
           <div className="field">
             <span className="field-label">测试模块</span>
-            <div className="choice-grid three">
+            <div className="choice-row">
               {MODULES.map((module) => (
                 <button
                   key={module}
@@ -678,33 +696,39 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
             <FieldError id={`${fieldId('identifier')}-error`} message={fieldErrors.identifier} />
           </div>
 
-          <div className="form-grid two">
-            <div className="field">
-              <label htmlFor={fieldId('appVersion')}>应用版本</label>
-              <input
-                id={fieldId('appVersion')}
-                value={form.appVersion}
-                maxLength={40}
-                placeholder="例如 3.8.0-rc.2（示例不会自动提交）"
-                aria-invalid={Boolean(fieldErrors.appVersion)}
-                aria-describedby={fieldErrors.appVersion ? `${fieldId('appVersion')}-error` : undefined}
-                onChange={(event) => update('appVersion', event.target.value)}
-              />
-              <div className="field-hint">可留空，后端记录实际构建</div>
-              <FieldError id={`${fieldId('appVersion')}-error`} message={fieldErrors.appVersion} />
+          {/* 渐进式披露：两个可留空的次级字段默认收起，摘要显示已填项数（规则 3/4） */}
+          <Disclosure
+            title="高级配置（可选）"
+            summary={`已填 ${(form.appVersion.trim() ? 1 : 0) + (form.scenario.trim() ? 1 : 0)} 项`}
+          >
+            <div className="form-grid two">
+              <div className="field">
+                <label htmlFor={fieldId('appVersion')}>应用版本</label>
+                <input
+                  id={fieldId('appVersion')}
+                  value={form.appVersion}
+                  maxLength={40}
+                  placeholder="例如 3.8.0-rc.2（示例不会自动提交）"
+                  aria-invalid={Boolean(fieldErrors.appVersion)}
+                  aria-describedby={fieldErrors.appVersion ? `${fieldId('appVersion')}-error` : undefined}
+                  onChange={(event) => update('appVersion', event.target.value)}
+                />
+                <div className="field-hint">可留空，后端记录实际构建</div>
+                <FieldError id={`${fieldId('appVersion')}-error`} message={fieldErrors.appVersion} />
+              </div>
+              <div className="field">
+                <label htmlFor={fieldId('scenario')}>测试套件 / 场景</label>
+                <input
+                  id={fieldId('scenario')}
+                  value={form.scenario}
+                  maxLength={120}
+                  placeholder={form.module === 'perf' ? '首页滑动' : '核心链路回归'}
+                  onChange={(event) => update('scenario', event.target.value)}
+                />
+                <div className="field-hint">请选择可信来源登记套件；自由填写的场景名称不会自动成为套件版本。</div>
+              </div>
             </div>
-            <div className="field">
-              <label htmlFor={fieldId('scenario')}>测试套件 / 场景</label>
-              <input
-                id={fieldId('scenario')}
-                value={form.scenario}
-                maxLength={120}
-                placeholder={form.module === 'perf' ? '首页滑动' : '核心链路回归'}
-                onChange={(event) => update('scenario', event.target.value)}
-              />
-              <div className="field-hint">请选择可信来源登记套件；自由填写的场景名称不会自动成为套件版本。</div>
-            </div>
-          </div>
+          </Disclosure>
         </div>
       ) : null}
 
@@ -723,7 +747,7 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
               ) : devices.length === 0 && !resourcesError ? (
                 <div className="muted small">当前没有登记在册的 Android 设备。</div>
               ) : (
-                <div className="choice-grid">
+                <div className="choice-grid device-list">
                   {devices.map((device) => {
                     const selectable = isDeviceSelectable(device)
                     return (
@@ -898,79 +922,79 @@ export function TaskWizard({ open, onClose, onCreated, initialPlatform, initialM
               onRegistered={(id, versionId) => setForm(prev => ({ ...prev, suiteId: id, suiteVersionId: versionId ?? '' }))}
             />
           </> : null}
-          {form.module !== 'perf' ? <TemplatePicker value={form.imageTemplates ?? []} onChange={value => update('imageTemplates', value)} /> : null}
+          {form.module !== 'perf' ? (
+            <Disclosure
+              title="固定图像模板（可选）"
+              summary={(form.imageTemplates?.length ?? 0) > 0 ? `已选 ${form.imageTemplates!.length} 个` : '未选择'}
+            >
+              <TemplatePicker value={form.imageTemplates ?? []} onChange={value => update('imageTemplates', value)} />
+            </Disclosure>
+          ) : null}
+          {form.module !== 'ui' ? (
           <div className="form-grid two">
             <div className="field">
               <label htmlFor={fieldId('duration')}>
-                采集时长（秒）{form.module !== 'ui' ? <span className="text-red"> *</span> : null}
+                采集时长（秒）<span className="text-red"> *</span>
               </label>
               <input
                 id={fieldId('duration')}
                 value={form.duration}
                 inputMode="numeric"
-                disabled={form.module === 'ui'}
                 placeholder="300"
                 aria-invalid={Boolean(fieldErrors.duration)}
                 aria-describedby={fieldErrors.duration ? `${fieldId('duration')}-error` : undefined}
                 onChange={(event) => update('duration', event.target.value)}
               />
-              <div className="field-hint">
-                {form.module === 'ui' ? 'UI 自动化不采集性能指标，时长不适用' : '整数，10–3600 秒'}
-              </div>
+              <div className="field-hint">整数，10–3600 秒</div>
               <FieldError id={`${fieldId('duration')}-error`} message={fieldErrors.duration} />
             </div>
             <div className="field">
               <span className="field-label">
-                采集指标{form.module !== 'ui' ? <span className="text-red"> *</span> : null}
+                采集指标<span className="text-red"> *</span>
               </span>
-              {form.module === 'ui' ? (
-                <div className="muted small">不采集性能指标</div>
-              ) : (
-                <>
-                  <div role="group" aria-label="采集指标" style={{ display: 'grid', gap: 6 }}>
-                    {PERF_ITEM_OPTIONS.map((option) => (
-                      <label
-                        key={option.value}
-                        className="small"
-                        style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={form.perfItems.includes(option.value)}
-                          onChange={(event) => {
-                            setForm((prev) => {
-                              const current = normalizePerfItems(prev.perfItems)
-                              const next = event.target.checked
-                                ? [...current, option.value]
-                                : current.filter((item) => item !== option.value)
-                              return { ...prev, perfItems: normalizePerfItems(next) }
-                            })
-                          }}
-                        />
-                        <span>
-                          {option.label}
-                          <span className="muted"> · {option.description}</span>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                  <div className="field-hint">
-                    至少选一项。FPS 首次采集可能弹系统告知框；Temperature / GPU 由补采旁路自动采集。
-                  </div>
-                  {scenarioMismatch && selectedScenario ? (
-                    <div className="field-error" role="alert">
-                      当前采集配置与所选版本场景不一致（
-                      {selectedScenario.duration_s !== null ? `${selectedScenario.duration_s}s · ` : ''}
-                      {perfItemsLabel(selectedScenario.items) || '未记录采集项'}）。提交会被拒绝，
-                      请改回版本场景或发布新版本。
-                    </div>
-                  ) : null}
-                  <FieldError id={`${fieldId('perfItems')}-error`} message={fieldErrors.perfItems} />
-                </>
-              )}
+              <div role="group" aria-label="采集指标" style={{ display: 'grid', gap: 6 }}>
+                {PERF_ITEM_OPTIONS.map((option) => (
+                  <label
+                    key={option.value}
+                    className="small"
+                    style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.perfItems.includes(option.value)}
+                      onChange={(event) => {
+                        setForm((prev) => {
+                          const current = normalizePerfItems(prev.perfItems)
+                          const next = event.target.checked
+                            ? [...current, option.value]
+                            : current.filter((item) => item !== option.value)
+                          return { ...prev, perfItems: normalizePerfItems(next) }
+                        })
+                      }}
+                    />
+                    <span>
+                      {option.label}
+                      <span className="muted"> · {option.description}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div className="field-hint">
+                至少选一项。FPS 首次采集可能弹系统告知框；Temperature / GPU 由补采旁路自动采集。
+              </div>
+              {scenarioMismatch && selectedScenario ? (
+                <div className="field-error" role="alert">
+                  当前采集配置与所选版本场景不一致（
+                  {selectedScenario.duration_s !== null ? `${selectedScenario.duration_s}s · ` : ''}
+                  {perfItemsLabel(selectedScenario.items) || '未记录采集项'}）。提交会被拒绝，
+                  请改回版本场景或发布新版本。
+                </div>
+              ) : null}
+              <FieldError id={`${fieldId('perfItems')}-error`} message={fieldErrors.perfItems} />
               <div className="field-hint">门禁阈值由后端基线策略给出，页面不自行判定</div>
             </div>
           </div>
+          ) : null}
         </div>
       ) : null}
 

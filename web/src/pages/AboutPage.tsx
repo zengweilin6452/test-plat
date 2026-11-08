@@ -1,6 +1,7 @@
 /** 关于页：真实版本、提交标识不可用说明、帮助入口。 */
 import { Link } from 'react-router-dom'
 import { PageHeading, Panel, PanelHead } from '../components/Card'
+import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
 import { BRAND, usePlatform } from '../store/platform'
 
@@ -12,7 +13,7 @@ export function AboutPage() {
       <Panel>
         <PanelHead title="版本与构建" hint={BRAND.mode} />
         <div className="panel-pad">
-          {loading ? <p>正在读取产品版本…</p> : null}
+          {loading ? <Empty loading title="正在读取产品版本" description="正在请求平台能力信息…" /> : null}
           {error ? <Notice tone="red" title="产品信息读取失败">{error}</Notice> : null}
           {capabilities ? (
             <>

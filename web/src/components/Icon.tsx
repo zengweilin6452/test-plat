@@ -71,8 +71,7 @@ export function Icon({ name, size = 19, className, title }: IconProps) {
     <svg
       className={'icon' + (className ? ' ' + className : '')}
       viewBox="0 0 24 24"
-      width={size}
-      height={size}
+      style={{ width: size, height: size }}
       aria-hidden={title ? undefined : true}
       role={title ? 'img' : undefined}
       focusable="false"

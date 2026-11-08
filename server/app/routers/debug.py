@@ -41,6 +41,7 @@ import base64
 import contextlib
 import json
 import logging
+import os
 import re
 import secrets
 import subprocess
@@ -463,15 +464,77 @@ def register_viewer_port(session_id: str, port: int) -> None:
     _READY_PORTS[str(session_id)] = int(port)
 
 
+def _find_runner_pid_by_run_id(run_id: str) -> int | None:
+    """进程表丢失（API 重启过）时按命令行找该 run_id 的 runner 进程。
+
+    spawn 的命令行固定是 `python -m testdock_runner ... --run-id <run_id>`，
+    所以限定 python 进程名——否则扫描进程（powershell）自己的命令行也含
+    脚本文本，会把扫描器本身当成 runner。
+    """
+    marker = f"--run-id {run_id}"
+    if os.name == "nt":
+        script = (
+            "Get-CimInstance Win32_Process | Where-Object { "
+            "$_.Name -like 'python*' "
+            "-and $_.CommandLine "
+            "-and $_.CommandLine.Contains('testdock_runner') "
+            f"-and $_.CommandLine.Contains('{marker}') }} "
+            "| ForEach-Object { $_.ProcessId }"
+        )
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", script],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        for token in (completed.stdout or "").split():
+            try:
+                pid = int(token)
+            except ValueError:
+                continue
+            if pid != os.getpid():
+                return pid
+        return None
+    try:
+        completed = subprocess.run(
+            ["pgrep", "-f", f"testdock_runner.*{run_id}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    for token in (completed.stdout or "").split():
+        try:
+            pid = int(token)
+        except ValueError:
+            continue
+        if pid != os.getpid():
+            return pid
+    return None
+
+
 def _terminate_runner_blocking(run_id: str) -> None:
-    """杀 runner 进程树（同步 subprocess，避开 Selector loop 不支持子进程的限制）。"""
+    """杀 runner 进程树（同步 subprocess，避开 Selector loop 不支持子进程的限制）。
+
+    `_PROCESSES` 是进程内表，API 重启后为空——只查它的话，重启前 spawn 的
+    runner 会漏杀，成为持有本地设备锁的孤儿（新会话 runner 全部 DeviceBusy，
+    reason=local_lease_busy）。所以进程表没有时按命令行兜底扫描。
+    """
     import subprocess as subprocess_mod
 
     proc = spawn_mod._PROCESSES.get(str(run_id))
     pid = proc.pid if proc is not None else None
+    if pid is None:
+        pid = _find_runner_pid_by_run_id(str(run_id))
     if pid:
-        subprocess_mod.run(
-            ["taskkill", "/T", "/F", "/PID", str(pid)],
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(pid)]
+            if os.name == "nt"
+            else ["kill", "-9", str(pid)],
             capture_output=True,
         )
     spawn_mod._PROCESSES.pop(str(run_id), None)
@@ -693,11 +756,47 @@ async def _close_session(session_id: str, *, reason: str) -> dict[str, Any] | No
     return {"id": str(session_id), "state": "closed"}
 
 
+async def _last_close_reason(session: AsyncSession, session_id: str) -> str | None:
+    """会话关闭原因（审计里的最新一条 debug_session_closed）。
+
+    会话行没有 reason 列；关闭路径（client_closed / runner_exit / spawn_failed /
+    local_lease_busy…）都写审计，detail 据此给前端一个可行动的失败原因。
+    """
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT changes FROM audit_events
+                 WHERE entity_type = 'debug_session'
+                   AND entity_id = CAST(:sid AS uuid)
+                   AND action = 'debug_session_closed'
+                 ORDER BY created_at DESC
+                 LIMIT 1
+                """
+            ),
+            {"sid": str(session_id)},
+        )
+    ).mappings().first()
+    if row is None or row["changes"] is None:
+        return None
+    changes = row["changes"]
+    if isinstance(changes, str):
+        try:
+            changes = json.loads(changes)
+        except ValueError:
+            return None
+    reason = changes.get("reason") if isinstance(changes, dict) else None
+    return str(reason) if reason else None
+
+
 @router.get("/debug-sessions/{session_id}")
 async def get_debug_session(session_id: str, session: AsyncSession = Depends(get_session)) -> dict:
     row = await _session_row(session, session_id)
     viewer_port = _READY_PORTS.get(str(row["id"])) if row["state"] == "active" else None
-    return _view(row, viewer_port=viewer_port)
+    view = _view(row, viewer_port=viewer_port)
+    if row["state"] in ("closed", "lost"):
+        view["close_reason"] = await _last_close_reason(session, str(row["id"]))
+    return view
 
 
 @router.delete("/debug-sessions/{session_id}")
@@ -1229,13 +1328,21 @@ async def debug_video_socket(websocket: WebSocket, session_id: str) -> None:
     _VIDEO_CLIENTS[sid] = _VIDEO_CLIENTS.get(sid, 0) + 1
 
     upstream = None
+    upstream_failed = False
     try:
-        upstream = await websockets.connect(
-            f"ws://127.0.0.1:{port}{_viewer_device_path('/api/v1/preview/video', str(row['resource_key']))}",
-            max_size=None,
-            origin=f"http://127.0.0.1:{port}",
-        )
-        await upstream.send(json.dumps({"proto": 1}))
+        try:
+            upstream = await websockets.connect(
+                f"ws://127.0.0.1:{port}{_viewer_device_path('/api/v1/preview/video', str(row['resource_key']))}",
+                max_size=None,
+                origin=f"http://127.0.0.1:{port}",
+            )
+            await upstream.send(json.dumps({"proto": 1}))
+        except Exception:
+            # viewer 通道没起来（runner 被杀 / scrcpy 启动失败等）：用专门的
+            # 关闭码告诉前端「重连救不了，需要关闭会话重进」，而不是 1000
+            # 让前端误判成正常结束。
+            upstream_failed = True
+            raise
 
         async def to_client() -> None:
             while True:
@@ -1276,7 +1383,7 @@ async def debug_video_socket(websocket: WebSocket, session_id: str) -> None:
             with contextlib.suppress(Exception):
                 await upstream.close()
         with contextlib.suppress(Exception):
-            await websocket.close(code=1000)
+            await websocket.close(code=4450 if upstream_failed else 1000)
 
 
 @router.websocket("/ws/debug/{session_id}/gesture")

@@ -75,7 +75,7 @@ export function TasksPage() {
    * 不在这里乐观插入行 —— 列表口径以后端为准。
    */
   function handleCreated(created: CreateTaskResponse) {
-    toast.show('任务已创建：' + created.display_id + '（编号 ' + created.id + '）')
+    toast.show('任务已创建：' + created.display_id + '（编号 ' + created.id + '）', 'success')
     setWizardOpen(false)
     void queryClient.invalidateQueries({ queryKey: ['tasks'] })
   }
@@ -181,7 +181,7 @@ export function TasksPage() {
           title="任务列表"
           hint="每行展示最新修订与最近一次运行；点击任务查看配置，查看执行打开运行详情"
         />
-        <div style={{ padding: '0 20px' }}>
+        <div style={{ padding: '0 var(--space-9)' }}>
           <Toolbar search={keyword} onSearch={(value) => patchParams({ q: value || null })}>
             <select
               value={testType}
