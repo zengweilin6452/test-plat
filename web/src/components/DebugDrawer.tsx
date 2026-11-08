@@ -848,6 +848,15 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   const sessionActive = detailQuery.data?.state === 'active'
 
   // ------------------------------------------------------------ 预览传输（H.264 → JPEG 回退）
+  /** 手动重连实时画面：清退避计数、按当前传输模式重开通道，不必拆掉整个会话。
+   * 自动重连有 30s 上限（WS_CONNECT_RETRIES），租约过期/通道僵死时这是唯一出口。 */
+  const reconnectLive = useCallback(() => {
+    setWsNotice(null)
+    setPreviewNote(null)
+    setWsStatus('idle')
+    wsRetriesRef.current = 0
+    setWsAttempt((n) => n + 1)
+  }, [])
   useEffect(() => {
     if (!open || !session) return
     const choice = choosePreviewTransport(typeof VideoDecoder !== 'undefined')
@@ -896,7 +905,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
       player.close()
       if (h264PlayerRef.current === player) h264PlayerRef.current = null
     }
-  }, [open, session, previewMode, sessionActive])
+  }, [open, session, previewMode, sessionActive, wsAttempt])
 
   useEffect(() => {
     if (!open || previewMode !== 'h264') return
@@ -1496,14 +1505,21 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
           <section className="phone-panel">
             <div className="between">
               <Badge tone={frozen ? 'amber' : 'blue'} dot>{frozen ? '冻结快照' : '实时画面'}</Badge>
-              <span className="small muted">
-                {previewMode === 'h264'
-                  ? wsStatus === 'open'
-                    ? 'H.264 · ' + (previewFps ?? 0) + 'fps'
-                    : 'H.264 连接中'
-                  : previewNote
-                    ? 'JPEG 回退'
-                    : wsText}
+              <span className="flex" style={{ gap: 8 }}>
+                <span className="small muted">
+                  {previewMode === 'h264'
+                    ? wsStatus === 'open'
+                      ? 'H.264 · ' + (previewFps ?? 0) + 'fps'
+                      : 'H.264 连接中'
+                    : previewNote
+                      ? 'JPEG 回退'
+                      : wsText}
+                </span>
+                {wsStatus !== 'open' ? (
+                  <Button size="small" onClick={reconnectLive}>
+                    重新连接
+                  </Button>
+                ) : null}
               </span>
             </div>
             <div
