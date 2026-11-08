@@ -15,12 +15,14 @@
  * 联动（joint）运行同样产出性能组件与门禁结论，因此一并列出。
  */
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { request, describeError } from '../api/client'
 import { createGateEvaluation, fetchAnalysis, fetchRuns } from '../api/endpoints'
 import { Badge, StatusBadge } from '../components/Badge'
 import { Button } from '../components/Button'
 import { PageHeading, Panel, PanelHead } from '../components/Card'
+import { Disclosure } from '../components/Disclosure'
 import { ContextBar, PlannedNotice, PrimaryAction } from '../components/PageBits'
 import { Empty } from '../components/Empty'
 import { Notice } from '../components/Notice'
@@ -100,7 +102,7 @@ function ScopedPerfPage() {
   function openTaskOfRun(run: RunRecord) { setActiveRunId(run.id) }
 
   function handleCreated(created: CreateTaskResponse) {
-    toast.show('任务已创建：' + created.display_id + '（编号 ' + created.id + '）')
+    toast.show('任务已创建：' + created.display_id + '（编号 ' + created.id + '）', 'success')
     setWizardOpen(false)
     void queryClient.invalidateQueries({ queryKey: ['tasks'] })
     void queryClient.invalidateQueries({ queryKey: ['runs'] })
@@ -156,12 +158,12 @@ function ScopedPerfPage() {
     onSuccess: (result) => {
       const id = result.evaluation_id ?? result.id
       setEvaluationId(id)
-      toast.show('试算完成：' + verdictText(result.verdict) + '（未改写历史报告）')
+      toast.show('试算完成：' + verdictText(result.verdict) + '（未改写历史报告）', 'success')
       void queryClient.invalidateQueries({ queryKey: ['analysis', currentRunId] })
     },
     onError: (mutationError) => {
       const described = describeError(mutationError)
-      toast.show('试算失败（' + described.code + '）：' + described.message)
+      toast.show('试算失败（' + described.code + '）：' + described.message, 'error')
     },
   })
 
@@ -230,11 +232,14 @@ function ScopedPerfPage() {
         </div>
       ) : null}
 
+      {/* 渐进式披露：判定规则的完整说明默认收起，首屏只留一行入口（规则 1/4） */}
       <div className="mb">
-        <Notice tone="blue" icon="alert" title="门禁结论不在前端计算">
-          性能结论由后端根据阈值与基线评估后写入 gate_evaluations。样本不足或基线不可比时结论为「未判定」，
-          页面不会把它显示成未通过或已通过；指标缺失会显示具体原因，而不是 0。
-        </Notice>
+        <Disclosure title="为什么结论可能是「未判定」？" summary="判定规则说明">
+          <Notice tone="blue" icon="alert" title="门禁结论不在前端计算">
+            性能结论由后端根据阈值与基线评估后写入 gate_evaluations。样本不足或基线不可比时结论为「未判定」，
+            页面不会把它显示成未通过或已通过；指标缺失会显示具体原因，而不是 0。
+          </Notice>
+        </Disclosure>
       </div>
 
       {error ? (
@@ -256,7 +261,7 @@ function ScopedPerfPage() {
           hint="指标取 median；门禁逐项来自后端 checks，试算只新增判定行"
           actions={
             currentRunId ? (
-              <a className="link-btn" href={`/api/v1/runs/${currentRunId}/report/export`}>
+              <a className="link-btn" href={`/api/v1/runs/${currentRunId}/report/export`} download>
                 导出报告 JSON
               </a>
             ) : null
@@ -339,6 +344,13 @@ function ScopedPerfPage() {
               <Empty
                 title={runsEmptyCopy.title}
                 description={runsEmptyCopy.description}
+                actions={
+                  planned ? null : (
+                    <Link className="btn" to="/tasks">
+                      前往任务中心发起运行
+                    </Link>
+                  )
+                }
               />
             )
           ) : (

@@ -9,6 +9,7 @@
  * 硬约束：断言结果与失败现场都来自后端，接口未接入时只显示空态。
  */
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { describeError } from '../api/client'
 import {
@@ -166,7 +167,7 @@ export function UiPage() {
   function openTaskOfRun(run: RunRecord) { setActiveRunId(run.id) }
 
   function handleCreated(created: CreateTaskResponse) {
-    toast.show('任务已创建：' + created.display_id + '（编号 ' + created.id + '）')
+    toast.show('任务已创建：' + created.display_id + '（编号 ' + created.id + '）', 'success')
     setWizardOpen(false)
     void queryClient.invalidateQueries({ queryKey: ['tasks'] })
     void queryClient.invalidateQueries({ queryKey: ['runs'] })
@@ -445,7 +446,7 @@ export function UiPage() {
         />
         {tab === 'runs' ? (
           <>
-            <div style={{ padding: '0 20px' }}>
+            <div style={{ padding: '0 var(--space-9)' }}>
               <Toolbar search={keyword} onSearch={setKeyword}>
                 <span className="muted small">按运行名称或编号搜索</span>
               </Toolbar>
@@ -459,6 +460,13 @@ export function UiPage() {
                 icon="phone"
                 title={runsEmptyCopy.title}
                 description={runsEmptyCopy.description}
+                actions={
+                  planned ? null : (
+                    <Link className="btn" to="/tasks">
+                      前往任务中心发起运行
+                    </Link>
+                  )
+                }
               />
             ) : (
               <Table
@@ -477,7 +485,7 @@ export function UiPage() {
           <>
             {currentApp ? <div className="panel-pad"><SuiteRegistration key={currentApp.id} applicationId={currentApp.id} testType="ui" onRegistered={(id) => { setSuiteId(id); void queryClient.invalidateQueries({ queryKey: ['suites'] }); void queryClient.invalidateQueries({ queryKey: ['suite-versions'] }) }} /></div> : null}
             {suitesError ? (
-              <div className="mb" style={{ padding: '0 20px' }}>
+              <div className="mb" style={{ padding: '0 var(--space-9)' }}>
                 <Notice tone="red" title={'套件列表获取失败（' + suitesError.code + '）'}>
                   {suitesError.message}
                 </Notice>
@@ -523,21 +531,21 @@ export function UiPage() {
           <>
             <div className="panel-pad"><Button size="small" onClick={() => setTab('suites')}>返回测试套件</Button></div>
             {suitesError ? (
-              <div className="mb" style={{ padding: '0 20px' }}>
+              <div className="mb" style={{ padding: '0 var(--space-9)' }}>
                 <Notice tone="red" title={'套件列表获取失败（' + suitesError.code + '）'}>
                   {suitesError.message}
                 </Notice>
               </div>
             ) : null}
             {versionsError ? (
-              <div className="mb" style={{ padding: '0 20px' }}>
+              <div className="mb" style={{ padding: '0 var(--space-9)' }}>
                 <Notice tone="red" title={'套件版本获取失败（' + versionsError.code + '）'}>
                   {versionsError.message}
                 </Notice>
               </div>
             ) : null}
             {activeSuiteId ? (
-              <div style={{ padding: '0 20px' }}>
+              <div style={{ padding: '0 var(--space-9)' }}>
                 <Toolbar>
                   <label className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     套件
@@ -583,7 +591,7 @@ export function UiPage() {
               </div>
             ) : null}
             {copyNotice ? (
-              <div className="mb" style={{ padding: '0 20px' }}>
+              <div className="mb" style={{ padding: '0 var(--space-9)' }}>
                 <Notice tone="amber" title={'v' + (activeVersion?.version ?? '') + ' 没有固定代码副本'}>
                   {copyNotice}
                 </Notice>

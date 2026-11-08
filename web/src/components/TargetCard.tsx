@@ -1,32 +1,40 @@
 /**
- * 目标端卡（原型 .target-card）：三端卡片，选中态高亮。
- * 只做选择，不发请求；切换后由 scope store 写回 URL。
+ * 目标端切换（渐进式披露改造：原先的三张大卡压缩为一行紧凑 chips，
+ * 能力说明收进 chip 内的小字；切换行为不变，仍由 scope store 写回 URL）。
  */
 import { TARGET_CATALOG, SCOPE_OPTIONS } from '../constants'
 import type { Platform, TargetScope } from '../types'
 
 const PLATFORMS: Platform[] = ['android', 'ios', 'web']
 
-interface TargetCardProps {
+interface TargetChipRowProps {
   scope: TargetScope
   onSelect: (scope: TargetScope) => void
 }
 
-export function TargetCardGrid({ scope, onSelect }: TargetCardProps) {
+export function TargetChipRow({ scope, onSelect }: TargetChipRowProps) {
+  const options: { value: TargetScope; label: string; capability?: string }[] = [
+    { value: 'all', label: '全部', capability: '所有平台' },
+    ...PLATFORMS.map((platform) => ({
+      value: platform as TargetScope,
+      label: TARGET_CATALOG[platform].label,
+      capability: TARGET_CATALOG[platform].capability,
+    })),
+  ]
   return (
-    <div className="target-overview">
-      {PLATFORMS.map((platform) => {
-        const meta = TARGET_CATALOG[platform]
+    <div className="scope-chips" role="group" aria-label="目标端切换">
+      {options.map((option) => {
+        const on = scope === option.value
         return (
           <button
-            key={platform}
+            key={option.value}
             type="button"
-            className={'target-card' + (scope === platform ? ' selected' : '')}
-            aria-pressed={scope === platform}
-            onClick={() => onSelect(platform)}
+            className={'scope-chip' + (on ? ' selected' : '')}
+            aria-pressed={on}
+            onClick={() => onSelect(option.value)}
           >
-            <strong>{meta.label}</strong>
-            <p>{meta.capability}</p>
+            <strong>{option.label}</strong>
+            <span className="scope-chip-cap">{option.capability}</span>
           </button>
         )
       })}
