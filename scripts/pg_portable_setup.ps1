@@ -59,8 +59,11 @@ function Start-PgDirect {
     New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
     $stdoutLog = Join-Path $RunDir 'postgres-stdout.log'
     $stderrLog = Join-Path $RunDir 'postgres-stderr.log'
+    # Start-Process 的 -ArgumentList 按空格拼接、不自动加引号：数据目录路径含空格时
+    # （正式安装可迁移到任意目录，US27）postgres 会把目录名拆成多余参数
+    # （2026-11-08 部署验收实证：invalid argument: "deploy"）。这里显式内嵌引号。
     $proc = Start-Process -FilePath (Join-Path $Bin 'postgres.exe') `
-        -ArgumentList '-D', $PgData, '-p', "$Port", '-c', 'listen_addresses=127.0.0.1' `
+        -ArgumentList '-D', ('"{0}"' -f $PgData), '-p', "$Port", '-c', 'listen_addresses=127.0.0.1' `
         -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru -WindowStyle Hidden
     Write-Host "[pg] postgres.exe PID=$($proc.Id)，日志: $stdoutLog / $stderrLog"
     if (-not (Wait-PgReady)) { throw "postgres 启动后 30s 内未就绪，查看 $stderrLog" }
@@ -126,7 +129,11 @@ switch ($Action) {
         $content = Get-Content $conf -Raw
         $content = $content -replace "(?m)^#?\s*port\s*=.*$", "port = $Port"
         $content = $content -replace "(?m)^#?\s*listen_addresses\s*=.*$", "listen_addresses = '127.0.0.1'"
-        Set-Content -Path $conf -Value $content -Encoding UTF8
+        # 必须写 UTF-8 无 BOM：Windows PowerShell 5.1 的 Set-Content -Encoding UTF8
+        # 会带 BOM，postgres 对 postgresql.conf 的 BOM 直接报 syntax error 拒启
+        # （2026-11-08 部署验收实证，含空格目录 init→start 链路）。.NET WriteAllText
+        # 恒为 UTF-8 无 BOM，两个 PowerShell 版本行为一致。
+        [System.IO.File]::WriteAllText($conf, $content)
         Write-Host "[pg] 完成。下一步: .\scripts\pg_portable_setup.ps1 start"
     }
     'start' {
