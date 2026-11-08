@@ -209,6 +209,48 @@ export interface RunReport {
     ui: { started_at: string; ended_at: string; timeout_s: number }
   } | null
   thresholdsAtRun?: Record<string, unknown> | null
+  /**
+   * 能力块透传（2026-11 性能能力接入，报告端点原样回读 report.json）：
+   * startup 启动编排、pages 整页耗时、network 网络剖面（含 HAR 摘要）、
+   * api 接口级指标。vendor 未产出对应块时为 null —— 表示通道未启用，
+   * 与「启用但 not_tested」区分。
+   */
+  startup?: {
+    mode?: string | null
+    metricKey?: string | null
+    ms?: number | null
+    status?: string | null
+    error?: string | null
+    msSource?: string | null
+    launchState?: string | null
+  } | null
+  pages?: {
+    status?: string | null
+    pages?: Array<{
+      page?: string | null
+      status?: string | null
+      pageLoadMs?: number | null
+      reason?: string | null
+    }> | null
+    notTestedReason?: string | null
+  } | null
+  network?: {
+    profile?: string | null
+    tier?: string | null
+    har?: {
+      status?: string | null
+      entries?: number | null
+      sizeBytes?: number | null
+      path?: string | null
+      notTestedReason?: string | null
+    } | null
+  } | null
+  api?: {
+    status?: string | null
+    notTestedReason?: string | null
+    reqCount?: number | null
+    errorRatePct?: number | null
+  } | null
   reason?: string | null
   reasonText?: string | null
   evaluatedAt?: string | null
@@ -495,6 +537,17 @@ export interface RunAnalysis {
   components?: { id: string; kind?: string | null; state?: string | null; outcome?: string | null; reason_code?: string | null }[] | null
   evaluations?: AnalysisEvaluation[] | null
   baseline_options?: BaselineOption[] | null
+  /** 泄漏趋势（vendor leak 同口径）：performance/joint 才有，样本不足时 slopeMbPerDay=null */
+  leakTrend?: {
+    metric?: string | null
+    slopeMbPerDay?: number | null
+    confidence?: 'ok' | 'low' | 'insufficient' | string | null
+    confidenceReason?: string | null
+    runCount?: number | null
+    spanHours?: number | null
+    firstMedian?: number | null
+    lastMedian?: number | null
+  } | null
   trial?: unknown
   [key: string]: unknown
 }
