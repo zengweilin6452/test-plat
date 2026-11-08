@@ -1,16 +1,37 @@
 # 工单状态索引（与实际情况对齐）
 
-> 2026-11-07 校正。起因：四份 effort 的 `Status:` 行与实际进度脱节，无法从 tracker 判断
-> 「什么还开着」。**本文件是状态的权威**；各工单正文的 `Status:` 行保留历史值，冲突时以本文件为准。
+> 2026-11-08 收口轮校正（release-readiness 九票执行完毕）。本文件仍是状态权威；
+> 上一版校准（2026-11-07）中被本轮事实取代的描述已更新。
 
 ## 总览
 
 | effort | 票数 | 实际状态 | 证据 |
 | --- | --- | --- | --- |
+| `release-readiness` | 9 | **01–08 resolved（本轮实测+复验）；09 有条件通过（唯一缺口=远程 CI 待推送复核）** | `.scratch/release-readiness/evidence/02..08`、`baseline/01-evidence-baseline.md`、`evidence/09-delivery-baseline.md` |
 | `prototype-alignment` | 25 | 19 票 resolved；4 票已实现但验收项未勾；2 票有明确未闭环项 | 已并入 HEAD；`acceptance.md`、`handoff-2026-10-29.md`、`server/tests/` |
-| `first-release-closure` | 10 | 10 票 resolved；8 条 US 为「已实现待验」，1 条受阻 | `acceptance.md` §2/§12/§16–§18 |
-| `product-formalization` | 12 | 7 票 resolved；5 票待现场验收 | `implementation-report.md`、`fix-verification.md`、`server/tests/test_formalization.py` |
+| `first-release-closure` | 10 | 10 票 resolved；真机/来源/像素证据齐（2026-11-01 §8–§10） | `acceptance.md` |
+| `product-formalization` | 12 | 7 票 resolved；5 票待验项已由 release-readiness 承接并关闭（03→06、08→02、10→07、11→08、12→09） | `implementation-report.md` + release-readiness 证据 |
 | `debug-direct-control` | 2 | 2 票 resolved | `acceptance.md` §11–§12 |
+
+## release-readiness 收口结论（2026-11-08）
+
+- **32/32 用户故事已通过**（含 3 条「本轮实测+自动化复用」口径）；验收暴露并修复 5 个范围内缺陷：
+  `3eff530`（CI ruff 死导入 + vendor charmap 编码）、`d3c2124`（运行 started_at/耗时 0s）、
+  `16f1771`（joint 版本发布缺 ui_timeout_s）、`596306e`（便携 PG 含空格路径 ×2：ArgumentList 引号 + UTF-8 BOM）。
+- 真机验收：RUN-0001~0010（UI/性能/联动/取消/互斥/调试），设备串行全程租约干净。
+- 后端 665 项（0 失败/1 跳过）+ 定向 47 项；前端 90/90 + tsc + build。
+- **未闭合必需项**：远程 CI 在 origin/master 为红，本地修复已验证但**未推送**（推送需独立授权）；
+  远端转绿前交付结论为「有条件通过」。
+
+## 现存验证缺口（跨 effort，2026-11-08 更新）
+
+| 缺口 | 影响 | 解除条件 |
+| --- | --- | --- |
+| 本轮 4 个修复提交未推送 | 远端 CI 未复核；master 本地领先 origin 4 个提交 | 用户授权 push |
+| 无版本 tag | 构建身份靠 `TESTDOCK_BUILD_COMMIT`（可核对），tag 缺失不影响身份识别 | 打标签需独立授权 |
+| 历史 runner 消失根因 | 观察项（本轮 10 次真机运行未复现） | 复现后按规格决策 11 限口径调查 |
+| 多 worker 凭证共享 / 保留期 expired 态 | out-of-scope 维持 | 按首版边界 |
+
 
 ## prototype-alignment（已并入 `integration/first-release-closure`）
 

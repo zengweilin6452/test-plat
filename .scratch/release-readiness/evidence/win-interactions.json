@@ -1,0 +1,58 @@
+{
+  "env": {
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36 Edg/157.0.0.0",
+    "dpr": 1,
+    "platform": "Win32",
+    "browser": "Edg/157.0.4341.42"
+  },
+  "pages": {
+    "apps_100": {
+      "iw": 1416,
+      "ih": 808,
+      "scrollW": 1401,
+      "overflowElems": 0
+    },
+    "tasks_100": {
+      "iw": 1416,
+      "ih": 808,
+      "scrollW": 1416,
+      "overflowElems": 0
+    },
+    "reports_100": {
+      "iw": 1416,
+      "ih": 808,
+      "scrollW": 1401,
+      "overflowElems": 0
+    },
+    "apps_125": {
+      "iw": 1440,
+      "ih": 900,
+      "scrollW": 1425,
+      "overflowElems": 0
+    },
+    "apps_1024": {
+      "iw": 1024,
+      "ih": 700,
+      "scrollW": 1009,
+      "overflowElems": 20
+    }
+  },
+  "keyboard": {
+    "tag": "A",
+    "text": "项目与应用",
+    "matchesFocusVisible": true,
+    "outline": "solid/3px/rgb(147, 166, 255)"
+  },
+  "forcedColors": {
+    "linkOutline": "solid/3px/rgb(55, 0, 110)",
+    "btnBorder": "1px/rgb(0, 0, 0)",
+    "matchesFV": true
+  },
+  "dark": {
+    "bodyBg": "rgb(245, 247, 250)",
+    "bodyColor": "rgb(36, 48, 71)"
+  },
+  "longName": {
+    "found": false
+  }
+}
