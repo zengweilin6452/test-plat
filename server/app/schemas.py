@@ -510,6 +510,8 @@ class ResourceRecordOut(BaseModel):
 
     id: UuidStr
     project_id: UuidStr
+    #: 同物理设备按项目各登记一行；项目名供前端区分卡片
+    project_name: str | None = None
     node_id: UuidStr | None = None
     name: str
     resource_key: str

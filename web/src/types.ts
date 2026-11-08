@@ -143,6 +143,8 @@ export interface ResourceProfile {
 export interface ResourceRecord {
   id: string
   project_id: string
+  /** 同物理设备按项目各登记一行；项目名供卡片区分 */
+  project_name?: string | null
   node_id: string | null
   name: string
   resource_key: string
@@ -298,6 +300,8 @@ export interface ResourceSyncDevice {
 export interface ResourceSyncNode {
   node_id: string
   node_name: string
+  /** 每个项目各自登记自己的设备：节点行带项目名，避免 N 行被误读成 N 台设备 */
+  project_name?: string | null
   status: 'ok' | 'unreachable'
   seen: number
   created: number

@@ -74,6 +74,7 @@ def _unreachable_node(node_id: str, node_name: str) -> dict[str, Any]:
     return {
         "node_id": node_id,
         "node_name": node_name,
+        "project_name": None,
         "status": "unreachable",
         "seen": 0,
         "created": 0,
@@ -180,19 +181,24 @@ async def sync_resources(
     started_at = _dt.datetime.now(_dt.UTC)
 
     # ---- 1) 项目范围 -------------------------------------------------- #
+    project_names: dict[str, str] = {}
     if project_id is not None:
         exists = (
             await session.execute(
-                text("SELECT 1 FROM projects WHERE id = CAST(:pid AS uuid)"),
+                text("SELECT id, name FROM projects WHERE id = CAST(:pid AS uuid)"),
                 {"pid": project_id},
             )
         ).first()
         if exists is None:
             raise not_found("project", project_id)
-        project_ids = [project_id]
+        project_ids = [str(exists.id)]
+        project_names[str(exists.id)] = str(exists.name)
     else:
-        rows = (await session.execute(text("SELECT id FROM projects ORDER BY created_at"))).all()
+        rows = (
+            await session.execute(text("SELECT id, name FROM projects ORDER BY created_at"))
+        ).all()
         project_ids = [str(r.id) for r in rows]
+        project_names.update({str(r.id): str(r.name) for r in rows})
 
     # ---- 2) 节点范围 -------------------------------------------------- #
     adb_path = adb_integration.resolve_adb_path()
@@ -275,6 +281,9 @@ async def sync_resources(
         node_result: dict[str, Any] = {
             "node_id": current_node_id,
             "node_name": node_row.name,
+            # 设备按项目隔离登记（同物理设备会在每个项目下各有一行）：
+            # 结果里带项目名，前端与排查才不会把 N 行当成 N 台设备。
+            "project_name": project_names.get(pid),
             "status": "ok",
             "seen": len(device_list),
             "created": 0,

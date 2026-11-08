@@ -34,7 +34,8 @@ function summarizeSync(result: ResourceSyncResponse): string {
     if (node.status === 'unreachable') return `${node.node_name}：节点不可达`
     const bits = [`新增 ${node.created}`, `更新 ${node.updated}`, `离线 ${node.offlined}`]
     if (node.busy_skipped.length) bits.push(`占用跳过 ${node.busy_skipped.join('、')}`)
-    return `${node.node_name}：${bits.join(' / ')}`
+    const label = node.project_name ? `${node.node_name} · ${node.project_name}` : node.node_name
+    return `${label}：${bits.join(' / ')}`
   })
   return `同步完成（${result.duration_ms}ms，adb: ${result.adb_path}）\n` + parts.join('\n')
 }
@@ -209,6 +210,8 @@ export function DevicesPage() {
                   <dd>{profile?.screen_resolution ?? DASH}</dd>
                   <dt>设备编号</dt>
                   <dd className="mono">{row.resource_key}</dd>
+                  <dt>所属项目</dt>
+                  <dd>{row.project_name ?? DASH}</dd>
                   <dt>当前占用</dt>
                   <dd>
                     {row.lease?.run_id
