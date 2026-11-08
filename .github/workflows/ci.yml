@@ -9,6 +9,11 @@ on:
     branches: [master, main]
   pull_request:
 
+# Windows runner 的 stdout 默认是 charmap 编码，校验脚本/测试打印中文横幅会
+# UnicodeEncodeError（2026-11-08 master CI 实证）；统一按 UTF-8 走管道。
+env:
+  PYTHONIOENCODING: utf-8
+
 jobs:
   vendor:
     name: vendor 只读校验 + 回归

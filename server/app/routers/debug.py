@@ -524,8 +524,6 @@ def _terminate_runner_blocking(run_id: str) -> None:
     runner 会漏杀，成为持有本地设备锁的孤儿（新会话 runner 全部 DeviceBusy，
     reason=local_lease_busy）。所以进程表没有时按命令行兜底扫描。
     """
-    import subprocess as subprocess_mod
-
     proc = spawn_mod._PROCESSES.get(str(run_id))
     pid = proc.pid if proc is not None else None
     if pid is None:
