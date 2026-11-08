@@ -587,9 +587,10 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     retry: false,
     // 会话刚创建时 state=opening，响应里还没有 ws_path（viewer 端口未回报）。
     // 轮询到 active 才停：建连 effect 依赖 ws_path，没有轮询它永远不会出现。
+    // closed/lost 是终态，继续轮询只会空转——恢复入口是「重建会话」。
     refetchInterval: (query) => {
       const state = query.state.data?.state
-      return state && state !== 'active' ? 1500 : false
+      return state && state !== 'active' && state !== 'closed' && state !== 'lost' ? 1500 : false
     },
     // 调试页可能被切到后台（或由浏览器自动化驱动）：opening→active 的轮询
     // 不能因为标签页不可见而暂停，否则画面一直停在「未连接」。
@@ -716,10 +717,22 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         setWsNotice(text)
       }
     }
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       wsRef.current = null
       setWsStatus('closed')
       if (closingRef.current) return
+      // 平台是 accept 之后再校验会话：4403/4404 的拒绝也会先触发 onopen，
+      // 把重试计数清零——「重试耗尽」永远等不到，终态判定必须直接看关闭码。
+      // （opening 会话没有 ws_path，这个 socket 连不上，不会误伤正常建连。）
+      const code = typeof event?.code === 'number' ? event.code : 1000
+      const cachedState = detailQuery.data?.state
+      if ((code === 4403 || code === 4404) && cachedState && cachedState !== 'opening') {
+        // 会话激活后被拒（已关闭，或后端重启丢了 viewer 端口表）：重连救不了。
+        // 探一次 detail，closed 终态的「重建会话」入口靠这次 refetch 浮出来。
+        setWsNotice('连接已断开：会话已结束或采集服务失效，可重建会话或返回设备池重试。')
+        void queryClient.refetchQueries({ queryKey: ['debug-session', sessionRef.current] })
+        return
+      }
       // 会话刚创建时 runner 还在拉起 viewer（state=opening），平台会立刻拒绝 WS。
       // 有限次退避重连，成功即清零；耗尽后才告知断开。
       if (sessionRef.current !== null && wsRetriesRef.current < WS_CONNECT_RETRIES) {
@@ -732,6 +745,10 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
       }
       // 服务端关闭（会话结束 / 1000），明确提示而不是静默黑屏
       setWsNotice('连接已断开：会话已结束')
+      // detailQuery 在 active 后就停轮了，会话后端侧被关（runner 死/平台重启）
+      // 前端不会自己知道——重试耗尽说明媒体通道救不了，主动探一次会话状态，
+      // closed 终态的「重建会话」入口就靠这次 refetch 浮出来。
+      void queryClient.refetchQueries({ queryKey: ['debug-session', sessionRef.current] })
     }
     socket.onerror = () => {
       // 只记录状态；重连决策统一放在 onclose（error 后必有 close），
@@ -756,7 +773,9 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         // 忽略
       }
     }
-  }, [open, session, detailQuery.data?.ws_path, wsAttempt, previewMode])
+    // 依赖 state 字符串而非 data 对象：refetch 换新对象不触发重连，只有状态
+    // 真变化（opening→active / →closed）才重跑。onclose 里的 cachedState 读它。
+  }, [open, session, detailQuery.data?.ws_path, detailQuery.data?.state, wsAttempt, previewMode])
 
   /** 卸载兜底：组件销毁（页面切换）也要关会话 */
   useEffect(() => {
@@ -846,6 +865,22 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   /** 会话必须 active 才能碰 vendor：opening 期间 /templates 一律
    * `debug_session_not_active`，提前请求只会在界面上挂一条红字。 */
   const sessionActive = detailQuery.data?.state === 'active'
+  /** 终态会话（closed/lost）：媒体通道重连救不了，唯一出口是重建会话。 */
+  const sessionClosed = detailQuery.data?.state === 'closed' || detailQuery.data?.state === 'lost'
+  const closeReason = detailQuery.data?.close_reason ?? null
+
+  /** close_reason → 可行动文案；未知原因如实带上原值。 */
+  const closeReasonText = useCallback((reason: string | null) => {
+    const known: Record<string, string> = {
+      local_lease_busy:
+        '设备被另一个调试进程占用（多为平台重启残留的旧会话进程；稍候再试或重启平台）',
+      spawn_failed: '采集服务（runner）启动失败',
+      client_closed: '会话已被关闭（本页或其他页面操作）',
+      runner_exit: '采集服务已退出',
+    }
+    if (!reason) return '会话已结束，请重建会话。'
+    return known[reason] ?? ('会话已结束（原因：' + reason + '）')
+  }, [])
 
   // ------------------------------------------------------------ 预览传输（H.264 → JPEG 回退）
   /** 手动重连实时画面：清退避计数、按当前传输模式重开通道，不必拆掉整个会话。
@@ -857,6 +892,33 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     wsRetriesRef.current = 0
     setWsAttempt((n) => n + 1)
   }, [])
+
+  /** 终态/僵死会话就地重建：先尽力 DELETE 旧会话再走与自动建会话相同的
+   * 创建路径，不必「返回设备池再进」。DELETE 对终态是幂等空操作；对
+   * 「行仍 active 但通道已死」（runner 悄悄死掉）则释放租约并按命令行
+   * 杀掉孤儿 runner——跳过这步直接建，新 runner 会 DeviceBusy 秒关。
+   * 不能用 createPendingRef 做入口守卫：初始自动建会话成功后它一直是 true。 */
+  const recreatePendingRef = useRef(false)
+  const recreateSession = useCallback(async () => {
+    if (!target?.serial || recreatePendingRef.current || createMutation.isPending) return
+    recreatePendingRef.current = true
+    try {
+      const staleId = sessionRef.current
+      sessionRef.current = null
+      teardownSocket()
+      reset()
+      if (staleId !== null) {
+        try {
+          await closeDebugSession(staleId)
+        } catch {
+          // 旧会话关闭失败不拦重建：新会话若真被旧租约挡住，409 会自己上屏
+        }
+      }
+      createMutation.mutate()
+    } finally {
+      recreatePendingRef.current = false
+    }
+  }, [createMutation, reset, target?.serial, teardownSocket])
   useEffect(() => {
     if (!open || !session) return
     const choice = choosePreviewTransport(typeof VideoDecoder !== 'undefined')
@@ -901,9 +963,15 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
           setWsStatus('closed')
           return
         }
+        if (code === 'closed-4403' || code === 'closed-4404' || code === 'closed-4450') {
+          // 平台明确说会话不在/未就绪/视频上游死了：本地可能已过期（active 后
+          // 停轮），探一次 detail 让终态与「重建会话」入口浮出来。
+          void queryClient.refetchQueries({ queryKey: ['debug-session', sessionRef.current] })
+        }
         if (code === 'closed-4450') {
           // 平台到 viewer 的视频通道没起来（runner/viewer 已失效）：重连救不了。
-          setWsNotice('视频通道不可用（设备采集服务已失效）；请点「关闭会话」后重新进入设备调试。')
+          // 行仍 active 时按钮还是「重新连接」，如实告诉用户它救不了。
+          setWsNotice('视频通道不可用（设备采集服务已失效）；请点「返回设备池」重新进入调试。')
           setPreviewMode('jpeg')
           setPreviewFps(null)
           setWsStatus('closed')
@@ -1482,6 +1550,13 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
       </div>
 
       <div className="debug-workspace-body">
+        {sessionClosed ? (
+          <div className="mb">
+            <Notice tone="red" title="调试会话已结束">
+              {closeReasonText(closeReason)}点「重建会话」可就地重新开始，不必返回设备池。
+            </Notice>
+          </div>
+        ) : null}
         {wsNotice ? (
           <div className="mb">
             <Notice tone="amber" title="调试会话">{wsNotice}</Notice>
@@ -1526,12 +1601,17 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                   {previewMode === 'h264'
                     ? wsStatus === 'open'
                       ? 'H.264 · ' + (previewFps ?? 0) + 'fps'
-                      : 'H.264 连接中'
+                      : 'H.264 · ' + wsText
                     : previewNote
                       ? 'JPEG 回退'
                       : wsText}
                 </span>
-                {wsStatus !== 'open' ? (
+                {sessionClosed ? (
+                  // 终态会话的媒体通道已无东西可连：给重建入口而不是无效的「重新连接」
+                  <Button size="small" onClick={recreateSession} disabled={createMutation.isPending}>
+                    {createMutation.isPending ? '重建中…' : '重建会话'}
+                  </Button>
+                ) : wsStatus !== 'open' ? (
                   <Button size="small" onClick={reconnectLive}>
                     重新连接
                   </Button>

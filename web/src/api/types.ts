@@ -17,6 +17,8 @@ export interface DebugSessionRecord {
   purpose?: string | null
   created_at?: string | null
   closed_at?: string | null
+  /** 终态时后端从审计回填的关闭原因（client_closed / runner_exit / local_lease_busy…） */
+  close_reason?: string | null
 }
 
 /** POST /api/v1/debug-sessions/{id}/control —— 控制权状态（token 永不下发） */
