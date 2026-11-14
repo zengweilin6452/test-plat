@@ -22,13 +22,27 @@ PYTHON="${PYTHON:-python}"
 MODE="${1:-installed}"
 SCOPE="${MOBILE_PKG:-all}"
 
+# PYTHONPATH 分隔符必须跟解释器的 os.pathsep 走：Windows 原生 Python（含 Git
+# Bash 下调用的 python.exe）按 ';' 切分，':' 会把两段路径并成一个失效条目
+# （2026-11-14 实测：sys.path 里出现整串合并路径，tests 包解析失败）。
+PY_SEP="$("$PYTHON" -c "import os; print(os.pathsep)")"
+
+# MSYS/Git Bash 只自动转换命令行参数（如 --basetemp），不转换 PYTHONPATH 这类
+# 自定义环境变量；pwd 产出的 /d/... 形式 Windows Python 无法解析（同样是
+# 2026-11-14 实测的 'No module named tests' 来源），须显式转成 Windows 形式。
+if command -v cygpath >/dev/null 2>&1; then
+  PY_ROOT="$(cygpath -m "$REPO_ROOT")"
+else
+  PY_ROOT="$REPO_ROOT"
+fi
+
 if [ "$MODE" = "pathonly" ]; then
-  export PYTHONPATH="$REPO_ROOT/vendor/mobile_auto/src:$REPO_ROOT/vendor/mobile_perf/src${PYTHONPATH:+:$PYTHONPATH}"
+  export PYTHONPATH="$PY_ROOT/vendor/mobile_auto/src${PY_SEP}$PY_ROOT/vendor/mobile_perf/src${PYTHONPATH:+${PY_SEP}${PYTHONPATH}}"
 fi
 
 # 包根也进 PYTHONPATH：mobile_perf 新测试跨模块导入 tests.unit.test_kit，
 # 需要能以 tests 包解析 vendor/<pkg>/tests（与源仓库在其根目录跑 pytest 同构）。
-export PYTHONPATH="$REPO_ROOT/vendor/mobile_auto:$REPO_ROOT/vendor/mobile_perf${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$PY_ROOT/vendor/mobile_auto${PY_SEP}$PY_ROOT/vendor/mobile_perf${PYTHONPATH:+${PY_SEP}${PYTHONPATH}}"
 
 # 临时目录收进仓库内（F17）；宿主上也可安全使用
 RUNTIME="$REPO_ROOT/.runtime"

@@ -81,23 +81,34 @@ def test_public_openapi_excludes_internal_protocol() -> None:
     assert not non_v1, f"公开路径必须以 /api/v1 开头: {non_v1}"
 
 
+def _response_ref(operation: dict, status_prefix: str = "2") -> str:
+    """取一个 operation 的 2xx 响应 $ref（无具名模型时为空串）。
+
+    契约投影（app/contract.py）把每个响应压成 schema 本体：{"200": {"$ref": ...}}。
+    """
+    for status, response in sorted(operation.get("responses", {}).items()):
+        if not status.startswith(status_prefix):
+            continue
+        ref = response.get("$ref", "") if isinstance(response, dict) else ""
+        if ref:
+            return ref
+    return ""
+
+
 def test_expected_endpoints_use_named_response_models() -> None:
-    from app.main import app
+    """具名响应模型以公开 OpenAPI 投影的 2xx $ref 为准。
 
-    # 同一路径可能有多个方法（如 GET/POST /tasks），按 (method, path) 建索引。
-    actual: dict[tuple[str, str], str] = {}
-    for route in app.routes:
-        path = getattr(route, "path", None)
-        model = getattr(route, "response_model", None)
-        methods = getattr(route, "methods", None) or set()
-        if path and model is not None:
-            for method in methods:
-                actual[(method.upper(), path)] = getattr(model, "__name__", str(model))
-
+    不再走 `APIRoute.response_model` 路由属性：fastapi>=0.16 起该属性不再
+    承载具名模型（内部行为漂移），而契约的真实载体是 openapi 文档本身。
+    """
+    paths = _live_openapi()["paths"]
     for path, model_name in EXPECTED_RESPONSE_MODELS.items():
-        key = ("GET", path)
-        assert actual.get(key) == model_name, (
-            f"GET {path} 期望 response_model={model_name}，实际 {actual.get(key)!r}"
+        operation = paths.get(path, {}).get("get")
+        assert operation is not None, f"GET {path} 不在公开 OpenAPI 中"
+        ref = _response_ref(operation)
+        actual = ref.rsplit("/", 1)[-1] if ref else None
+        assert actual == model_name, (
+            f"GET {path} 期望响应模型 {model_name}，实际 {actual!r}"
         )
 
 
@@ -105,19 +116,30 @@ def test_response_models_declare_explicit_extra_policy() -> None:
     """响应模型不能沿用 pydantic 默认 extra=ignore（会静默丢字段）。
 
     只检查 pydantic BaseModel 响应模型；返回注解是 `dict[...]` 的端点不在此列
-    （它们不经过模型序列化，也就不会因 extra 策略丢字段）。
+    （它们不经过模型序列化，也就不会因 extra 策略丢字段）。模型从公开 OpenAPI
+    的 2xx $ref 解析（同上，路由属性跨 fastapi 版本不可靠），再回 app.schemas
+    取类检查 model_config。
     """
-    from app.main import app
+    import app.schemas as app_schemas
     from pydantic import BaseModel
 
     offenders: list[str] = []
-    for route in app.routes:
-        model = getattr(route, "response_model", None)
-        if not (isinstance(model, type) and issubclass(model, BaseModel)):
-            continue
-        extra = model.model_config.get("extra")
-        if extra not in ("allow", "forbid"):
-            offenders.append(model.__name__)
+    seen: set[str] = set()
+    for path, methods in _live_openapi()["paths"].items():
+        for method, operation in methods.items():
+            ref = _response_ref(operation)
+            if not ref:
+                continue
+            name = ref.rsplit("/", 1)[-1]
+            if name in seen:
+                continue
+            seen.add(name)
+            model = getattr(app_schemas, name, None)
+            if not (isinstance(model, type) and issubclass(model, BaseModel)):
+                continue
+            extra = model.model_config.get("extra")
+            if extra not in ("allow", "forbid"):
+                offenders.append(name)
     assert not offenders, f"响应模型未声明 extra 策略: {sorted(set(offenders))}"
 
 

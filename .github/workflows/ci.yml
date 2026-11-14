@@ -30,12 +30,19 @@ jobs:
       - name: 安装 vendor（可编辑）
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ./vendor/mobile_auto -e ./vendor/mobile_perf
+          # 单测 conftest 导入 cv2（[image] extra）与 fastapi.testclient/uvicorn
+          # （[viewer] extra）；缺装会在收集期 ModuleNotFoundError，此前被编码
+          # 失败掩盖（2026-11-14 CI 实测）。
+          python -m pip install -e "./vendor/mobile_auto[image,viewer]" -e ./vendor/mobile_perf
           python -m pip install pytest pytest-asyncio httpx
+      # 走 scripts/run_vendor_tests.sh：它负责 PYTHONPATH（tests 包跨模块导入）
+      # 与 basetemp 收敛；MOBILE_PKG 拆两步保住作业内失败定位。
       - name: mobile_auto unit + contract
-        run: python -m pytest vendor/mobile_auto/tests/unit vendor/mobile_auto/tests/contract -q
+        shell: bash
+        run: MOBILE_PKG=auto bash scripts/run_vendor_tests.sh
       - name: mobile_perf unit + contract
-        run: python -m pytest vendor/mobile_perf/tests/unit vendor/mobile_perf/tests/contract -q
+        shell: bash
+        run: MOBILE_PKG=perf bash scripts/run_vendor_tests.sh
 
   server:
     name: 后端测试（Windows + 便携 PostgreSQL）
