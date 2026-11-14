@@ -12,9 +12,9 @@ import asyncio
 import uuid
 
 import pytest
+from app.domain import leases
 from sqlalchemy import text
 
-from app.domain import leases
 from tests._p3_common import async_session, make_run, requires_db
 from tests._p3_common import p3_project as project  # noqa: F401 - fixture 复用
 from tests._p3_common import sync_engine as sync_engine  # noqa: F401 - fixture 复用
@@ -153,10 +153,12 @@ def test_stale_fence_token_cannot_write_or_release(clean_checks, make_run):
             )
             assert stale["ok"] is False and stale["checked"] is True
 
+            # P1-01：缺 token 一律 fail-closed，且不回显当前租约的 token
             strict_missing = await leases.verify_fence(
-                session, run_id=run_id, token=None, require_token=True
+                session, run_id=run_id, token=None
             )
-            assert strict_missing["ok"] is False and strict_missing["checked"] is True
+            assert strict_missing["ok"] is False and strict_missing["checked"] is False
+            assert strict_missing["expected"] is None
 
             current = await leases.verify_fence(
                 session, run_id=run_id, token=second.fencing_token

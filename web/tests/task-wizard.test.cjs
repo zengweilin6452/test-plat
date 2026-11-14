@@ -85,7 +85,8 @@ test('至少选择一个采集项才能继续；性能场景不应包含固定�
 })
 
 test('性能模式使用性能场景文案，空清单给出登记入口', () => {
-  const source = fs.readFileSync('src/components/TaskWizard.tsx', 'utf8')
+  // P2-03：步骤视图迁到 wizard/wizardSteps.tsx
+  const source = fs.readFileSync('src/components/wizard/wizardSteps.tsx', 'utf8')
   assert.match(source, /性能场景版本/)
   assert.match(source, /不执行 UI 用例/)
   assert.match(source, /还没有性能场景版本/)

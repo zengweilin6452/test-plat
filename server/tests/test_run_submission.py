@@ -9,21 +9,21 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import text
-
 from app.main import app
 from app.runner import dispatch_runner
 from app.scheduler import dispatcher
+from fastapi.testclient import TestClient
+from sqlalchemy import text
+
 from tests._p3_common import (
     CLIENT_HEADERS,
     TEST_DB,
     make_project,
-    reset_db_engine,
     requires_db,
+    reset_db_engine,
 )
 from tests._p3_common import make_run as make_run
-from tests._p3_common import p3_project as project
+from tests._p3_common import p3_project as project  # noqa: F401 - fixture 复用
 from tests._p3_common import sync_engine as sync_engine
 
 pytestmark = requires_db
@@ -330,15 +330,37 @@ def test_import_source_run_does_not_block_normal_dispatch(project, make_run, syn
     assert _row(sync_engine, import_run)["state"] == "queued"
 
 
-def test_internal_events_rejects_non_array_with_intact_message(client, project):
+def test_internal_events_rejects_non_array_with_intact_message(
+    client, project, sync_engine
+):
     """validation_error 只收列表：传字符串曾被 ''.join 拆成单字消息。"""
     response = client.post("/api/v1/runs", json=_body(project), headers=CLIENT_HEADERS)
     assert response.status_code == 201, response.text
     run_id = response.json()["id"]
+    # P1-01：events 先过 fence，载荷形状校验在其后 —— 补齐合法租约与 token，
+    # 让本用例继续专测 validation_error 分支。
+    with sync_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE test_runs SET state = 'running', resource_id = CAST(:rid AS uuid),"
+                " profile_id = CAST(:pid AS uuid), started_at = now()"
+                " WHERE id = CAST(:id AS uuid)"
+            ),
+            {"rid": project["resource_id"], "pid": project["profile_id"], "id": run_id},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO resource_leases (id, project_id, resource_id, run_id,"
+                "                             fencing_token, holder_id, expires_at)"
+                " VALUES (gen_random_uuid(), CAST(:pid AS uuid), CAST(:rid AS uuid),"
+                "         CAST(:run AS uuid), 11, 'pytest', now() + interval '120 seconds')"
+            ),
+            {"pid": project["project_id"], "rid": project["resource_id"], "run": run_id},
+        )
     token = getattr(app.state, "control_token", "")
     rejected = client.post(
         f"/internal/runs/{run_id}/events",
-        json={"events": "not-a-list"},
+        json={"fencing_token": 11, "events": "not-a-list"},
         headers={"X-Control-Token": token},
     )
     assert rejected.status_code == 400, rejected.text

@@ -94,8 +94,12 @@ test('冻结快照必须显示同一快照的图片，而不是最后一帧实�
   const freezeAt = source.indexOf('frozenRef.current = true', source.indexOf('const snapshotMutation'))
   const drawAt = source.indexOf('drawSnapshotImage(canvasRef.current, image)', freezeAt)
   assert.ok(freezeAt >= 0 && drawAt > freezeAt, '先冻结再绘制快照，防止解码期间的实时帧覆盖')
-  // 实时帧改成异步解码后也要复查冻结标记
-  assert.match(source, /if \(isPaused\?\.\(\)\) return/, '实时帧 onload 必须复查冻结状态')
+  // 实时帧改成异步解码后也要复查冻结标记（P2-03：drawFrame 迁到 debug/debugModel.ts）
+  const drawModel = fs.readFileSync(
+    require.resolve('../src/components/debug/debugModel.ts'),
+    'utf8',
+  )
+  assert.match(drawModel, /if \(isPaused\?\.\(\)\) return/, '实时帧 onload 必须复查冻结状态')
 })
 
 test('快照画面地址与会话/快照 id 对应', () => {

@@ -16,7 +16,6 @@ from __future__ import annotations
 import base64
 import json
 import re
-import shutil
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -31,13 +30,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..domain import artifacts as artifacts_mod
 from ..domain import events as events_mod
 from ..domain import identity as identity_mod
 from ..domain import report_html as report_html_mod
 from ..domain import runs as runs_mod
-from ..errors import device_not_ready, not_found, readiness_incomplete, state_conflict, validation_error
+from ..errors import (
+    conflict,
+    device_not_ready,
+    not_found,
+    readiness_incomplete,
+    state_conflict,
+    validation_error,
+)
 from ..schemas import RunsOut
+from ..services.run_import import (
+    collect_import_files as _collect_import_files,
+)
+from ..services.run_import import (
+    import_artifacts_dir as _import_artifacts_dir,
+)
+from ..services.run_import import (
+    import_fingerprint as _import_fingerprint,
+)
+from ..services.run_import import (
+    registered_evidence as _registered_evidence,
+)
+from ..services.run_import import (
+    stored_import_fingerprint as _stored_import_fingerprint,
+)
 from ..ws import hub as hub_mod
 
 router = APIRouter(tags=["runs"])
@@ -594,6 +616,14 @@ async def _insert_run(session: AsyncSession, body: Mapping, *, internal: bool = 
         ),
         "requested_resource_id": resource_id,
         "source": "import" if internal else "api",
+        # 导入内容指纹（P1-02）：幂等键只保证"同键同 Run"，不保证"同键同内容"。
+        # 指纹随 Run 行原子落库，重复导入据此区分"重试同一批产物"（放行）与
+        # "拿另一批产物冒充同一 Run"（409），防止重复导入覆盖既有证据。
+        **(
+            {"import_fingerprint": str(body["import_fingerprint"])}
+            if internal and body.get("import_fingerprint")
+            else {}
+        ),
         "submitted_at": datetime.now(UTC).isoformat(),
     }
 
@@ -769,7 +799,9 @@ async def _run_view(session: AsyncSession, run_id: str) -> dict:
 
 @router.post("/runs", status_code=201)
 async def create_run(
-    body: dict = Body(default_factory=dict), session: AsyncSession = Depends(get_session)
+    body: dict = Body(default_factory=dict),
+    _client: str = Depends(require_client_header),
+    session: AsyncSession = Depends(get_session),
 ):
     """创建 run（queued）。重复 request_key 返回 200 + 既有 run（api-design.md §1.3）。"""
     created = await _insert_run(session, body)
@@ -840,7 +872,11 @@ async def list_run_events(
 
 
 @router.post("/runs/{run_id}/cancel", status_code=202)
-async def cancel_run(run_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+async def cancel_run(
+    run_id: str,
+    _client: str = Depends(require_client_header),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
     """取消 run：受理取消事实，并让执行中的运行真的停下来（spec §6.2、§9.1）。
 
     - 取消事实写进 `test_runs.cancel_requested_at`（重复受理保留首次时间），
@@ -1383,34 +1419,22 @@ async def export_run_report(
     )
 
 
-def _import_artifacts_dir(run_id: str, source: Path) -> Path:
-    """把外部 vendor 产物目录复制到受管产物目录，返回复制后的路径。
-
-    为什么必须复制：artifacts.storage_key 是相对 settings.artifacts_dir 的路径，
-    下载端点与 GET /report 都按这个根反查。直接登记外部绝对路径会让 storage_key
-    退化成裸文件名（storage_key_for 的兜底），读回来永远是"文件不存在"。
-    复制而不是移动：源目录是用户的既有证据，导入是只读补录，不能改它。
-    """
-    target = Path(settings.artifacts_dir) / str(run_id)
-    target.mkdir(parents=True, exist_ok=True)
-    for item in source.rglob("*"):
-        if not item.is_file():
-            continue
-        relative = item.relative_to(source)
-        destination = target / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(item, destination)
-    return target
-
-
 @router.post("/runs/import", status_code=201)
 async def import_run(
-    body: dict = Body(default_factory=dict), session: AsyncSession = Depends(get_session)
+    body: dict = Body(default_factory=dict),
+    _client: str = Depends(require_client_header),
+    session: AsyncSession = Depends(get_session),
 ):
     """降级通道：导入已有 vendor 产物目录（report.json / junit.xml / evidence/**）。
 
     与真跑**共用** runtime.finalize_run：同样扫描目录、同样登记 sha256、同样由 junit
     推导 outcome。差别只在于没有 runner 与设备，所以不占租约，报告 mode=imported。
+
+    幂等契约（P1-02）：
+    - 相同 request_key + 相同内容指纹 -> 返回原 Run（duplicate=true），不重新
+      复制、不重新登记，已终态运行的证据文件一个字节都不碰；
+    - 相同 request_key + 不同内容 -> 409 idempotency_conflict（first-write-wins）；
+    - 上次导入在 finalize 前崩溃（Run 未终态）-> 同内容重试会补完 finalize（恢复）。
     """
     source_dir = str(body.get("source_dir") or "").strip()
     if not source_dir:
@@ -1419,8 +1443,14 @@ async def import_run(
     if not path.is_dir():
         raise validation_error(["source_dir 不存在或不是目录: %s" % source_dir])
 
+    # 边界校验（P2-01）在任何写操作之前：symlink / 逃逸 / 体积超限直接拒绝。
+    _collect_import_files(path)
+    # 指纹在任何写操作之前算好：内容冲突必须发生在"碰任何文件/行"之前。
+    source_fingerprint = _import_fingerprint(path)
+
     payload = dict(body)
     payload["source"] = "import"
+    payload["import_fingerprint"] = source_fingerprint
     # 内部通道：允许 source=import 与 source_dir，且可省略 application_id（补录历史产物）
     created = await _insert_run(session, payload, internal=True)
     await session.commit()
@@ -1428,10 +1458,66 @@ async def import_run(
     project_id = str(created["project_id"])
 
     from .. import runtime as runtime_mod
+    from ..db import get_sessionmaker
+
+    duplicate = not created["created"]
+    if duplicate:
+        stored = await _stored_import_fingerprint(run_id)
+        if stored is not None:
+            fingerprint_matches = stored == source_fingerprint
+        else:
+            # 旧版本导入的运行没有指纹：回退到与受管目录的现算指纹比对
+            managed = Path(settings.artifacts_dir) / run_id
+            fingerprint_matches = (
+                _import_fingerprint(managed) == source_fingerprint
+                if managed.is_dir()
+                else False
+            )
+        if not fingerprint_matches:
+            raise conflict(
+                "idempotency_conflict",
+                "request_key 已绑定内容不同的运行（幂等冲突：相同 request_key "
+                "必须携带与首次导入一致的产物内容）",
+                {
+                    "run_id": run_id,
+                    "import_fingerprint": source_fingerprint,
+                    "stored_fingerprint": stored,
+                },
+            )
+
+        async with get_sessionmaker()() as state_session:
+            state_row = (
+                await state_session.execute(
+                    text("SELECT state, outcome FROM test_runs WHERE id::text = :id"),
+                    {"id": run_id},
+                )
+            ).mappings().one()
+        if runs_mod.is_terminal(str(state_row["state"])):
+            # 已终态：证据不可变 —— 不复制、不 finalize，直接回读已登记证据。
+            artifact_count, sha256s = await _registered_evidence(run_id)
+            async with get_sessionmaker()() as view_session:
+                view = await _run_view(view_session, run_id)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "id": run_id,
+                    "display_id": view["display_id"],
+                    "state": str(state_row["state"]),
+                    "outcome": state_row["outcome"],
+                    "artifacts": artifact_count,
+                    "sha256": sha256s,
+                    "duplicate": True,
+                },
+            )
+        # 未终态 = 上次导入在 finalize 前中断：同内容重试在这里补完收敛。
 
     # 产物必须搬进受管目录：下载端点与 GET /report 都只按 settings.artifacts_dir
     # 反查 storage_key，登记一个外部绝对路径等于登记了永远读不到的行。
-    imported_dir = _import_artifacts_dir(run_id, path)
+    imported_dir = Path(settings.artifacts_dir) / run_id
+    if not imported_dir.is_dir():
+        # 目录已存在 = 上次复制已完整落盘（finalize 前中断的恢复），不再重拷；
+        # 缺失（含首次导入）才走"暂存 + 原子 rename"。
+        imported_dir = _import_artifacts_dir(run_id, path)
     result = await runtime_mod.finalize_run(
         run_id=run_id,
         state=runs_mod.STATE_COMPLETED,
@@ -1444,12 +1530,10 @@ async def import_run(
     )
     # 上面 commit 之后请求级事务已经关闭（get_session 用 session.begin() 包住），
     # 不能在同一个 session 上再发查询；视图改用一个新会话读。
-    from ..db import get_sessionmaker
-
     async with get_sessionmaker()() as view_session:
         view = await _run_view(view_session, run_id)
     return JSONResponse(
-        status_code=200 if not created["created"] else 201,
+        status_code=200 if duplicate else 201,
         content={
             "id": run_id,
             "display_id": view["display_id"],
@@ -1457,7 +1541,7 @@ async def import_run(
             "outcome": result.outcome,
             "artifacts": result.artifact_count,
             "sha256": result.sha256s,
-            "duplicate": not created["created"],
+            "duplicate": duplicate,
         },
     )
 

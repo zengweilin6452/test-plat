@@ -14,10 +14,10 @@ import threading
 import uuid
 
 import pytest
+from app.routers import debug
 from sqlalchemy import text
 from starlette.responses import Response
 
-from app.routers import debug
 from tests._p3_common import CLIENT_HEADERS, requires_db
 from tests._p3_common import api_client as api_client  # noqa: F401 - 夹具复用
 from tests._p3_common import p3_project as p3_project  # noqa: F401 - 夹具复用
@@ -77,7 +77,12 @@ def _install_forward(monkeypatch, handler):
         )
         return handler(method, path, json_body, headers)
 
+    # P2-03：vendor 代理分路由层（快照/控制端点）与服务层（关闭/释放）两条通道，
+    # 替身两边都装，调用统一记进同一个列表。
     monkeypatch.setattr(debug, "_forward", fake_forward)
+    from app.services import debug_session as debug_session_mod
+
+    monkeypatch.setattr(debug_session_mod, "_forward", fake_forward)
     return calls
 
 

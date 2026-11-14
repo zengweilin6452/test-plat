@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..domain.gates import GateError, policy_rules_to_thresholds, rules_fingerprint
 
 router = APIRouter(tags=["gate-policies"])
@@ -113,6 +114,7 @@ async def get_gate_policy(
 async def update_gate_policy(
     policy_id: str,
     payload: dict[str, Any],
+    _client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """改阈值 = 插入新版本行，**绝不 UPDATE 同 id 的历史行**。
@@ -195,6 +197,7 @@ async def update_gate_policy(
 @router.post("/gate-policies", status_code=201)
 async def create_gate_policy(
     payload: dict[str, Any],
+    _client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """新建策略（首期单条全局策略用默认阈值）。同一应用下重名则 version+1。"""

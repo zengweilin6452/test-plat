@@ -15,16 +15,17 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy import text as _text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..domain import identity as identity_mod
 from ..domain import runs as runs_mod
-from ..errors import CLIENT_HEADER, CLIENT_HEADER_VALUE, client_header_required, validation_error
+from ..errors import validation_error
 from ..schemas import TaskCreateIn, TaskPatchIn, TaskRevisionListOut, TasksOut
 from ..services import tasks as task_service
 
@@ -57,19 +58,9 @@ async def _task_scope(session: AsyncSession, task_id: str) -> tuple[str, str]:
     return row["pid"], row["aid"]
 
 
-def require_client_header(
-    x_testdock_client: Annotated[str | None, Header(alias=CLIENT_HEADER)] = None,
-) -> str:
-    """写操作必须带 X-TestDock-Client: web（development-plan.md §8.1 防跨站表单）。
-
-    缺失时 428 Precondition Required 而不是 403：这是"缺少前置条件"，
-    不是"认证失败"，语义上更准确，也避免前端把它当成登录问题去跳登录页。
-    """
-    if x_testdock_client is None:
-        raise client_header_required()
-    if x_testdock_client.strip().lower() != CLIENT_HEADER_VALUE:
-        raise client_header_required()
-    return x_testdock_client.strip()
+# require_client_header 已上移到 app/dependencies.py（P1-04：写操作守卫是
+# 全 API 横切约束，不该住在第一个用到它的业务路由里）。本模块经顶部导入
+# 继续使用；历史用法 `from .tasks import require_client_header` 仍然可用。
 
 
 @router.get("/tasks", response_model=TasksOut)

@@ -16,24 +16,21 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..domain import leases as leases_mod
 from ..errors import (
-    CLIENT_HEADER,
-    CLIENT_HEADER_VALUE,
-    client_header_required,
     conflict,
     not_found,
 )
 from ..integrations import devices as adb_integration
 from ..schemas import ResourcesOut
 from ..services import resources as resource_service
-from .tasks import require_client_header
 
 router = APIRouter(tags=["resources"])
 
@@ -378,14 +375,10 @@ def run_readiness_check(
 @router.post("/resources/sync")
 async def sync_resources(
     payload: ResourceSyncIn,
-    x_testdock_client: Annotated[str | None, Header(alias=CLIENT_HEADER)] = None,
+    client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """问 adb「现在插着什么设备」，把答案登记进设备池（写操作，web 守卫与 POST /runs 一致）。"""
-    if x_testdock_client is None or not x_testdock_client.strip():
-        raise client_header_required()
-    if x_testdock_client.strip().lower() != CLIENT_HEADER_VALUE:
-        raise client_header_required()
     from ..domain import identity as identity_mod
 
     # 归档守卫（工单 04）：归档项目不允许新增 / 更新业务设备

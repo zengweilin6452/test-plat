@@ -31,11 +31,10 @@ if not TEST_DB:
 
 os.environ.setdefault("TESTDOCK_DATABASE_URL", TEST_DB)
 
-from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import text  # noqa: E402
-
 from app.db import get_engine  # noqa: E402
 from app.main import app  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VENDOR_SRC = REPO_ROOT / "vendor" / "mobile_perf" / "src"
@@ -113,6 +112,9 @@ def _exec_sql(sql: str, params: dict | None = None):
 @pytest.fixture(scope="module")
 def client():
     with TestClient(app) as test_client:
+        # P1-04：写端点统一要求 X-TestDock-Client: web —— 本文件的用例
+        # 关注门禁语义，默认带上合法头；守卫本身由 test_p1_client_header 覆盖。
+        test_client.headers.update({"X-TestDock-Client": "web"})
         yield test_client
 
 

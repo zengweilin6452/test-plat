@@ -41,12 +41,8 @@ import base64
 import contextlib
 import json
 import logging
-import os
 import re
-import secrets
 import subprocess
-import sys
-import time
 import uuid as uuid_mod
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -58,6 +54,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..domain import leases as leases_mod
 from ..errors import (
     ApiError,
@@ -68,7 +65,58 @@ from ..errors import (
     validation_error,
 )
 from ..runner import spawn as spawn_mod
-from .tasks import require_client_header
+
+# P2-03：业务服务在 services/debug_session.py；这里再导出进程内状态与业务函数，
+# 供历史用例（debug._CONTROL_TOKENS 等）与 internal 协议面按原路径访问。
+from ..services.debug_session import (  # noqa: F401 - 兼容再导出见 __all__
+    CONTROL_TOKENS as _CONTROL_TOKENS,
+)
+from ..services.debug_session import (
+    CROP_VERIFICATION_TTL_SECONDS,
+    register_viewer_port,
+)
+from ..services.debug_session import (
+    CROP_VERIFICATIONS as _CROP_VERIFICATIONS,
+)
+from ..services.debug_session import (
+    GESTURE_CLIENTS as _GESTURE_CLIENTS,
+)
+from ..services.debug_session import (
+    READY_PORTS as _READY_PORTS,
+)
+from ..services.debug_session import (
+    audit as _audit,
+)
+from ..services.debug_session import (
+    busy_holder as _busy_holder,
+)
+from ..services.debug_session import (
+    close_session as _close_session,
+)
+from ..services.debug_session import (
+    consume_crop_verification as _consume_crop_verification,
+)
+from ..services.debug_session import (
+    drop_crop_verifications as _drop_crop_verifications,
+)
+from ..services.debug_session import (
+    find_runner_pid_by_run_id as _find_runner_pid_by_run_id,
+)
+from ..services.debug_session import (
+    issue_crop_verification as _issue_crop_verification,
+)
+from ..services.debug_session import (
+    last_close_reason as _last_close_reason,
+)
+from ..services.debug_session import (
+    release_control as _release_control,
+)
+from ..services.debug_session import (
+    spawn_runner_threadsafe as _spawn_runner_threadsafe,
+)
+from ..services.debug_session import (
+    terminate_runner_blocking as _terminate_runner_blocking,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,21 +130,6 @@ MAX_WS_CLIENTS_PER_SESSION = 4
 
 #: 进程内会话 WS 客户端计数：{session_id: int}。单进程 uvicorn 下是权威计数。
 _WS_CLIENTS: dict[str, int] = {}
-#: 进程内 viewer 端口表：{session_id: port}，ready 上报时写入，关闭时删除。
-_READY_PORTS: dict[str, int] = {}
-
-#: 框选验证凭证有效期（秒）。验证只证明「发凭证那一刻画面上唯一命中」，
-#: 窗口内必须完成登记，否则重新验证（阈值/框选/画面都可能已经变了）。
-CROP_VERIFICATION_TTL_SECONDS = 120.0
-#: 进程内验证凭证：token -> {session_id, snapshot_id, region, threshold, expires_at}。
-#: 单进程 uvicorn 下与 _READY_PORTS 同口径：多 worker 部署要换成共享存储。
-_CROP_VERIFICATIONS: dict[str, dict[str, Any]] = {}
-
-#: 直接操控：平台代浏览器持有 vendor 控制权 token；浏览器永远拿不到 token。
-#: 与 _READY_PORTS/_CROP_VERIFICATIONS 同口径，多 worker 部署需换共享存储。
-_CONTROL_TOKENS: dict[str, str] = {}
-#: 每会话最多一条手势 WS（vendor 侧每设备同时只允许一个手势）。
-_GESTURE_CLIENTS: dict[str, int] = {}
 #: 每会话最多一条 H.264 视频 WS（vendor 每设备预览客户端上限 4，平台只占一条）。
 _VIDEO_CLIENTS: dict[str, int] = {}
 #: vendor /input/key 允许的按键；与 mobile_auto 有限键表一致。
@@ -169,60 +202,6 @@ def _view(row: dict[str, Any], *, viewer_port: int | None = None) -> dict[str, A
         data["base_url"] = f"http://127.0.0.1:{viewer_port}"
         data["ws_path"] = f"{API_PREFIX}/ws/debug/{row['id']}"
     return data
-
-
-async def _audit(
-    session: AsyncSession,
-    *,
-    project_id: str,
-    action: str,
-    entity_id: str,
-    changes: dict[str, Any],
-) -> None:
-    await session.execute(
-        text(
-            """
-            INSERT INTO audit_events (
-                id, project_id, actor_ref, action, entity_type, entity_id,
-                request_id, changes
-            ) VALUES (
-                CAST(:id AS uuid), CAST(:pid AS uuid), :actor, :action, 'debug_session',
-                CAST(:eid AS uuid), :rid, CAST(:changes AS jsonb)
-            )
-            """
-        ),
-        {
-            "id": str(uuid_mod.uuid4()),
-            "pid": str(project_id),
-            "actor": str(changes.get("actor_ref") or "web-client"),
-            "action": action,
-            "eid": str(entity_id),
-            "rid": uuid_mod.uuid4().hex,
-            "changes": json.dumps(changes, ensure_ascii=False, default=str),
-        },
-    )
-
-
-async def _busy_holder(session: AsyncSession, resource_id: str) -> dict[str, Any] | None:
-    """设备当前活动租约的占用者（display_id 用 resource_key 代替）。"""
-    row = (
-        await session.execute(
-            text(
-                """
-                SELECT rl.run_id, rl.debug_session_id, rl.check_id, rl.holder_id,
-                       COALESCE(er.resource_key, '') AS display_id
-                  FROM resource_leases rl
-                  LEFT JOIN execution_resources er ON er.id = rl.resource_id
-                 WHERE rl.resource_id = CAST(:rid AS uuid)
-                   AND rl.released_at IS NULL
-                 ORDER BY rl.created_at DESC
-                 LIMIT 1
-                """
-            ),
-            {"rid": str(resource_id)},
-        )
-    ).mappings().first()
-    return dict(row) if row else None
 
 
 async def _viewer_port(session: AsyncSession, session_id: str) -> int:
@@ -310,23 +289,6 @@ def _control_view(response: Response) -> dict[str, Any]:
         "ttl_seconds": int(ttl) if isinstance(ttl, (int, float)) else 5,
         "note": data.get("note") if isinstance(data, dict) else None,
     }
-
-
-async def _release_control(session_id: str) -> None:
-    """尽力释放 vendor 控制权并清掉本地 token；会话关闭/清理共用。"""
-    sid = str(session_id)
-    token = _CONTROL_TOKENS.pop(sid, None)
-    _GESTURE_CLIENTS.pop(sid, None)
-    if not token:
-        return
-    with contextlib.suppress(Exception):
-        await _forward(
-            sid,
-            "POST",
-            "/api/v1/control",
-            headers={"X-Viewer-Control": token},
-            json_body={"enabled": False},
-        )
 
 
 def _control_token_or_409(session_id: str) -> str:
@@ -459,121 +421,6 @@ async def debug_input_key(
     return response
 
 
-def register_viewer_port(session_id: str, port: int) -> None:
-    """internal ready 端点回报的 viewer 端口登记（进程内表，见模块 docstring）。"""
-    _READY_PORTS[str(session_id)] = int(port)
-
-
-def _find_runner_pid_by_run_id(run_id: str) -> int | None:
-    """进程表丢失（API 重启过）时按命令行找该 run_id 的 runner 进程。
-
-    spawn 的命令行固定是 `python -m testdock_runner ... --run-id <run_id>`，
-    所以限定 python 进程名——否则扫描进程（powershell）自己的命令行也含
-    脚本文本，会把扫描器本身当成 runner。
-    """
-    marker = f"--run-id {run_id}"
-    if os.name == "nt":
-        script = (
-            "Get-CimInstance Win32_Process | Where-Object { "
-            "$_.Name -like 'python*' "
-            "-and $_.CommandLine "
-            "-and $_.CommandLine.Contains('testdock_runner') "
-            f"-and $_.CommandLine.Contains('{marker}') }} "
-            "| ForEach-Object { $_.ProcessId }"
-        )
-        try:
-            completed = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", script],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return None
-        for token in (completed.stdout or "").split():
-            try:
-                pid = int(token)
-            except ValueError:
-                continue
-            if pid != os.getpid():
-                return pid
-        return None
-    try:
-        completed = subprocess.run(
-            ["pgrep", "-f", f"testdock_runner.*{run_id}"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    for token in (completed.stdout or "").split():
-        try:
-            pid = int(token)
-        except ValueError:
-            continue
-        if pid != os.getpid():
-            return pid
-    return None
-
-
-def _terminate_runner_blocking(run_id: str) -> None:
-    """杀 runner 进程树（同步 subprocess，避开 Selector loop 不支持子进程的限制）。
-
-    `_PROCESSES` 是进程内表，API 重启后为空——只查它的话，重启前 spawn 的
-    runner 会漏杀，成为持有本地设备锁的孤儿（新会话 runner 全部 DeviceBusy，
-    reason=local_lease_busy）。所以进程表没有时按命令行兜底扫描。
-    """
-    proc = spawn_mod._PROCESSES.get(str(run_id))
-    pid = proc.pid if proc is not None else None
-    if pid is None:
-        pid = _find_runner_pid_by_run_id(str(run_id))
-    if pid:
-        subprocess.run(
-            ["taskkill", "/T", "/F", "/PID", str(pid)]
-            if os.name == "nt"
-            else ["kill", "-9", str(pid)],
-            capture_output=True,
-        )
-    spawn_mod._PROCESSES.pop(str(run_id), None)
-
-
-def _spawn_runner_threadsafe(**kwargs) -> int:
-    """在独立线程 + Proactor loop 里 spawn runner。
-
-    请求处理器跑在 Selector loop（psycopg 异步需要），而 Windows 的
-    asyncio.create_subprocess_exec 只有 Proactor loop 支持；跨 loop 子进程
-    归属也不对，所以在专用线程里起一个短命 Proactor loop 完成拉起。
-    """
-    import threading
-
-    result: dict[str, Any] = {}
-
-    def _run() -> None:
-        if sys.platform == "win32":
-            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-
-        async def _inner() -> None:
-            result["pid"] = await spawn_mod.spawn_runner(**kwargs)
-
-        try:
-            asyncio.run(_inner())
-        except Exception as exc:  # noqa: BLE001
-            result["error"] = exc
-
-    thread = threading.Thread(target=_run, name="debug-spawn", daemon=True)
-    thread.start()
-    thread.join(timeout=30.0)
-    if "error" in result:
-        raise result["error"]
-    if "pid" not in result:
-        raise RuntimeError("runner 拉起超时（30s）")
-    return int(result["pid"])
-
-
-# --------------------------------------------------------------------------- #
-# 会话生命周期
-# --------------------------------------------------------------------------- #
 @router.post("/debug-sessions", status_code=201)
 async def create_debug_session(
     body: dict = Body(default_factory=dict),
@@ -702,91 +549,6 @@ async def create_debug_session(
     return _view(view_row)
 
 
-async def _close_session(session_id: str, *, reason: str) -> dict[str, Any] | None:
-    """关闭会话（幂等）：runner 终止 -> state=closed + closed_at -> 释放租约 -> 审计。
-
-    所有关闭路径（DELETE、spawn 失败、runner 退出兜底）都汇到这里，所以验证凭证
-    的按会话清理也放在这里：会话没了，旧凭证就不该还能解锁模板登记。
-    """
-    from ..db import get_sessionmaker
-
-    _drop_crop_verifications(str(session_id))
-    # 控制权先尽力还给 vendor：token 在本地也一并清掉，token 不随会话残留。
-    await _release_control(str(session_id))
-    sessionmaker = get_sessionmaker()
-    async with sessionmaker() as session:
-        async with session.begin():
-            row = (
-                await session.execute(
-                    text(
-                        """
-                        SELECT id, project_id, state
-                          FROM debug_sessions WHERE id = CAST(:sid AS uuid)
-                        """
-                    ),
-                    {"sid": str(session_id)},
-                )
-            ).mappings().first()
-            if row is None:
-                return None
-            if row["state"] not in ("closed", "lost"):
-                await session.execute(
-                    text(
-                        """
-                        UPDATE debug_sessions
-                           SET state = 'closed', closed_at = now()
-                         WHERE id = CAST(:sid AS uuid)
-                        """
-                    ),
-                    {"sid": str(session_id)},
-                )
-                await leases_mod.release_lease_for_debug(
-                    session, debug_session_id=str(session_id), reason=reason
-                )
-                await _audit(
-                    session,
-                    project_id=str(row["project_id"]),
-                    action="debug_session_closed",
-                    entity_id=str(session_id),
-                    changes={"reason": reason},
-                )
-    _READY_PORTS.pop(str(session_id), None)
-    return {"id": str(session_id), "state": "closed"}
-
-
-async def _last_close_reason(session: AsyncSession, session_id: str) -> str | None:
-    """会话关闭原因（审计里的最新一条 debug_session_closed）。
-
-    会话行没有 reason 列；关闭路径（client_closed / runner_exit / spawn_failed /
-    local_lease_busy…）都写审计，detail 据此给前端一个可行动的失败原因。
-    """
-    row = (
-        await session.execute(
-            text(
-                """
-                SELECT changes FROM audit_events
-                 WHERE entity_type = 'debug_session'
-                   AND entity_id = CAST(:sid AS uuid)
-                   AND action = 'debug_session_closed'
-                 ORDER BY created_at DESC
-                 LIMIT 1
-                """
-            ),
-            {"sid": str(session_id)},
-        )
-    ).mappings().first()
-    if row is None or row["changes"] is None:
-        return None
-    changes = row["changes"]
-    if isinstance(changes, str):
-        try:
-            changes = json.loads(changes)
-        except ValueError:
-            return None
-    reason = changes.get("reason") if isinstance(changes, dict) else None
-    return str(reason) if reason else None
-
-
 @router.get("/debug-sessions/{session_id}")
 async def get_debug_session(session_id: str, session: AsyncSession = Depends(get_session)) -> dict:
     row = await _session_row(session, session_id)
@@ -833,6 +595,7 @@ async def _active_row(session: AsyncSession, session_id: str) -> dict[str, Any]:
 async def proxy_snapshot(
     session_id: str,
     request: Request,
+    _client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     row = await _active_row(session, session_id)
@@ -865,6 +628,7 @@ async def proxy_snapshot_tree(
 async def proxy_locators_validate(
     session_id: str,
     request: Request,
+    _client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     row = await _active_row(session, session_id)
@@ -900,73 +664,6 @@ async def _template_session(session: AsyncSession, session_id: str | None) -> st
         )
     row = await _active_row(session, session_id)
     return str(row["id"])
-
-
-def _prune_crop_verifications() -> None:
-    now = time.monotonic()
-    for token in [t for t, rec in _CROP_VERIFICATIONS.items() if rec["expires_at"] <= now]:
-        _CROP_VERIFICATIONS.pop(token, None)
-
-
-def _drop_crop_verifications(session_id: str) -> None:
-    """会话关闭即作废该会话的全部验证凭证（按 session 清，不动别的会话）。
-
-    TTL 只是兜底：会话已经关了，凭证再"没过期"也不能证明当前画面仍然成立。
-    """
-    target = str(session_id)
-    for token in [
-        t for t, rec in _CROP_VERIFICATIONS.items() if rec["session_id"] == target
-    ]:
-        _CROP_VERIFICATIONS.pop(token, None)
-
-
-def _issue_crop_verification(
-    *, session_id: str, snapshot_id: str, region: list[int], threshold: float
-) -> str:
-    """发放一次性登记凭证：绑定验证时的会话、新快照、命中框与阈值。"""
-    _prune_crop_verifications()
-    token = secrets.token_urlsafe(24)
-    _CROP_VERIFICATIONS[token] = {
-        "session_id": str(session_id),
-        "snapshot_id": str(snapshot_id),
-        "region": [int(value) for value in region],
-        "threshold": float(threshold),
-        "expires_at": time.monotonic() + CROP_VERIFICATION_TTL_SECONDS,
-    }
-    return token
-
-
-def _reject_unverified(reason: str, **extra: Any) -> ApiError:
-    return conflict(
-        "crop_not_verified",
-        "框选尚未验证通过，不能登记模板：" + reason + "。请用当前画面重新验证框选。",
-        extra,
-    )
-
-
-def _consume_crop_verification(
-    *, token: Any, session_id: str, snapshot_id: str, region: list[int], threshold: float
-) -> None:
-    """校验并消费凭证：只有「刚刚用新画面唯一命中」的那次验证能解锁登记。
-
-    任何一项不一致（会话 / 快照 / 框选 / 阈值）都按未验证处理，且**不消费**
-    凭证，让客户端带着正确参数重试；命中后立即作废（一次性）。
-    """
-    _prune_crop_verifications()
-    if not isinstance(token, str) or not token:
-        raise _reject_unverified("缺少验证凭证")
-    record = _CROP_VERIFICATIONS.get(token)
-    if record is None:
-        raise _reject_unverified("验证凭证已失效（已使用或已过期）")
-    if record["session_id"] != str(session_id):
-        raise _reject_unverified("验证凭证属于另一个调试会话")
-    if record["snapshot_id"] != str(snapshot_id):
-        raise _reject_unverified("快照与验证时不同（验证基于最新捕获的画面）")
-    if record["region"] != [int(value) for value in region]:
-        raise _reject_unverified("框选区域与验证时不同")
-    if abs(record["threshold"] - float(threshold)) > 1e-9:
-        raise _reject_unverified("阈值与验证时不同")
-    _CROP_VERIFICATIONS.pop(token, None)
 
 
 def _registration_payload(body: Any) -> dict[str, Any]:
@@ -1022,6 +719,7 @@ async def list_templates(session_id: str | None = None, session: AsyncSession = 
 
 @router.post("/templates")
 async def create_template(request: Request, session_id: str | None = None,
+                          _client: str = Depends(require_client_header),
                           session: AsyncSession = Depends(get_session)) -> Response:
     """从验证通过的新快照登记模板版本（服务端强制，不依赖前端 disabled）。"""
     sid = await _template_session(session, session_id)
@@ -1069,6 +767,7 @@ async def _match_crop(source: bytes, current: bytes, region: list[int], threshol
 
 @router.post("/templates/validate-crop")
 async def validate_crop(request: Request, session_id: str | None = None,
+                        _client: str = Depends(require_client_header),
                         session: AsyncSession = Depends(get_session)) -> Response:
     """用**新捕获的画面**验证框选：唯一命中才发放一次性登记凭证。
 
@@ -1122,6 +821,7 @@ async def validate_crop(request: Request, session_id: str | None = None,
 
 @router.post("/templates/validate")
 async def validate_template(request: Request, session_id: str | None = None,
+                            _client: str = Depends(require_client_header),
                             session: AsyncSession = Depends(get_session)) -> Response:
     """IMAGE 定位验证：走 vendor 的专用端点 `/templates/validate`。
 
@@ -1151,9 +851,9 @@ async def validate_template(request: Request, session_id: str | None = None,
     return await _forward(sid, "POST", "/api/v1/templates/validate", json_body=body)
 
 
-
 @router.put("/templates/{logical:path}")
 async def update_template(logical: str, request: Request, session_id: str | None = None,
+                          _client: str = Depends(require_client_header),
                           session: AsyncSession = Depends(get_session)) -> Response:
     """确认更新同名模板：同样必须先拿到框选验证凭证（更新也会生成新版本）。"""
     from urllib.parse import quote
@@ -1489,4 +1189,19 @@ async def debug_gesture_socket(websocket: WebSocket, session_id: str) -> None:
             await websocket.close(code=1000)
 
 
-__all__ = ["router", "MAX_WS_CLIENTS_PER_SESSION", "_READY_PORTS", "_close_session", "register_viewer_port"]
+__all__ = [
+    "router",
+    "MAX_WS_CLIENTS_PER_SESSION",
+    "CROP_VERIFICATION_TTL_SECONDS",
+    "_READY_PORTS",
+    "_CONTROL_TOKENS",
+    "_CROP_VERIFICATIONS",
+    "_GESTURE_CLIENTS",
+    "_close_session",
+    "_find_runner_pid_by_run_id",
+    "_terminate_runner_blocking",
+    "_spawn_runner_threadsafe",
+    "_issue_crop_verification",
+    "_drop_crop_verifications",
+    "register_viewer_port",
+]

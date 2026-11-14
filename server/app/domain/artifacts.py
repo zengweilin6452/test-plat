@@ -48,9 +48,13 @@ ARTIFACT_KINDS: tuple[str, ...] = (
     "other",
 )
 
-#: 扫描时跳过的目录/文件（缓存、临时文件、被移动过的产物）
-_SKIP_DIRS = {".pytest_cache", "__pycache__", ".git", ".cache", ".ipynb_checkpoints"}
-_SKIP_SUFFIXES = {".pyc", ".pyo", ".tmp", ".part", ".swp"}
+#: 扫描 / 导入复制时跳过的目录与后缀（缓存、临时文件、被移动过的产物）。
+#: 公开常量：导入通道（routers/runs.py）按同一口径过滤复制集，
+#: 登记口径与磁盘口径一致，也避免把源目录里的隐藏/敏感文件带进可下载证据。
+SKIP_DIRS = frozenset({".pytest_cache", "__pycache__", ".git", ".cache", ".ipynb_checkpoints"})
+SKIP_SUFFIXES = frozenset({".pyc", ".pyo", ".tmp", ".part", ".swp"})
+_SKIP_DIRS = SKIP_DIRS  # 兼容旧名
+_SKIP_SUFFIXES = SKIP_SUFFIXES
 
 #: 单文件哈希上限（超过就不登记，避免把视频整段读进内存）
 MAX_HASH_BYTES = 512 * 1024 * 1024
@@ -458,6 +462,8 @@ __all__ = [
     "mime_for",
     "register_files",
     "resolve_storage_path",
+    "SKIP_DIRS",
+    "SKIP_SUFFIXES",
     "retention_days_from_settings",
     "scan_artifacts",
     "sha256_file",

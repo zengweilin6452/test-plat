@@ -213,24 +213,24 @@ async def verify_fence(
     *,
     run_id: str | uuid.UUID,
     token: int | None,
-    require_token: bool = False,
 ) -> dict[str, Any]:
-    """校验 runner 带来的 fencing token 是否仍是当前活动租约的 token。
+    """校验 runner 带来的 fencing token 是否仍是当前活动租约的 token（fail-closed）。
 
     返回 {ok, checked, expected, provided, lease, resource_id}。
 
-    兼容语义（require_token=False）：token 为 None（旧 runner / import 通道）
-    时按"不校验"处理：ok=True 但 checked=False。HTTP 写入端点必须使用
-    require_token=True —— 缺失 token 一律拒绝，避免旧 token 重放或旧 runner
-    绕过 fence。
+    严格语义（P1-01）：没有"缺 token 即放行"的旁路 —— token 为 None 一律
+    ok=False、checked=False，且**不回显 expected**，让"无 token 的 fence
+    查询"探不到当前租约的 token。token 提供但不匹配（含租约已释放/转手）
+    同样拒绝；expected 仅在 provided 时返回，供服务器内部比对，HTTP 层
+    不得把它带进错误响应（否则旧 runner 能从 409 里学到新 token 再冒用）。
     """
     lease = await live_lease_for_run(session, run_id)
     expected = int(lease["fencing_token"]) if lease else None
     if token is None:
         return {
-            "ok": not require_token,
-            "checked": bool(require_token),
-            "expected": expected,
+            "ok": False,
+            "checked": False,
+            "expected": None,
             "provided": None,
             "lease": lease,
             "resource_id": lease["resource_id"] if lease else None,
@@ -247,9 +247,14 @@ async def verify_fence(
 
 
 async def extend_lease(
-    session: AsyncSession, *, run_id: str | uuid.UUID, token: int | None = None
+    session: AsyncSession, *, run_id: str | uuid.UUID, token: int
 ) -> bool:
-    """心跳续租：把 expires_at 推后。token 给了就只续自己那条租约。"""
+    """心跳续租：把 expires_at 推后。
+
+    token 是必填参数，且只续 fencing_token 精确匹配的那条租约（P1-01）：
+    旧 runner 拿旧 token / 不带 token 都续不动新租约，过期执行者无法靠
+    心跳把已转手的设备续在自己名下。
+    """
     result = await session.execute(
         text(
             """
@@ -257,12 +262,12 @@ async def extend_lease(
                SET expires_at = now() + make_interval(secs => :lease_seconds)
              WHERE run_id = :run_id
                AND released_at IS NULL
-               AND (CAST(:token AS bigint) IS NULL OR fencing_token = CAST(:token AS bigint))
+               AND fencing_token = CAST(:token AS bigint)
             """
         ),
         {
             "run_id": str(run_id),
-            "token": int(token) if token is not None else None,
+            "token": int(token),
             "lease_seconds": DEFAULT_LEASE_SECONDS,
         },
     )

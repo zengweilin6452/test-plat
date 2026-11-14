@@ -21,22 +21,22 @@ import re
 import uuid
 
 import pytest
+from app.domain import events as events_mod
+from app.main import app
+from app.routers import runs as runs_router
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from starlette.websockets import WebSocketDisconnect
 
-from app.domain import events as events_mod
-from app.main import app
-from app.routers import runs as runs_router
 from tests._p3_common import (
     CLIENT_HEADERS,
     TEST_DB,
     make_project,
-    reset_db_engine,
     requires_db,
+    reset_db_engine,
 )
 from tests._p3_common import make_run as make_run
-from tests._p3_common import p3_project as project
+from tests._p3_common import p3_project as project  # noqa: F401 - fixture 复用
 from tests._p3_common import sync_engine as sync_engine
 
 pytestmark = requires_db
@@ -350,8 +350,12 @@ def test_heartbeat_reports_cancel_from_column(
         json={"fencing_token": 7, "pid": 1},
         headers=headers,
     )
-    assert after.status_code == 200, after.text
-    assert after.json()["cancel"] is True, "runner 必须能从心跳感知取消受理"
+    # P1-01：取消会立即收敛终态并释放租约，此后旧 runner 的心跳不再拿到
+    # cancel 标志，而是 409 fence_mismatch —— runner 侧把它当作 fence_lost
+    # 立即退出（runner_pkg/testdock_runner/env.py 心跳线程），停止信号比
+    # cancel 标志更强：无论租约是"被取消收敛"还是"已转手"都必须停。
+    assert after.status_code == 409, after.text
+    assert after.json()["code"] == "fence_mismatch"
 
 
 def test_repeated_heartbeats_with_static_progress_stay_distinct(

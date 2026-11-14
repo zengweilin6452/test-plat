@@ -334,7 +334,12 @@ def main() -> None:
 
     import uvicorn
 
-    config = uvicorn.Config(app, host=settings.host, port=settings.port, log_level="info")
+    # 纵深防御（P1-03）：Settings 的字段校验已拦住错误配置，这里再显式校验
+    # 一次，保证绑定参数永远经过回环检查（含 settings 对象被运行时改写的情形）。
+    from .config import ensure_loopback_host
+
+    bind_host = ensure_loopback_host(settings.host)
+    config = uvicorn.Config(app, host=bind_host, port=settings.port, log_level="info")
     server = uvicorn.Server(config)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

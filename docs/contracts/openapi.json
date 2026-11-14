@@ -90,7 +90,13 @@
         }
       },
       "post": {
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
         "request": {
           "additionalProperties": true,
           "title": "Body",
@@ -153,6 +159,11 @@
             "in": "path",
             "name": "application_id",
             "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
           }
         ],
         "request": {
@@ -188,6 +199,11 @@
             "in": "path",
             "name": "application_id",
             "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
           }
         ],
         "request": null,
@@ -250,6 +266,11 @@
             "in": "path",
             "name": "application_id",
             "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
           }
         ],
         "request": null,
@@ -361,7 +382,13 @@
         }
       },
       "post": {
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
         "request": {
           "additionalProperties": true,
           "title": "Payload",
@@ -814,6 +841,11 @@
             "in": "path",
             "name": "session_id",
             "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
           }
         ],
         "request": null,
@@ -841,6 +873,11 @@
             "in": "path",
             "name": "session_id",
             "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
           }
         ],
         "request": null,
@@ -961,7 +998,13 @@
         }
       },
       "post": {
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
         "request": {
           "additionalProperties": true,
           "title": "Payload",
@@ -1024,6 +1067,11 @@
             "in": "path",
             "name": "policy_id",
             "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
           }
         ],
         "request": {
@@ -1104,7 +1152,13 @@
     },
     "/api/v1/legacy-review/apply": {
       "post": {
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
         "request": {
           "$ref": "#/components/schemas/LegacyApplyIn"
         },
@@ -1220,7 +1274,13 @@
         }
       },
       "post": {
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
         "request": {
           "additionalProperties": true,
           "title": "Body",
@@ -1254,6 +1314,11 @@
             "in": "path",
             "name": "project_id",
             "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
           }
         ],
         "request": {
@@ -1289,6 +1354,11 @@
             "in": "path",
             "name": "project_id",
             "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
           }
         ],
         "request": null,
@@ -1351,6 +1421,11 @@
             "in": "path",
             "name": "project_id",
             "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
           }
         ],
         "request": null,
@@ -1544,7 +1619,13 @@
         }
       },
       "post": {
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
         "request": {
           "additionalProperties": true,
           "title": "Body",
@@ -1569,7 +1650,13 @@
     },
     "/api/v1/runs/import": {
       "post": {
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
         "request": {
           "additionalProperties": true,
           "title": "Body",
@@ -1725,6 +1812,11 @@
             "in": "path",
             "name": "run_id",
             "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
           }
         ],
         "request": null,
@@ -1797,6 +1889,11 @@
             "in": "path",
             "name": "run_id",
             "required": true
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
           }
         ],
         "request": {
@@ -2471,6 +2568,11 @@
             "in": "query",
             "name": "session_id",
             "required": false
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
           }
         ],
         "request": null,
@@ -2498,6 +2600,11 @@
             "in": "query",
             "name": "session_id",
             "required": false
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
           }
         ],
         "request": null,
@@ -2524,6 +2631,11 @@
           {
             "in": "query",
             "name": "session_id",
+            "required": false
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
             "required": false
           }
         ],
@@ -2556,6 +2668,11 @@
           {
             "in": "query",
             "name": "session_id",
+            "required": false
+          },
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
             "required": false
           }
         ],
@@ -2600,7 +2717,13 @@
         }
       },
       "patch": {
-        "parameters": [],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-TestDock-Client",
+            "required": false
+          }
+        ],
         "request": {
           "$ref": "#/components/schemas/WorkspacePatchIn"
         },

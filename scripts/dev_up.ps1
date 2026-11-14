@@ -29,6 +29,14 @@ $WebDir = if ($env:TESTDOCK_WEB_DIR) { $env:TESTDOCK_WEB_DIR } else { Join-Path 
 $RunDir = if ($env:TESTDOCK_RUNTIME_DIR) { $env:TESTDOCK_RUNTIME_DIR } else { Join-Path $RepoRoot '.runtime\dev' }
 if (-not [IO.Path]::IsPathRooted($RunDir)) { $RunDir = Join-Path $RepoRoot $RunDir }
 $ServerDir = Join-Path $RepoRoot 'server'
+# 回环约束（P1-03）：首期无登录认证，API / Web 只能绑定回环。这里是启动前的
+# 快速失败；config.py 与 vite.config.ts 各自有同样的校验作为应用自身保护。
+$LoopbackHosts = @('127.0.0.1', 'localhost', '::1')
+foreach ($pair in @(@('TESTDOCK_HOST', $HostAddr), @('TESTDOCK_WEB_HOST', $WebHost))) {
+    if ($LoopbackHosts -notcontains $pair[1]) {
+        throw "$($pair[0])=$($pair[1]) 不是回环地址。首期服务没有登录认证，只允许绑定 127.0.0.1 / localhost / ::1。"
+    }
+}
 # 构建身份：/health 与 /capabilities 要能报出实际提交；正式安装没有 git 时留空，不猜。
 if (-not $env:TESTDOCK_BUILD_COMMIT -and (Get-Command git -ErrorAction SilentlyContinue)) {
     $commit = (& git -C $RepoRoot rev-parse --short HEAD 2>$null)

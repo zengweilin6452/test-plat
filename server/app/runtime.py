@@ -350,7 +350,8 @@ async def _apply_original_gate(session, run_id: str) -> dict[str, Any]:
     必须在 transition 到 completed 之前调用：门禁显式接收 run_complete=True，
     不再依赖"先把 run 写成 completed 再直接 UPDATE outcome"的路径。
     """
-    from .routers.analyses import evaluate_run_original
+    # P2-02：判定核心在 services 层，Runtime 不再反向依赖 routers。
+    from .services.analysis import evaluate_run_original
 
     evaluation = await evaluate_run_original(
         session,

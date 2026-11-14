@@ -25,18 +25,16 @@ import os
 import uuid
 
 import pytest
+from app.domain.joint_policy import clamp_ui_timeout
+from app.main import app  # noqa: F401 - TestClient 需要
+from app.main import app as fastapi_app
+from app.runner.spawn import JOINT_TOTAL_TIMEOUT_MARGIN_S, build_spec
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from app.main import app as fastapi_app
-from tests._p3_common import TEST_DB, reset_db_engine
-
-from app.domain.joint_policy import clamp_ui_timeout
-from app.main import app  # noqa: F401 - TestClient 需要
-from app.runner.spawn import JOINT_TOTAL_TIMEOUT_MARGIN_S, build_spec
-from tests._p3_common import CLIENT_HEADERS, requires_db
+from tests._p3_common import TEST_DB, requires_db, reset_db_engine
 from tests._p3_common import make_run as make_run
-from tests._p3_common import p3_project as project
+from tests._p3_common import p3_project as project  # noqa: F401 - fixture 复用
 from tests._p3_common import sync_engine as sync_engine
 
 pytestmark = requires_db
@@ -518,9 +516,32 @@ def _add_joint_revision(engine, project: dict) -> str:
     return revision_id
 
 
+#: joint run 通过 internal complete/fail 收敛时必须携带的 fencing token；
+#: P1-01 起 internal 写端点对缺 token/错 token 一律 409。
+_JOINT_FENCE = 774411
+
+
 def _joint_run(engine, project: dict) -> str:
     revision_id = _add_joint_revision(engine, project)
-    return _make_run_with_revision(engine, project, revision_id)
+    run_id = _make_run_with_revision(engine, project, revision_id)
+    # 真实链路里 joint run 派发时就会持有租约；这里补一条活动租约，
+    # 让 internal complete/fail 的 fence 校验有 token 可对。
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO resource_leases (id, project_id, resource_id, run_id,"
+                "                             fencing_token, holder_id, expires_at)"
+                " VALUES (gen_random_uuid(), CAST(:pid AS uuid), CAST(:rid AS uuid),"
+                "         CAST(:run AS uuid), :token, 'pytest', now() + interval '120 seconds')"
+            ),
+            {
+                "pid": project["project_id"],
+                "rid": project["resource_id"],
+                "run": run_id,
+                "token": _JOINT_FENCE,
+            },
+        )
+    return run_id
 
 
 def _make_run_with_revision(engine, project: dict, revision_id: str) -> str:
@@ -557,6 +578,7 @@ def _complete(
 ) -> dict:
     payload = {
         "outcome": None,
+        "fencing_token": _JOINT_FENCE,
         "components": components,
         "junit": junit,
     }
@@ -647,6 +669,7 @@ def test_matrix_collect_start_failure_is_errored_with_cancelled_ui(client, proje
     response = client.post(
         f"/internal/runs/{run_id}/fail",
         json={
+            "fencing_token": _JOINT_FENCE,
             "error_code": "perf_collect_start_failed",
             "message": "性能采集启动失败，UI 未执行",
             "stage": "perf_collect_start",
@@ -678,6 +701,7 @@ def test_matrix_ui_timeout_is_errored_not_failed(client, project, sync_engine):
     response = client.post(
         f"/internal/runs/{run_id}/fail",
         json={
+            "fencing_token": _JOINT_FENCE,
             "error_code": "ui_timeout",
             "message": "UI 执行达到 ui_timeout_s 上限",
             "stage": "ui",
@@ -707,6 +731,7 @@ def test_matrix_cancelled_joint_keeps_components_without_outcome(client, project
     response = client.post(
         f"/internal/runs/{run_id}/fail",
         json={
+            "fencing_token": _JOINT_FENCE,
             "error_code": "cancelled",
             "message": "用户取消",
             "stage": "cancelled",
@@ -1005,6 +1030,7 @@ def test_ui_timeout_failure_still_registers_collect_window(
     response = client.post(
         f"/internal/runs/{run_id}/fail",
         json={
+            "fencing_token": _JOINT_FENCE,
             "error_code": "ui_timeout",
             "message": "UI 执行达到 ui_timeout_s 上限",
             "stage": "ui",

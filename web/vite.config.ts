@@ -10,6 +10,24 @@ const host = env.TESTDOCK_HOST || '127.0.0.1'
 const webHost = env.TESTDOCK_WEB_HOST || '127.0.0.1'
 const apiPort = Number(env.TESTDOCK_PORT || env.TESTDOCK_API_PORT || 8000)
 const webPort = Number(env.TESTDOCK_WEB_PORT || 5173)
+
+// 回环约束（P1-03）：首期服务没有登录认证，Web 与其代理的 API 都只能绑定回环。
+// 与 server/app/config.py 的 LOOPBACK_HOSTS 同一份名单 —— 任何一侧放开都必须先
+// 设计身份认证、Origin 校验与 CSRF 防护，而不是改这一行。
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
+function assertLoopback(envName: string, value: string): void {
+  const normalized = value.trim().toLowerCase().replace(/^\[|\]$/g, '')
+  if (!LOOPBACK_HOSTS.has(normalized)) {
+    throw new Error(
+      `${envName}=${value} 不是回环地址。首期服务没有登录认证，` +
+        '只允许绑定 127.0.0.1 / localhost / ::1；如需局域网访问，' +
+        '必须先设计身份认证、Origin 校验与 CSRF 防护，不能仅开放 Host。',
+    )
+  }
+}
+assertLoopback('TESTDOCK_WEB_HOST', webHost)
+assertLoopback('TESTDOCK_HOST', host)
+
 const apiTarget = `http://${host}:${apiPort}`
 const wsTarget = `ws://${host}:${apiPort}`
 

@@ -262,13 +262,18 @@ def lease_conflict(message: str, details: dict[str, Any] | None = None) -> ApiEr
     return ApiError(409, "lease_conflict", message, details or {})
 
 
-def fence_mismatch(run_id: str, expected: int | None, provided: int | None) -> ApiError:
-    """runner 的 fencing token 与 DB 租约不一致（api-design.md §1.2）。"""
+def fence_mismatch(run_id: str, provided: int | None) -> ApiError:
+    """runner 的 fencing token 与 DB 租约不一致（api-design.md §1.2）。
+
+    响应只回显调用方自己提供的值，绝不包含当前租约的实际 token：
+    否则旧 runner 拿旧 token 被拒时能从 409 里学到新 token，fencing 形同虚设
+    （P1-01）。
+    """
     return ApiError(
         409,
         "fence_mismatch",
         f"运行 {run_id} 的 fencing token 失配，执行身份已失效",
-        {"run_id": run_id, "expected": expected, "provided": provided},
+        {"run_id": run_id, "provided": provided},
     )
 
 

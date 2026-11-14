@@ -12,6 +12,7 @@ from __future__ import annotations
 import uuid
 
 from app.routers import debug as debug_mod
+from app.services import debug_session as debug_session_mod
 
 
 def test_terminate_falls_back_to_command_line_scan(monkeypatch):
@@ -21,8 +22,8 @@ def test_terminate_falls_back_to_command_line_scan(monkeypatch):
     spawn._PROCESSES.pop("orphan-run", None)
     seen: list[list[str]] = []
     monkeypatch.setattr(
-        debug_mod,
-        "_find_runner_pid_by_run_id",
+        debug_session_mod,
+        "find_runner_pid_by_run_id",
         lambda run_id: 4242 if run_id == "orphan-run" else None,
     )
     monkeypatch.setattr(debug_mod.subprocess, "run", lambda args, **kwargs: seen.append(list(args)))
@@ -48,7 +49,7 @@ def test_terminate_uses_process_table_when_present(monkeypatch):
         scanned.append(run_id)
         return None
 
-    monkeypatch.setattr(debug_mod, "_find_runner_pid_by_run_id", _scan)
+    monkeypatch.setattr(debug_session_mod, "find_runner_pid_by_run_id", _scan)
     monkeypatch.setattr(debug_mod.subprocess, "run", lambda args, **kwargs: seen.append(list(args)))
     try:
         debug_mod._terminate_runner_blocking("live-run")
