@@ -17,10 +17,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 
-from tests._p3_common import CLIENT_HEADERS, TEST_DB, reset_db_engine, requires_db
+from tests._p3_common import CLIENT_HEADERS, TEST_DB, requires_db, reset_db_engine
 from tests._p3_common import api_client as api_client  # noqa: PLW0127 - 夹具复用
 from tests._p3_common import make_run as make_run  # noqa: PLW0127 - 夹具复用
-from tests._p3_common import p3_project as project  # noqa: PLW0127 - 夹具复用
 from tests._p3_common import sync_engine as sync_engine  # noqa: PLW0127 - 夹具复用
 
 pytestmark = requires_db
@@ -651,6 +650,45 @@ def test_import_rejects_symlink_escape_and_hidden_files(
     except OSError:
         pytest.skip("此环境不允许创建符号链接（symlink 校验分支无法在本机验证）")
 
+    rejected = api_client.post(
+        "/api/v1/runs/import",
+        json=_import_body(project, source),
+        headers=CLIENT_HEADERS,
+    )
+    assert rejected.status_code == 400, rejected.text
+    assert "符号链接" in rejected.json()["message"]
+
+
+def test_import_rejects_symlink_dir_without_os_privilege(
+    api_client, project, sync_engine, tmp_path, monkeypatch
+):
+    """目录符号链接必须整单拒绝（无 symlink 权限的环境用 monkeypatch 验证分支）。
+
+    CI 实测抓过的分歧：目录符号链接曾被静默跳过（导入 201 成功），而契约是
+    "含 symlink 的源目录整单 400"。本用例不创建真实链接——把 Path.is_symlink
+    对哨兵目录名打桩为 True，直接验证拒绝分支本身。
+    """
+    from app.config import settings
+    from app.services import run_import as run_import_service
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path / "data")
+    source = _write_artifacts(tmp_path / "vendor-run", junit=JUNIT_PASSED, report=PERF_REPORT)
+    (source / "linked").mkdir()
+    (source / "linked" / "payload.txt").write_text("outside", encoding="utf-8")
+
+    real_is_symlink = Path.is_symlink
+
+    def fake_is_symlink(self: Path) -> bool:
+        return self.name == "linked" or real_is_symlink(self)
+
+    monkeypatch.setattr(Path, "is_symlink", fake_is_symlink)
+
+    # 服务层直查：目录链接必须触发拒绝（而不是被过滤后静默导入）
+    with pytest.raises(Exception) as exc_info:
+        run_import_service.collect_import_files(source)
+    assert "符号链接" in str(exc_info.value)
+
+    # 端到端：导入请求 400，且不落任何运行
     rejected = api_client.post(
         "/api/v1/runs/import",
         json=_import_body(project, source),

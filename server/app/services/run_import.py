@@ -97,12 +97,16 @@ def collect_import_files(source: Path) -> list[tuple[Path, Path]]:
     total_bytes = 0
     for dirpath, dirnames, filenames in os.walk(root):
         base = Path(dirpath)
+        # 目录符号链接一律**拒绝**而不是跳过：跳过会让导入静默成功，而调用方
+        # （与用例）的契约是"含 symlink 的源目录整单 400"——CI 实测抓过这个
+        # 分歧（目录链接被过滤后导入 201）。符号链接检查先于缓存/隐藏过滤。
+        for d in dirnames:
+            if (base / d).is_symlink():
+                raise validation_error([f"source_dir 含符号链接，拒绝导入: {base / d}"])
         dirnames[:] = sorted(
             d
             for d in dirnames
-            if d not in artifacts_mod.SKIP_DIRS
-            and not (base / d).is_symlink()
-            and not d.startswith(".")
+            if d not in artifacts_mod.SKIP_DIRS and not d.startswith(".")
         )
         for name in sorted(filenames):
             item = base / name
