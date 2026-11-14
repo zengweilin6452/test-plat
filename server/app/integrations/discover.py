@@ -288,6 +288,34 @@ def _is_link_like(path: Path) -> bool:
     return bool(attrs & _FILE_ATTRIBUTE_REPARSE_POINT)
 
 
+def _reject_tree_links(root: Path, *, source_id: str) -> None:
+    """来源目录树内的符号链接/交接点在解析期即拒绝（复制前 fail-fast）。
+
+    与副本扫描（_iter_regular_files）同一套跳过规则；区别在错误类型——这里
+    是来源边界问题（SourceBoundaryError / source_symlink），登记阶段就该给
+    浏览器明确原因，而不是等到复制才以 code_copy_corrupt 失败（工单 03）。
+    """
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in dirnames:
+            if name in _SKIP_DIR_NAMES:
+                continue
+            if _is_link_like(Path(dirpath) / name):
+                raise SourceBoundaryError(
+                    "source_symlink",
+                    "来源目录内包含符号链接或交接点，拒绝越界读取",
+                    source_id=source_id,
+                )
+        for name in filenames:
+            if Path(name).suffix.lower() in _SKIP_SUFFIXES:
+                continue
+            if _is_link_like(Path(dirpath) / name):
+                raise SourceBoundaryError(
+                    "source_symlink",
+                    "来源目录内包含符号链接，拒绝越界读取",
+                    source_id=source_id,
+                )
+
+
 def _reject_link_components(path: Path, root: Path) -> None:
     """从可信根到目标路径的每一级都拒绝链接/交接点。"""
     if _is_link_like(root):
@@ -372,6 +400,9 @@ def resolve_source(
             raise SourceBoundaryError(
                 "source_symlink", "来源真实路径逃逸出可信目录", source_id=source_id
             )
+        # 树内链接同样在解析期拒绝：后续复制虽会兜底（code_copy_corrupt），
+        # 但登记时就给出明确的越界原因（工单 03 / test_rejects_symlink_inside_source）。
+        _reject_tree_links(real, source_id=source_id)
         return ResolvedSource(
             source_id=source_id,
             path=real,

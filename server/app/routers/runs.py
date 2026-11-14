@@ -1222,7 +1222,11 @@ async def _report_view(session: AsyncSession, run_id: str) -> dict:
             }
         )
 
-    return {
+    # 出口统一过 jsonable_encoder：时间戳在视图层就定型为同一文本格式，之后
+    # GET /report（FastAPI 自行序列化）与 /report/export（这里同一编码器）逐字段
+    # 一致。否则快照路径随 fastapi/pydantic 版本在 'Z' 与 '+00:00' 之间漂移
+    # （2026-11-14 CI 实测：0.162 下两条路径格式分叉，导出与快照不再相等）。
+    return jsonable_encoder({
         # 报告里的编号与页面、导出、告警同源：都是持久分配的 display_id；
         # 精确身份仍由 id（UUID）承载（INV-10）。
         "runId": view["display_id"],
@@ -1304,7 +1308,7 @@ async def _report_view(session: AsyncSession, run_id: str) -> dict:
         "mode": source.get("mode") or mode,
         "vendorReports": vendor_reports,
         "junit": source.get("junit") or {},
-    }
+    })
 
 
 @router.get("/runs/{run_id}/report")
