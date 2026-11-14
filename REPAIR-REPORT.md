@@ -104,7 +104,7 @@ Phase 验收对照（任务书 P1-01 验收目标）：旧 Runner 永远不能�
 
 1. **VENDOR.lock.json 失配（基点 221c77d 的预存在问题，上游已解决，本分支无需处理）**：实测锁文件记录 CRLF 时代哈希（GLOSSARY.md size=5182, sha256=515103fb…＝CRLF 变体实测值），而 221c77d 的 vendor blob 是 LF（5089），故本 worktree 的 `vendor_sync.py check` 失败 144 处（vendor/ 与锁文件在本轮**零改动**，git status 证实）。追查 CI 记录发现该问题**已在上游修复**：`c8a7438 fix(vendor): 快照按原始字节入库（配合 * -text）` 重做了 vendor 快照与锁，CI 在 `cdb88b7`/`9f0aeff` 两次全绿（run 43557510582 / 43558495766）。本分支基点早于该修复；**合并/rebase 到现 master 后 vendor check 自然通过**，不要在本分支重生锁（会与上游冲突）。
 2. **P2-02 Runtime→Router 反向依赖**：`runtime._apply_original_gate` 函数内惰性导入 `routers.analyses.evaluate_run_original`。实测其传递依赖闭包约 400 行（`evaluate_run_original` 本体 ~150 行 + `_load_run/_load_components/_load_metrics/_profile_of/_is_complete/_latest_policy_id/_default_baseline_run_id/_not_tested_evaluation/_evaluation_response/_json` ~226 行），且函数直接抛 HTTPException（HTTP 语义内嵌）。属于任务书"较大架构调整→先提交独立方案"的情形，本轮不动代码。**方案**：新建 `services/analysis.py`，把上述闭包整体搬入并把 HTTPException 翻译成 domain 错误（errors.py 信封不变）；`analyses.py` 只留 HTTP 解析与响应映射，`runtime.py` 改依赖 services。建议独立一轮执行并回跑 test_issue12/13/14/perf_gate 套件。
-3. **P2-03 大组件拆分**：DebugDrawer(2265 行)/debug.py(1492)/runs.py(1461)/analyses.py(1065)/TaskWizard(1050) 按职责拆分属于行为保持型重构，须逐个保证 WS 生命周期与设备控制协议不退化，建议独立方案+独立分支执行，本轮不做。
+3. **P2-03 大组件拆分**：~~本轮不做~~ → **已获批准并在后续轮次执行完毕**（见 §10 补记）。
 4. **symlink 校验分支本机未实测**：环境拒绝创建符号链接，该分支被 skip；过滤与边界逻辑已被同文件的隐藏文件用例验证，symlink 分支靠代码审查（inferred）+ CI（若 runner 有权限）覆盖。
 
 ## 9. 剩余风险
@@ -117,3 +117,28 @@ Phase 验收对照（任务书 P1-01 验收目标）：旧 Runner 永远不能�
 ## 10. 是否建议进入下一阶段
 
 **建议进入**。后续合并顺序建议：本分支 rebase/merge 到现 origin/master（含 `c8a7438` vendor 快照修复与全绿 CI）→ 复跑 `vendor_sync.py check` 与全量 pytest → 提交。P1 四项已全部修复并有回归测试钉死（全量 819 通过）；P2-02/P2-03 待批准后按 §8 方案独立执行。
+
+---
+
+## 补记（下一阶段执行记录，2026-11-14）
+
+**集成与 P2-02**：分支已 rebase 到 origin/master（`9f0aeff`）并提交；集成后全量 819 passed ×2；`vendor_sync check` 355 文件逐字节一致（基点 221c77d 的锁失配随上游 `c8a7438` 消除）。P2-02 已落地（`services/analysis.py`，Runtime 不再反向 import routers，错误信封逐字段兼容，定向 50 用例 + 全量 819 通过）。
+
+**P2-03 已执行**（用户批准，五步提交，每步定向验证）：
+
+| 文件 | 之前 | 之后 | 拆分方式 |
+|---|---:|---|---|
+| `server/app/routers/runs.py` | 1650+ | 1549 | 导入通道 IO 机制（指纹/边界/原子复制/证据回读）→ `services/run_import.py`（177 行）；请求编排留在路由层 |
+| `server/app/routers/debug.py` | 1492 | ~1190 | 会话业务（viewer 端口登记、runner 进程管理、关闭编排、框选凭证库、审计）→ `services/debug_session.py`（430 行）；端点/代理/WS/视图留在路由层；进程内 dict 由服务持有、路由层共享同一对象 |
+| `server/app/routers/analyses.py` | 1065 | 520 | P2-02 已分离判定核心；本轮复检不再机械拆 |
+| `web/src/components/TaskWizard.tsx` | 1050 | 398 | `wizard/wizardModel.ts`（237 行，纯校验/模型）+ `wizard/wizardSteps.tsx`（582 行，三步视图，状态全部由向导持有经 props 传入）；TaskWizard 再导出全部公开名，既有消费方导入零改动 |
+| `web/src/components/DebugDrawer.tsx` | 2265 | 1865 | `debug/debugModel.ts`（363 行，纯模型/坐标/手势/框选算法）+ `debug/TreeBranch.tsx`（103 行）；**组件状态、WS 生命周期与面板 JSX 逐字保留**——顺序回归测试钉死的行为契约不动 |
+
+验证（每步 measured）：
+- 后端定向：import 套件 11+1、debug 套件 9 文件 66 用例、gate 套件 50 用例全过；ruff 全绿；
+- web：typecheck 干净、90/90 用例、build 成功；4 处源码文本断言随迁移指向新文件（其行为保护语义不变）；
+- 全量后端（P2-03 后、全新迁移库 p2_03_final）：819 passed / 2 skipped。
+
+WS 生命周期、设备控制协议、状态同步在本轮拆分中零改动：DebugDrawer 组件体逐字保留（所有语句顺序断言照常通过）；debug.py 的 WS 透传与控制端点未动；服务层 `_forward` 与路由层同形。
+
+**待办移交**：真机验收（含 07 现场 DPI/高对比度复验）按用户安排另行执行；分支推送已获准并完成（`fix/p1-security-hardening`）。
