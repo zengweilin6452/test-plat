@@ -45,7 +45,18 @@ class DeploymentTests(unittest.TestCase):
             result = call()
             self.assertEqual(json.loads(result.stdout)['TESTDOCK_PORT'], '18761')
             def settings_port():
-                code = 'import sys;sys.path.insert(0, ' + repr(str(root / 'server')) + ');from app.config import settings;print(settings.port)'
+                # 按文件路径直接加载被拷贝的 config.py：pip install -e 的 editable
+                # finder 会按模块名劫持 'app'（meta_path 先于 sys.path），普通的
+                # import 拿到的是安装根的 config 而不是这个部署根的。
+                code = (
+                    'import importlib.util, sys;'
+                    'spec = importlib.util.spec_from_file_location("config_probe", '
+                    + repr(str(root / 'server/app/config.py')) + ');'
+                    'm = importlib.util.module_from_spec(spec);'
+                    'sys.modules["config_probe"] = m;'
+                    'spec.loader.exec_module(m);'
+                    'print(m.settings.port)'
+                )
                 return subprocess.check_output([sys.executable, '-c', code], env=env, cwd=temp, text=True).strip()
             self.assertEqual(settings_port(), '18761')
             env['TESTDOCK_PORT'] = '18763'
