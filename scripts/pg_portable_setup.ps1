@@ -54,9 +54,21 @@ function Wait-PgReady {
 }
 
 function Start-PgDirect {
-    # 直接启动 postgres.exe（不经 pg_ctl）：pg_ctl 在沙箱/restricted token 下会失败。
     if (-not (Test-Path (Join-Path $PgData 'PG_VERSION'))) { throw "数据目录未初始化：先执行 init" }
     New-Item -ItemType Directory -Force -Path $RunDir | Out-Null
+    # 首选 pg_ctl -w：Windows 上最成熟的拉起路径，句柄继承/就绪等待/失败回报都由
+    # pg_ctl 负责。2026-11-14 CI 实测 Start-Process 直启的 postgres 进程 ExitCode=1
+    # 且 stdout/stderr 两份日志皆空（而 initdb 的 bootstrap 能跑同一个 exe），直启
+    # 路径在 GitHub runner 环境不可依赖。
+    $pgctlLog = Join-Path $RunDir 'postgres-pgctl.log'
+    & (Join-Path $Bin 'pg_ctl.exe') -D $PgData -l $pgctlLog -o "-p $Port -c listen_addresses=127.0.0.1" -w start
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[pg] 已就绪: 127.0.0.1:$Port（pg_ctl，日志: $pgctlLog）"
+        return
+    }
+    Write-Host "[pg] pg_ctl 启动失败（退出码 $LASTEXITCODE），日志尾部:"
+    Get-Content $pgctlLog -Tail 40 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" }
+    # 沙箱/restricted token 环境下 pg_ctl 会失败，保留直启兜底。
     $stdoutLog = Join-Path $RunDir 'postgres-stdout.log'
     $stderrLog = Join-Path $RunDir 'postgres-stderr.log'
     # Start-Process 的 -ArgumentList 按空格拼接、不自动加引号：数据目录路径含空格时
@@ -67,8 +79,7 @@ function Start-PgDirect {
         -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru -WindowStyle Hidden
     Write-Host "[pg] postgres.exe PID=$($proc.Id)，日志: $stdoutLog / $stderrLog"
     if (-not (Wait-PgReady)) {
-        # 启动失败时把现场带进输出：进程是否还活着/退出码（0xC0000135 类 =
-        # DLL 缺失）、两份日志尾部（2026-11-14 CI 实测启动失败且两份日志皆空）。
+        # 启动失败时把现场带进输出：进程是否还活着/退出码、两份日志尾部。
         if ($proc.HasExited) {
             Write-Host "[pg] postgres 进程已退出: ExitCode=$($proc.ExitCode)（0xC0000135=DLL 缺失，0xC0000142=初始化失败）"
         } else {
@@ -81,7 +92,7 @@ function Start-PgDirect {
         Get-Content $stdoutLog -Tail 40 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" }
         throw "postgres 启动后 30s 内未就绪，完整日志: $stderrLog"
     }
-    Write-Host "[pg] 已就绪: 127.0.0.1:$Port"
+    Write-Host "[pg] 已就绪: 127.0.0.1:$Port（直启兜底）"
 }
 
 function Stop-PgByPid {
