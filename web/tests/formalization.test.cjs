@@ -93,7 +93,8 @@ test('能力摘要是服务端来源，失败不显示可执行', () => {
 })
 
 test('表单示例明确标注、不会自动提交；构建向导保留空真实值', () => {
-  const wizard = read(path.join('components', 'TaskWizard.tsx'))
+  // P2-03：向导步骤视图迁到 wizard/wizardSteps.tsx，文案断言随之指向新文件
+  const wizard = read(path.join('components', 'wizard', 'wizardSteps.tsx'))
   assert.match(wizard, /例如 3\.8\.0-rc\.2（示例不会自动提交）/)
   assert.doesNotMatch(wizard, /placeholder="3\.8\.0-rc\.2"/)
   assert.match(wizard, /任务接口返回 404：请确认后端已升级/)
