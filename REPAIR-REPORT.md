@@ -142,3 +142,29 @@ Phase 验收对照（任务书 P1-01 验收目标）：旧 Runner 永远不能�
 WS 生命周期、设备控制协议、状态同步在本轮拆分中零改动：DebugDrawer 组件体逐字保留（所有语句顺序断言照常通过）；debug.py 的 WS 透传与控制端点未动；服务层 `_forward` 与路由层同形。
 
 **待办移交**：真机验收（含 07 现场 DPI/高对比度复验）按用户安排另行执行；分支推送已获准并完成（`fix/p1-security-hardening`）。
+
+---
+
+## 现场验收记录（真机，2026-11-14）
+
+设备：Xiaomi 25102RKBEC（ADB `84cb2c4e`）；后端 `python -m app.main`（master @ 3bfa4ae）+ 独立验收项目 `uat-f5ba5557`（validated 修订 + 真实代码副本）。
+
+**① fencing 正向链路（两轮真机运行）**
+- RUN-1033（最小用例）：queued→completed/passed；ack/finish 均过 fence；租约 token=1、released（run_finished）、设备回 ready。
+- RUN-1034（25s 用例，验证心跳）：**2 条 heartbeat 事件（间隔恰 10s：49:47→49:57）**；租约 token=**2**（释放后重新领取，fence 严格递增）；released（run_finished）。
+- 负向：旧 token(1) 打 fence → **409**；无 token → **409**；终态 run 用旧 token complete → `already=true` 不改写既有结论。
+
+**② 调试会话真机链路（3 个会话）**
+- 创建→active 4s（viewer 127.0.0.1:12296，internal ready 上报 → 服务层端口登记）；代理快照 1200×2608 + 层级树 **60 个真实 UI 节点**；直接操控：领取控制权 → 真机 back 键 `{ok:true}` → 释放。
+- DELETE 关闭：state=closed、租约 token=3 released（client_closed）、设备回 ready。
+- 会话 2 秒关（`local_lease_busy`——会话 1 的 runner 进程未退净、本地设备锁残留）：**已知启动竞态，重试即过**（记忆在案，非本轮回归）；重试会话 3 即 active（token=5），快照+树可用，关闭释放正常。
+
+**③ 构建层**
+- 合并代码的 vite（:5174）对全部拆分模块（TaskWizard/wizardSteps/DebugDrawer/debugModel）编译伺服正常；浏览器自动化工具在本工作区不可用，页面交互目检由用户按下方清单执行。
+
+**遗留给用户的现场目检（07 缺口：DPI / 高对比度）**
+在 Windows 显示设置缩放 150%/175% 与高对比度主题下打开前端（注意 :5173 是旧检出的 vite，请用主仓重启或 :5174），目检清单：
+1. 任务向导三步：字段标签/错误提示（role=alert）不溢出、不遮挡；
+2. 调试工作区三栏与图像模板面板在缩放下不重叠；
+3. 运行详情/报告页时间戳与徽标不换行错位；
+4. 高对比度主题下按钮/徽标文字可读（不依赖纯色块区分）。
