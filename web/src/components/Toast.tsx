@@ -5,7 +5,7 @@
  *
  * 为什么渲染成非模态原生 <dialog>：showModal 打开的对话框处于浏览器 top layer，
  * 普通 fixed 元素再高的 z-index 也盖不过去（抽屉里保存绑定/发起运行的提示会被整块遮挡）；
- * dialog.show() 同样进入 top layer 但不阻断页面交互，提示在任何弹层状态下都可见。
+ * 手动 popover 通过 showPopover() 进入 top layer，不阻断页面交互。
  *
  * 支持 tone（info/success/error）与多槽位：连续操作（先失败后成功）不再互相覆盖，
  * 最新一条在最下方，各自计时 2.6s 后消失。
@@ -71,11 +71,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={api}>
       {children}
       {items.map((item, index) => (
-        // 每条 toast 一个非模态 dialog：top layer 保证盖过 showModal 的抽屉/对话框
+        // 手动 popover 进入 top layer，盖过当前模态弹层。
         <dialog
           key={item.id}
           ref={(el) => {
-            if (el && !el.open) el.show()
+            if (el) {
+              el.popover = 'manual'
+              if (!el.matches(':popover-open')) el.showPopover()
+            }
           }}
           className={'toast ' + item.tone}
           style={{ bottom: 28 + (items.length - 1 - index) * 52 }}

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>Toast modal regression</title><div id="root"></div>
+<script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { ToastProvider, useToast } from '/src/components/Toast.tsx';
+import '/src/styles/tokens.css';
+function Probe() {
+  const toast = useToast();
+  return React.createElement('dialog', {ref: el => { if (el && !el.open) el.showModal(); }, style: {width:'90vw',height:'90vh'}},
+    React.createElement('h1', null, '模态弹层提示验证'),
+    ...['success','error'].map(tone => React.createElement('button', {id:tone,onClick:()=>toast.show(tone + ' 提示', tone)}, tone)));
+}
+createRoot(document.getElementById('root')).render(React.createElement(ToastProvider, null, React.createElement(Probe)));
+</script></html>

@@ -375,10 +375,11 @@ dialog.viewer .dialog-foot { flex: 0 0 auto; }
 .timeline-item.error::before { background: var(--red); }
 .timeline-item p { font-size: var(--fs-sm); }
 .timeline-item small { font-size: var(--fs-2xs); color: var(--muted); }
-/* toast 渲染为非模态原生 <dialog>（show() 进 top layer，盖过 showModal 弹层），
-   display 交给 dialog[open] 的 UA 规则，只负责在未打开时隐藏 */
+/* 手动 popover 提示进入 top layer，不使用模态弹层的背景遮罩。 */
 dialog.toast { position: fixed; left: calc(50% + 80px); bottom: 28px; transform: translateX(-50%); background: var(--toast-bg); color: #fff; border: none; border-radius: 9px; padding: 11px var(--space-8); box-shadow: var(--shadow-toast); font-size: var(--fs-sm); max-width: calc(100vw - 32px); margin: 0; pointer-events: none; }
-dialog.toast:not([open]) { display: none; }
+dialog.toast { top: auto; right: auto; width: max-content; }
+dialog.toast::backdrop { background: transparent; backdrop-filter: none; pointer-events: none; }
+dialog.toast:not(:popover-open) { display: none; }
 dialog.toast.success { background: var(--green); }
 dialog.toast.error { background: var(--red); }
 
