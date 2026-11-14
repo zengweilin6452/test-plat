@@ -66,7 +66,15 @@ function Start-PgDirect {
         -ArgumentList '-D', ('"{0}"' -f $PgData), '-p', "$Port", '-c', 'listen_addresses=127.0.0.1' `
         -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru -WindowStyle Hidden
     Write-Host "[pg] postgres.exe PID=$($proc.Id)，日志: $stdoutLog / $stderrLog"
-    if (-not (Wait-PgReady)) { throw "postgres 启动后 30s 内未就绪，查看 $stderrLog" }
+    if (-not (Wait-PgReady)) {
+        # 启动失败时把两份日志尾部带进输出：CI/远端排障不必再手工翻文件
+        # （2026-11-14 CI 实测 start 未就绪但日志内容没有出现在任何输出里）。
+        Write-Host "[pg] postgres-stderr.log（尾部）:"
+        Get-Content $stderrLog -Tail 40 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" }
+        Write-Host "[pg] postgres-stdout.log（尾部）:"
+        Get-Content $stdoutLog -Tail 40 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" }
+        throw "postgres 启动后 30s 内未就绪，完整日志: $stderrLog"
+    }
     Write-Host "[pg] 已就绪: 127.0.0.1:$Port"
 }
 

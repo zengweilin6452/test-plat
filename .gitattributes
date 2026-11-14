@@ -1,0 +1,5 @@
+# 全仓库按字节忠实检出：Windows runner 的默认 core.autocrlf 会把文本文件
+# 转成 CRLF，破坏 vendor/ 与 VENDOR.lock.json 的逐字节 sha256 校验
+# （2026-11-14 CI 实测 179 个文件大小不符）。仓库工作区实际以 LF 维护，
+# 这里统一关闭转换；已入索引内容不变，无需 renormalize。
+* -text

@@ -24,6 +24,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: vendor 只读校验（sha256 逐字节）
+        # 必须 bash：默认 pwsh 对 run 块是逐条点源执行，退出码取最后一条，
+        # check 失败会被第二条命令的 0 吞掉（2026-11-14 CI 实测被掩盖）。
+        shell: bash
         run: |
           python scripts/vendor_sync.py check
           python scripts/test_vendor_sync_check.py
