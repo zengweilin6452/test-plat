@@ -6,12 +6,15 @@
 > 上一版校准（2026-11-07）中被本轮事实取代的描述已更新。
 > 2026-11-14 同步：`git push origin master` 已执行（4 个修复提交 + 文档同步并入 origin/master）；
 > 推送/远端 CI 相关陈旧描述按当前事实更新，已被取代的重复缺口段删除。
+> 2026-11-14 CI 转绿：远端 CI 自建立以来首次三作业全绿（run `43557510582`：vendor 1m58s /
+> 前端 37s / 后端 10m44s）；过程中暴露并修复 CI 从未真正跑过的七层问题（逐层 dated 记录见
+> PROGRESS.md 与 evidence/09 §8）。远程 CI 复核缺口自此解除。
 
 ## 总览
 
 | effort | 票数 | 实际状态 | 证据 |
 | --- | --- | --- | --- |
-| `release-readiness` | 9 | **01–06/08 resolved；07 复核改 ready-for-human（Windows 实际 DPI/高对比度待现场验收）；09 有缺口（07 现场复验 + 远程 CI 复核，推送已于 2026-11-14 执行，见 09 §8）** | `.scratch/release-readiness/evidence/02..08`、`evidence/acceptance-fixes-2026-11-09.md`、`baseline/01-evidence-baseline.md`、`evidence/09-delivery-baseline.md` |
+| `release-readiness` | 9 | **01–06/08 resolved；07 复核改 ready-for-human（Windows 实际 DPI/高对比度待现场验收）；09 有缺口（唯一剩余=07 现场复验）；远程 CI 已转绿（2026-11-14 run `43557510582`）** | `.scratch/release-readiness/evidence/02..08`、`evidence/acceptance-fixes-2026-11-09.md`、`baseline/01-evidence-baseline.md`、`evidence/09-delivery-baseline.md` |
 | `prototype-alignment` | 25 | 19 票 resolved；3 票已实现但验收项未勾；3 票有明确未闭环项 | 已并入 HEAD；`acceptance.md`、`handoff-2026-10-29.md`、`server/tests/` |
 | `first-release-closure` | 10 | 10 票 resolved；真机/来源/像素证据齐（2026-11-01 §8–§10） | `acceptance.md` |
 | `product-formalization` | 12 | 7 票 resolved；5 票待验项已由 release-readiness 承接并关闭（03→06、08→02、10→07、11→08、12→09） | `implementation-report.md` + release-readiness 证据 |
@@ -25,16 +28,16 @@
   `16f1771`（joint 版本发布缺 ui_timeout_s）、`596306e`（便携 PG 含空格路径 ×2：ArgumentList 引号 + UTF-8 BOM）。
 - 真机验收：RUN-0001~0010（UI/性能/联动/取消/互斥/调试），设备串行全程租约干净。
 - 后端 665 项（0 失败/1 跳过）+ 定向 47 项；前端 90/90 + tsc + build。
-- **未闭合必需项（2026-11-09 更正后）**：① 07 的 Windows 实际 125% DPI / 高对比度现场复验；
-  ② 远程 CI 复核。2026-11-08 授权的推送当时因 github.com:443 不可达未执行；
-  **2026-11-14 网络恢复后 `git push origin master` 已执行**（收口修复、11-09 的 toast/restore 修复与
-  文档同步并入 origin/master）；①② 均解除前交付结论维持「有缺口」。
+- **未闭合必需项（2026-11-14 更新后）**：仅剩 ① 07 的 Windows 实际 125% DPI / 高对比度现场复验。
+  ② 远程 CI 复核已解除：推送执行后远端逐层暴露 CI 建立以来从未跑过的问题并全部修复，
+  run `43557510582` 三作业全绿（2026-11-14）。①解除前交付结论维持「有缺口」。
 
 ## 现存验证缺口（跨 effort，2026-11-08 更新）
 
 | 缺口 | 影响 | 解除条件 |
 | --- | --- | --- |
-| ~~本轮 4 个修复提交未推送~~ | 已解除：2026-11-14 推送执行完毕；剩余为远端 CI 复核 | 已授权并执行（2026-11-14） |
+| ~~本轮 4 个修复提交未推送~~ | 已解除：2026-11-14 推送执行完毕 | 已授权并执行（2026-11-14） |
+| ~~远程 CI 复核~~ | 已解除：run `43557510582` 三作业全绿（2026-11-14）；CI 从未跑过的七层问题已修（见 PROGRESS.md CI 转绿轮） | 已解除（2026-11-14） |
 | 07 现场 DPI/高对比度复验 | 用户故事 25–26 不标完整通过（2026-11-09 更正） | 真实 Windows 显示设置下现场验收 |
 | 无版本 tag | 构建身份靠 `TESTDOCK_BUILD_COMMIT`（可核对），tag 缺失不影响身份识别 | 打标签需独立授权 |
 | 历史 runner 消失根因 | 观察项（本轮 10 次真机运行未复现） | 复现后按规格决策 11 限口径调查 |
