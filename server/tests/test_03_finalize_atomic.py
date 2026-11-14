@@ -318,14 +318,15 @@ def test_gate_failure_rolls_back_everything_then_retry_succeeds(
     run_id = make_run(state="running", request_key="atomic-fail-" + uuid.uuid4().hex[:8])
     artifacts = _write_artifacts(tmp_path, junit=JUNIT_PASSED, report=PERF_REPORT)
 
-    from app.routers import analyses
+    # P2-02：判定核心迁到 services/analysis.py，runtime 直依赖 service —— patch 目标随之迁移
+    from app.services import analysis as analysis_service
 
-    original = analyses.evaluate_run_original
+    original = analysis_service.evaluate_run_original
 
     async def boom(*args, **kwargs):
         raise RuntimeError("gate exploded")
 
-    monkeypatch.setattr(analyses, "evaluate_run_original", boom)
+    monkeypatch.setattr(analysis_service, "evaluate_run_original", boom)
     with pytest.raises(RuntimeError, match="gate exploded"):
         _finalize(
             run_id,
@@ -352,7 +353,7 @@ def test_gate_failure_rolls_back_everything_then_retry_succeeds(
     ) == 0
 
     # 重试成功：恰好一条 original，不重复组件
-    monkeypatch.setattr(analyses, "evaluate_run_original", original)
+    monkeypatch.setattr(analysis_service, "evaluate_run_original", original)
     result = _finalize(
         run_id,
         artifacts,
