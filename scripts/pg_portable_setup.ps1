@@ -67,8 +67,14 @@ function Start-PgDirect {
         -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru -WindowStyle Hidden
     Write-Host "[pg] postgres.exe PID=$($proc.Id)，日志: $stdoutLog / $stderrLog"
     if (-not (Wait-PgReady)) {
-        # 启动失败时把两份日志尾部带进输出：CI/远端排障不必再手工翻文件
-        # （2026-11-14 CI 实测 start 未就绪但日志内容没有出现在任何输出里）。
+        # 启动失败时把现场带进输出：进程是否还活着/退出码（0xC0000135 类 =
+        # DLL 缺失）、两份日志尾部（2026-11-14 CI 实测启动失败且两份日志皆空）。
+        if ($proc.HasExited) {
+            Write-Host "[pg] postgres 进程已退出: ExitCode=$($proc.ExitCode)（0xC0000135=DLL 缺失，0xC0000142=初始化失败）"
+        } else {
+            Write-Host "[pg] postgres 进程仍在运行但未监听 $Port"
+        }
+        Write-Host "[pg] 日志文件存在: stderr=$(Test-Path $stderrLog) stdout=$(Test-Path $stdoutLog)"
         Write-Host "[pg] postgres-stderr.log（尾部）:"
         Get-Content $stderrLog -Tail 40 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" }
         Write-Host "[pg] postgres-stdout.log（尾部）:"
