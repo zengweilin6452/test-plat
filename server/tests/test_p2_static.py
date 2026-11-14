@@ -214,9 +214,12 @@ def test_discover_manifest_round_trip():
 
 
 def test_suites_router_is_mounted_under_api_prefix():
+    """路由挂载检查走公开 OpenAPI 投影：fastapi>=0.16 起 app.routes 的 path
+    属性不再可靠（与 test_contract_openapi 的 response_model 同因）。"""
+    from app.contract import project_openapi
     from app.main import app
 
-    paths = {getattr(route, "path", "") for route in app.routes}
+    paths = set(project_openapi(app.openapi())["paths"])
     for expected in (
         "/api/v1/tasks",
         "/api/v1/suites",

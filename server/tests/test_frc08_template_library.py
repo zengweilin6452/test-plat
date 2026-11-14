@@ -40,6 +40,10 @@ def _debug_spawn_spec() -> spawn_mod.SpawnSpec:
 
 def test_debug_viewer_template_store_lands_in_the_shared_library(tmp_path, monkeypatch):
     """调试会话的模板根 == 平台共享库根（不是按会话隔离的目录）。"""
+    # vendor imaging 链路顶层导入 cv2（engine.py），缺图像依赖时跳过
+    # （与 test_crop_validation.py 同口径），CI server 作业会安装。
+    pytest.importorskip("cv2")
+    pytest.importorskip("numpy")
     monkeypatch.delenv(TEMPLATE_ASSETS_ENV, raising=False)
     monkeypatch.syspath_prepend(str(VENDOR_SRC))
     from mobile_auto.config import MobileConfig
@@ -67,6 +71,9 @@ def test_library_root_is_absolute_and_device_independent(monkeypatch):
 
 def test_registered_template_survives_new_session_and_reload(tmp_path, monkeypatch):
     """刷新/恢复预览/新会话都不会删掉已登记模板：模板在共享根，不在前端状态里。"""
+    # 同上：vendor imaging 链路需要 cv2/numpy，缺依赖时跳过。
+    pytest.importorskip("cv2")
+    pytest.importorskip("numpy")
     monkeypatch.syspath_prepend(str(VENDOR_SRC))
     import numpy as np
 

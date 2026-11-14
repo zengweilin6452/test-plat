@@ -53,6 +53,10 @@ def _write_template(root: Path, logical: str, version_id: str, sha256: str) -> N
 
 def test_shared_store_is_visible_from_another_session(tmp_path, monkeypatch):
     """同一资产根上的两个 TemplateStore 实例共享清单（跨会话引用的证据）。"""
+    # vendor imaging 链路顶层导入 cv2（engine.py），缺图像依赖时跳过
+    # （与 test_crop_validation.py 同口径），CI server 作业会安装。
+    pytest.importorskip("cv2")
+    pytest.importorskip("numpy")
     monkeypatch.syspath_prepend(str(VENDOR_SRC))
     from mobile_auto.imaging import store as store_mod
     from mobile_auto.imaging.store import TemplateStore
