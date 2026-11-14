@@ -14,11 +14,12 @@ from __future__ import annotations
 import json
 
 import pytest
+from app.errors import ApiError
+from app.routers import debug
+from app.services import debug_session as debug_session_mod
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.errors import ApiError
-from app.routers import debug
 from tests._p3_common import CLIENT_HEADERS, requires_db
 from tests._p3_common import api_client as api_client  # noqa: F401 - 夹具注册
 from tests._p3_common import p3_project as p3_project  # noqa: F401 - 夹具注册
@@ -73,6 +74,9 @@ def _patch_forward(monkeypatch, *, forwarded: list, count: int = 1):
         return {"count": count, "matches": [], "scores": []}
 
     monkeypatch.setattr(debug, "_template_session", session)
+
+    # P2-03：关闭/释放走服务层 _forward，替身两边都装
+    monkeypatch.setattr(debug_session_mod, "_forward", forward)
     monkeypatch.setattr(debug, "_forward", forward)
     monkeypatch.setattr(debug, "_match_crop", match)
 
@@ -191,7 +195,7 @@ async def test_verification_is_single_use(monkeypatch):
 async def test_verification_expires(monkeypatch):
     forwarded: list = []
     _patch_forward(monkeypatch, forwarded=forwarded)
-    monkeypatch.setattr(debug, "CROP_VERIFICATION_TTL_SECONDS", -1.0)
+    monkeypatch.setattr(debug_session_mod, "CROP_VERIFICATION_TTL_SECONDS", -1.0)
     token = (await _verified_token())["verification"]
 
     with pytest.raises(ApiError) as excinfo:

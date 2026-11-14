@@ -445,7 +445,7 @@ async def close_debug(session_id: str, body: dict = Body(default_factory=dict),
     if not result["ok"]:
         raise fence_mismatch(session_id, _coerce_token(body.get("fencing_token")))
     await session.rollback()
-    from .debug import _close_session
+    from ..services.debug_session import close_session as _close_session
     await _close_session(session_id, reason=str(body.get("reason") or "runner_exit"))
     return {"ok": True}
 
@@ -491,7 +491,7 @@ async def debug_session_ready(
         ),
         {"sid": str(session_id)},
     )
-    from .debug import register_viewer_port
+    from ..services.debug_session import register_viewer_port
 
     register_viewer_port(str(session_id), int(port))
     await session.commit()
