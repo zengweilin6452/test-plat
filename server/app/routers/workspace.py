@@ -10,13 +10,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..domain import workspace as workspace_mod
-from ..errors import client_header_required
 
 router = APIRouter(tags=["workspace"])
 
@@ -72,13 +72,10 @@ async def get_workspace(session: AsyncSession = Depends(get_session)) -> dict[st
 @router.patch("/workspace", response_model=WorkspaceOut)
 async def patch_workspace(
     body: WorkspacePatchIn,
-    request: Request,
+    client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """改名。服务端再次去空白并校验长度；成功返回新值，失败保持原值。"""
-    x_client = request.headers.get("X-TestDock-Client")
-    if x_client is None or x_client.strip().lower() != "web":
-        raise client_header_required()
     from ..config import settings
 
     data = await workspace_mod.rename_workspace(session, name=body.name)

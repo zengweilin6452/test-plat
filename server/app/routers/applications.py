@@ -20,8 +20,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..domain import identity as identity_mod
-from ..errors import client_header_required, not_found, validation_error
+from ..errors import not_found, validation_error
 from ..schemas import ApplicationsOut
 
 router = APIRouter(tags=["applications"])
@@ -94,7 +95,7 @@ async def get_application(
 @router.post("/applications", status_code=201)
 async def create_application(
     body: dict[str, Any],
-    client: str = Depends(client_header_required),
+    client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     return await identity_mod.create_application(
@@ -110,7 +111,7 @@ async def create_application(
 async def rename_application(
     application_id: str,
     body: dict[str, Any],
-    client: str = Depends(client_header_required),
+    client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """改名只影响显示名称；所属项目、目标端与标识不可修改（ADR-0001）。"""
@@ -129,7 +130,7 @@ async def application_archive_preview(
 @router.post("/applications/{application_id}/archive")
 async def archive_application(
     application_id: str,
-    client: str = Depends(client_header_required),
+    client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     return await identity_mod.archive_entity(
@@ -140,7 +141,7 @@ async def archive_application(
 @router.post("/applications/{application_id}/restore")
 async def restore_application(
     application_id: str,
-    client: str = Depends(client_header_required),
+    client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     return await identity_mod.restore_entity(

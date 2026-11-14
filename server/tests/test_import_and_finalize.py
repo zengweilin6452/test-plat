@@ -436,3 +436,224 @@ def _request_key_of(engine, run_id: str) -> str:
             {"id": run_id},
         ).scalar_one()
 
+
+
+# --------------------------------------------------------------------------- #
+# P1-02：重复导入的幂等性 —— 证据不可变、内容冲突 409、中途失败可恢复
+# --------------------------------------------------------------------------- #
+def _artifact_rows(engine, run_id: str) -> list[dict]:
+    with engine.connect() as conn:
+        return [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    "SELECT logical_key, sha256, byte_size, created_at FROM artifacts"
+                    " WHERE run_id = CAST(:id AS uuid) ORDER BY logical_key"
+                ),
+                {"id": run_id},
+            ).mappings()
+        ]
+
+
+def _managed_dir(settings, run_id: str) -> Path:
+    return Path(settings.artifacts_dir) / str(run_id)
+
+
+def test_import_duplicate_same_content_returns_original_without_recopy(
+    api_client, project, sync_engine, tmp_path, monkeypatch
+):
+    """场景 A：同 request_key + 同内容 -> duplicate，不复制、不重登记、证据不变。"""
+    from app.config import settings
+    from app.domain import artifacts as artifacts_mod
+    from app.routers import runs as runs_mod
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path / "data")
+    source = _write_artifacts(tmp_path / "vendor-run", junit=JUNIT_PASSED, report=PERF_REPORT)
+
+    first = api_client.post(
+        "/api/v1/runs/import", json=_import_body(project, source), headers=CLIENT_HEADERS
+    )
+    assert first.status_code == 201, first.text
+    run_id = first.json()["id"]
+    request_key = _request_key_of(sync_engine, run_id)
+    rows_before = _artifact_rows(sync_engine, run_id)
+    assert rows_before
+
+    # 重复导入必须完全不碰磁盘：谁敢 copy2 就让请求当场炸出来
+    def _no_copy(*args, **kwargs):
+        raise AssertionError("重复导入不得重新复制文件")
+
+    monkeypatch.setattr(runs_mod.shutil, "copy2", _no_copy)
+
+    again = api_client.post(
+        "/api/v1/runs/import",
+        json=_import_body(project, source, request_key=request_key),
+        headers=CLIENT_HEADERS,
+    )
+    assert again.status_code == 200, again.text
+    body = again.json()
+    assert body["duplicate"] is True
+    assert body["id"] == run_id
+    assert body["state"] == "completed"
+
+    rows_after = _artifact_rows(sync_engine, run_id)
+    assert rows_after == rows_before, "重复导入不得修改已登记的证据行"
+
+    # Run identity == Artifact identity == 实际文件 SHA256
+    for row in rows_after:
+        path = _managed_dir(settings, run_id) / str(row["logical_key"])
+        assert path.is_file()
+        assert artifacts_mod.sha256_file(path) == row["sha256"]
+
+
+def test_import_duplicate_different_content_is_idempotency_conflict(
+    api_client, project, sync_engine, tmp_path, monkeypatch
+):
+    """场景 B：同 request_key + 不同内容 -> 409，原证据一个字节都不变。"""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path / "data")
+    source_a = _write_artifacts(tmp_path / "vendor-a", junit=JUNIT_PASSED, report=PERF_REPORT)
+    source_b = _write_artifacts(
+        tmp_path / "vendor-b",
+        junit=JUNIT_FAILED,
+        report={**PERF_REPORT, "metricsSummary": {}},
+    )
+
+    first = api_client.post(
+        "/api/v1/runs/import", json=_import_body(project, source_a), headers=CLIENT_HEADERS
+    )
+    assert first.status_code == 201, first.text
+    run_id = first.json()["id"]
+    request_key = _request_key_of(sync_engine, run_id)
+    rows_before = _artifact_rows(sync_engine, run_id)
+    managed = _managed_dir(settings, run_id)
+    bytes_before = {
+        p.relative_to(managed).as_posix(): p.read_bytes()
+        for p in managed.rglob("*")
+        if p.is_file()
+    }
+
+    conflict = api_client.post(
+        "/api/v1/runs/import",
+        json=_import_body(project, source_b, request_key=request_key),
+        headers=CLIENT_HEADERS,
+    )
+    assert conflict.status_code == 409, conflict.text
+    assert conflict.json()["code"] == "idempotency_conflict"
+
+    assert _artifact_rows(sync_engine, run_id) == rows_before, "冲突导入不得改写证据行"
+    bytes_after = {
+        p.relative_to(managed).as_posix(): p.read_bytes()
+        for p in managed.rglob("*")
+        if p.is_file()
+    }
+    assert bytes_after == bytes_before, "冲突导入不得覆盖磁盘上的既有证据"
+
+
+def test_import_midway_copy_failure_leaves_no_partial_evidence_and_recovers(
+    api_client, project, sync_engine, tmp_path, monkeypatch
+):
+    """场景 C：复制中途失败 -> 不留半批产物、不登记任何证据行；同内容重试可恢复。"""
+    import shutil as _shutil
+
+    from app.config import settings
+    from app.domain import artifacts as artifacts_mod
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path / "data")
+    source = _write_artifacts(tmp_path / "vendor-run", junit=JUNIT_PASSED, report=PERF_REPORT)
+    request_key = "import-recover-" + uuid.uuid4().hex[:8]
+
+    real_copy2 = _shutil.copy2
+    calls = {"n": 0}
+
+    def flaky_copy2(src, dst, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            # 只让第一次导入在第 2 个文件上炸：随后的恢复重试必须能完整复制
+            raise OSError("simulated copy failure")
+        return real_copy2(src, dst, **kwargs)
+
+    monkeypatch.setattr(_shutil, "copy2", flaky_copy2)
+    with pytest.raises(OSError):
+        api_client.post(
+            "/api/v1/runs/import",
+            json=_import_body(project, source, request_key=request_key),
+            headers=CLIENT_HEADERS,
+        )
+
+    # 失败现场：Run 已插入（queued），但零证据行、受管目录不存在、无暂存残留
+    with sync_engine.connect() as conn:
+        run_id = conn.execute(
+            text("SELECT id FROM test_runs WHERE request_key = :k"), {"k": request_key}
+        ).scalar_one()
+    assert run_id is not None
+    with sync_engine.connect() as conn:
+        state = conn.execute(
+            text("SELECT state FROM test_runs WHERE id = CAST(:id AS uuid)"), {"id": run_id}
+        ).scalar_one()
+    assert state == "queued", "复制失败不得留下可误认为成功的终态"
+    assert _count(
+        sync_engine,
+        "SELECT count(*) FROM artifacts WHERE run_id = CAST(:id AS uuid)",
+        {"id": run_id},
+    ) == 0
+    assert not _managed_dir(settings, run_id).exists(), "受管目录不得处于部分复制状态"
+    leftovers = list(
+        (Path(settings.artifacts_dir)).glob("_staging-import-*")
+    )
+    assert leftovers == [], "暂存目录必须在失败时清理"
+
+    # 同内容重试：补完复制与 finalize，收敛为 completed
+    recovered = api_client.post(
+        "/api/v1/runs/import",
+        json=_import_body(project, source, request_key=request_key),
+        headers=CLIENT_HEADERS,
+    )
+    assert recovered.status_code == 200, recovered.text
+    body = recovered.json()
+    assert body["duplicate"] is True
+    assert body["state"] == "completed"
+    assert body["artifacts"] >= 2
+    for row in _artifact_rows(sync_engine, run_id):
+        path = _managed_dir(settings, run_id) / str(row["logical_key"])
+        assert artifacts_mod.sha256_file(path) == row["sha256"]
+
+
+def test_import_rejects_symlink_escape_and_hidden_files(
+    api_client, project, sync_engine, tmp_path, monkeypatch
+):
+    """P2-01：symlink 逃逸拒绝；隐藏/缓存文件不进入受管证据。"""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path / "data")
+    source = _write_artifacts(tmp_path / "vendor-run", junit=JUNIT_PASSED, report=PERF_REPORT)
+    (source / ".env").write_text("SECRET=1", encoding="utf-8")
+    (source / "junk.tmp").write_text("x", encoding="utf-8")
+
+    # —— 隐藏/临时文件过滤：不受 symlink 权限影响，总是验证 —— #
+    body = _import_body(project, source)
+    ok = api_client.post("/api/v1/runs/import", json=body, headers=CLIENT_HEADERS)
+    assert ok.status_code == 201, ok.text
+    run_id = ok.json()["id"]
+    managed = _managed_dir(settings, run_id)
+    names = {p.name for p in managed.rglob("*") if p.is_file()}
+    assert ".env" not in names and "junk.tmp" not in names, names
+
+    # —— symlink 逃逸：拒绝整个导入 —— #
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "escaped.txt").write_text("outside evidence", encoding="utf-8")
+    link = source / "escape-link"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("此环境不允许创建符号链接（symlink 校验分支无法在本机验证）")
+
+    rejected = api_client.post(
+        "/api/v1/runs/import",
+        json=_import_body(project, source),
+        headers=CLIENT_HEADERS,
+    )
+    assert rejected.status_code == 400, rejected.text
+    assert "符号链接" in rejected.json()["message"]

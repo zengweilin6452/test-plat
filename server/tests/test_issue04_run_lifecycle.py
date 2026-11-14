@@ -22,20 +22,20 @@ import time
 import uuid
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import text
-
 from app.main import app
 from app.runner import dispatch_runner, spawn
 from app.scheduler import dispatcher
+from fastapi.testclient import TestClient
+from sqlalchemy import text
+
 from tests._p3_common import (
     CLIENT_HEADERS,
     TEST_DB,
-    reset_db_engine,
     requires_db,
+    reset_db_engine,
 )
 from tests._p3_common import make_run as make_run
-from tests._p3_common import p3_project as project
+from tests._p3_common import p3_project as project  # noqa: F401 - fixture 复用
 from tests._p3_common import sync_engine as sync_engine
 
 pytestmark = requires_db
@@ -415,7 +415,28 @@ def test_events_replay_by_sequence_and_duplicate_delivery_adds_no_rows(
         "/api/v1/runs", json=_body(project), headers=CLIENT_HEADERS
     ).json()["id"]
     headers = {"X-Control-Token": control_token}
+    # P1-01：events 与其他 runner 写端点一样先过 fence —— 把 run 推到 running
+    # 并补一条活动租约（复合外键要求 run.resource_id 与租约一致）。
+    with sync_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE test_runs SET state = 'running', resource_id = CAST(:rid AS uuid),"
+                " profile_id = CAST(:pid AS uuid), started_at = now()"
+                " WHERE id = CAST(:id AS uuid)"
+            ),
+            {"rid": project["resource_id"], "pid": project["profile_id"], "id": run_id},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO resource_leases (id, project_id, resource_id, run_id,"
+                "                             fencing_token, holder_id, expires_at)"
+                " VALUES (gen_random_uuid(), CAST(:pid AS uuid), CAST(:rid AS uuid),"
+                "         CAST(:run AS uuid), 11, 'pytest', now() + interval '120 seconds')"
+            ),
+            {"pid": project["project_id"], "rid": project["resource_id"], "run": run_id},
+        )
     batch = {
+        "fencing_token": 11,
         "events": [
             {
                 "source_key": "runner",

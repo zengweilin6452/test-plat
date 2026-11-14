@@ -24,8 +24,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..domain import identity as identity_mod
-from ..errors import client_header_required, conflict
+from ..errors import conflict
 
 router = APIRouter(tags=["legacy-review"])
 
@@ -290,7 +291,7 @@ async def get_legacy_review(session: AsyncSession = Depends(get_session)) -> dic
 @router.post("/legacy-review/apply")
 async def apply_legacy_review(
     body: LegacyApplyIn,
-    client: str = Depends(client_header_required),
+    client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """逐项确认后执行；失败项返回具体原因，不物理删除，不改历史。"""

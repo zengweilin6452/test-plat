@@ -133,8 +133,14 @@ class ControlClient:
     def check_fence(self, fencing_token: int) -> dict[str, Any]:
         return self._request("GET", "fence?token=%d" % int(fencing_token))
 
-    def events(self, events: list[Mapping[str, Any]]) -> dict[str, Any]:
-        return self._request("POST", "events", {"events": list(events)})
+    def events(
+        self, events: list[Mapping[str, Any]], *, fencing_token: int | None = None
+    ) -> dict[str, Any]:
+        """批量上报事件；携带 fencing_token 供服务端 fence 校验（P1-01）。"""
+        payload: dict[str, Any] = {"events": list(events)}
+        if fencing_token is not None:
+            payload["fencing_token"] = int(fencing_token)
+        return self._request("POST", "events", payload)
 
     def complete(
         self,

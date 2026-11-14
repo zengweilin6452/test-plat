@@ -19,8 +19,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..domain import identity as identity_mod
-from ..errors import client_header_required, validation_error
+from ..errors import validation_error
 from ..schemas import ProjectsOut
 
 router = APIRouter(tags=["projects"])
@@ -64,7 +65,7 @@ async def list_projects(
 @router.post("/projects", status_code=201)
 async def create_project(
     body: dict[str, Any],
-    client: str = Depends(client_header_required),
+    client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """创建项目。编码冲突 409 identity_conflict，details.existing_id 指向原对象。"""
@@ -75,7 +76,7 @@ async def create_project(
 async def rename_project(
     project_id: str,
     body: dict[str, Any],
-    client: str = Depends(client_header_required),
+    client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """改名只影响显示名称；ID、编码、历史引用与运行快照均不变。"""
@@ -96,7 +97,7 @@ async def project_archive_preview(
 @router.post("/projects/{project_id}/archive")
 async def archive_project(
     project_id: str,
-    client: str = Depends(client_header_required),
+    client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """归档项目。存在非终态运行 / 未关闭调试 / 未释放租约时 409 并给出具体对象。"""
@@ -108,7 +109,7 @@ async def archive_project(
 @router.post("/projects/{project_id}/restore")
 async def restore_project(
     project_id: str,
-    client: str = Depends(client_header_required),
+    client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """恢复项目。不复活此前单独归档的子应用。"""

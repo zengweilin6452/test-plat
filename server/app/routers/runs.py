@@ -14,7 +14,9 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import os
 import re
 import shutil
 import uuid
@@ -31,12 +33,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..domain import artifacts as artifacts_mod
 from ..domain import events as events_mod
 from ..domain import identity as identity_mod
 from ..domain import report_html as report_html_mod
 from ..domain import runs as runs_mod
-from ..errors import device_not_ready, not_found, readiness_incomplete, state_conflict, validation_error
+from ..errors import (
+    conflict,
+    device_not_ready,
+    not_found,
+    readiness_incomplete,
+    state_conflict,
+    validation_error,
+)
 from ..schemas import RunsOut
 from ..ws import hub as hub_mod
 
@@ -594,6 +604,14 @@ async def _insert_run(session: AsyncSession, body: Mapping, *, internal: bool = 
         ),
         "requested_resource_id": resource_id,
         "source": "import" if internal else "api",
+        # 导入内容指纹（P1-02）：幂等键只保证"同键同 Run"，不保证"同键同内容"。
+        # 指纹随 Run 行原子落库，重复导入据此区分"重试同一批产物"（放行）与
+        # "拿另一批产物冒充同一 Run"（409），防止重复导入覆盖既有证据。
+        **(
+            {"import_fingerprint": str(body["import_fingerprint"])}
+            if internal and body.get("import_fingerprint")
+            else {}
+        ),
         "submitted_at": datetime.now(UTC).isoformat(),
     }
 
@@ -769,7 +787,9 @@ async def _run_view(session: AsyncSession, run_id: str) -> dict:
 
 @router.post("/runs", status_code=201)
 async def create_run(
-    body: dict = Body(default_factory=dict), session: AsyncSession = Depends(get_session)
+    body: dict = Body(default_factory=dict),
+    _client: str = Depends(require_client_header),
+    session: AsyncSession = Depends(get_session),
 ):
     """创建 run（queued）。重复 request_key 返回 200 + 既有 run（api-design.md §1.3）。"""
     created = await _insert_run(session, body)
@@ -840,7 +860,11 @@ async def list_run_events(
 
 
 @router.post("/runs/{run_id}/cancel", status_code=202)
-async def cancel_run(run_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+async def cancel_run(
+    run_id: str,
+    _client: str = Depends(require_client_header),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
     """取消 run：受理取消事实，并让执行中的运行真的停下来（spec §6.2、§9.1）。
 
     - 取消事实写进 `test_runs.cancel_requested_at`（重复受理保留首次时间），
@@ -1383,6 +1407,107 @@ async def export_run_report(
     )
 
 
+def _import_fingerprint(source: Path) -> str:
+    """导入内容的确定性指纹（P1-02）：相对路径 + sha256 + 字节大小。
+
+    扫描口径与登记口径一致（scan_artifacts：跳过缓存/临时/隐藏文件），未登记
+    的噪音文件变化不构成内容冲突；指纹只覆盖真正会被登记成证据的内容。
+    """
+    scanned = artifacts_mod.scan_artifacts(source)
+    digest = hashlib.sha256()
+    for item in sorted(scanned, key=lambda s: s.relative_key):
+        digest.update(f"{item.relative_key}\n{item.sha256}\n{item.byte_size}\n".encode())
+    return digest.hexdigest()
+
+
+async def _stored_import_fingerprint(run_id: str) -> str | None:
+    """Run 行上随导入原子写入的内容指纹（无则不是本实现导入的运行）。"""
+    from ..db import get_sessionmaker
+
+    async with get_sessionmaker()() as session:
+        value = (
+            await session.execute(
+                text(
+                    "SELECT config_snapshot->>'import_fingerprint'"
+                    " FROM test_runs WHERE id::text = :id"
+                ),
+                {"id": run_id},
+            )
+        ).scalar_one_or_none()
+    return str(value) if value else None
+
+
+async def _registered_evidence(run_id: str) -> tuple[int, dict[str, str]]:
+    """已登记产物数量与 logical_key -> sha256 映射（响应里回显既有证据）。"""
+    from ..db import get_sessionmaker
+
+    async with get_sessionmaker()() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT logical_key, sha256 FROM artifacts"
+                    " WHERE run_id = CAST(:id AS uuid) ORDER BY logical_key"
+                ),
+                {"id": run_id},
+            )
+        ).mappings().all()
+    return len(rows), {str(r["logical_key"]): str(r["sha256"]) for r in rows}
+
+
+#: 导入体积护栏（P2-01）：单次导入的文件数与总字节上限。导入是补录通道，
+#: 不是任意目录镜像；上限之内覆盖 vendor 产物目录的真实规模。
+IMPORT_MAX_FILES = 5000
+IMPORT_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
+
+
+def _collect_import_files(source: Path) -> list[tuple[Path, Path]]:
+    """枚举允许复制的 (源文件, 相对路径)，同时执行边界与 symlink 校验（P2-01）。
+
+    - canonical path：以 resolve() 后的源目录为根，逐文件确认没有逃逸；
+    - symlink：目录与文件符号链接一律拒绝（防止借链接把允许目录外的内容
+      带进可下载证据）；
+    - 过滤：与 scan_artifacts 同一口径（缓存目录 / 临时后缀 / 隐藏文件），
+      源目录里的 .env、.git 之类不会进入受管证据；
+    - 体积：文件数与总字节数双上限。
+    """
+    root = source.resolve()
+    collected: list[tuple[Path, Path]] = []
+    total_bytes = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        base = Path(dirpath)
+        dirnames[:] = sorted(
+            d
+            for d in dirnames
+            if d not in artifacts_mod.SKIP_DIRS
+            and not (base / d).is_symlink()
+            and not d.startswith(".")
+        )
+        for name in sorted(filenames):
+            item = base / name
+            if name.startswith(".") or item.suffix.lower() in artifacts_mod.SKIP_SUFFIXES:
+                continue
+            if item.is_symlink():
+                raise validation_error([f"source_dir 含符号链接，拒绝导入: {item}"])
+            if not item.is_file():
+                continue
+            try:
+                item.resolve().relative_to(root)
+            except ValueError:
+                raise validation_error([f"source_dir 文件逃逸出允许目录，拒绝导入: {item}"]) from None
+            size = item.stat().st_size
+            if len(collected) >= IMPORT_MAX_FILES:
+                raise validation_error(
+                    [f"导入文件数超过上限 {IMPORT_MAX_FILES}，拒绝导入"]
+                )
+            total_bytes += size
+            if total_bytes > IMPORT_MAX_TOTAL_BYTES:
+                raise validation_error(
+                    [f"导入总字节数超过上限 {IMPORT_MAX_TOTAL_BYTES}，拒绝导入"]
+                )
+            collected.append((item, item.relative_to(root)))
+    return collected
+
+
 def _import_artifacts_dir(run_id: str, source: Path) -> Path:
     """把外部 vendor 产物目录复制到受管产物目录，返回复制后的路径。
 
@@ -1390,27 +1515,51 @@ def _import_artifacts_dir(run_id: str, source: Path) -> Path:
     下载端点与 GET /report 都按这个根反查。直接登记外部绝对路径会让 storage_key
     退化成裸文件名（storage_key_for 的兜底），读回来永远是"文件不存在"。
     复制而不是移动：源目录是用户的既有证据，导入是只读补录，不能改它。
+
+    原子提交（P1-02）：先复制到同卷暂存目录，再一次性 rename 到 <run_id>。
+    直接往目标目录边拷边写，中途失败会留下"半批产物"——若随后 finalize 登记
+    成功，磁盘与数据库就永久不一致。暂存失败时清理暂存目录：目标目录要么
+    不存在、要么是完整的上一批，绝无中间态。
     """
+    files = _collect_import_files(source)
     target = Path(settings.artifacts_dir) / str(run_id)
-    target.mkdir(parents=True, exist_ok=True)
-    for item in source.rglob("*"):
-        if not item.is_file():
-            continue
-        relative = item.relative_to(source)
-        destination = target / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(item, destination)
+    if target.exists():
+        # 只会出现在旧版本遗留的部分复制上：调用方已做指纹校验，清掉重拷
+        # 才能保证"目标目录 == 本次导入内容"。
+        shutil.rmtree(target)
+    staging = (
+        Path(settings.artifacts_dir)
+        / f"_staging-import-{run_id}-{uuid.uuid4().hex[:12]}"
+    )
+    try:
+        staging.mkdir(parents=True)
+        for item, relative in files:
+            destination = staging / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, destination)
+        os.replace(staging, target)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
     return target
 
 
 @router.post("/runs/import", status_code=201)
 async def import_run(
-    body: dict = Body(default_factory=dict), session: AsyncSession = Depends(get_session)
+    body: dict = Body(default_factory=dict),
+    _client: str = Depends(require_client_header),
+    session: AsyncSession = Depends(get_session),
 ):
     """降级通道：导入已有 vendor 产物目录（report.json / junit.xml / evidence/**）。
 
     与真跑**共用** runtime.finalize_run：同样扫描目录、同样登记 sha256、同样由 junit
     推导 outcome。差别只在于没有 runner 与设备，所以不占租约，报告 mode=imported。
+
+    幂等契约（P1-02）：
+    - 相同 request_key + 相同内容指纹 -> 返回原 Run（duplicate=true），不重新
+      复制、不重新登记，已终态运行的证据文件一个字节都不碰；
+    - 相同 request_key + 不同内容 -> 409 idempotency_conflict（first-write-wins）；
+    - 上次导入在 finalize 前崩溃（Run 未终态）-> 同内容重试会补完 finalize（恢复）。
     """
     source_dir = str(body.get("source_dir") or "").strip()
     if not source_dir:
@@ -1419,8 +1568,14 @@ async def import_run(
     if not path.is_dir():
         raise validation_error(["source_dir 不存在或不是目录: %s" % source_dir])
 
+    # 边界校验（P2-01）在任何写操作之前：symlink / 逃逸 / 体积超限直接拒绝。
+    _collect_import_files(path)
+    # 指纹在任何写操作之前算好：内容冲突必须发生在"碰任何文件/行"之前。
+    source_fingerprint = _import_fingerprint(path)
+
     payload = dict(body)
     payload["source"] = "import"
+    payload["import_fingerprint"] = source_fingerprint
     # 内部通道：允许 source=import 与 source_dir，且可省略 application_id（补录历史产物）
     created = await _insert_run(session, payload, internal=True)
     await session.commit()
@@ -1428,10 +1583,66 @@ async def import_run(
     project_id = str(created["project_id"])
 
     from .. import runtime as runtime_mod
+    from ..db import get_sessionmaker
+
+    duplicate = not created["created"]
+    if duplicate:
+        stored = await _stored_import_fingerprint(run_id)
+        if stored is not None:
+            fingerprint_matches = stored == source_fingerprint
+        else:
+            # 旧版本导入的运行没有指纹：回退到与受管目录的现算指纹比对
+            managed = Path(settings.artifacts_dir) / run_id
+            fingerprint_matches = (
+                _import_fingerprint(managed) == source_fingerprint
+                if managed.is_dir()
+                else False
+            )
+        if not fingerprint_matches:
+            raise conflict(
+                "idempotency_conflict",
+                "request_key 已绑定内容不同的运行（幂等冲突：相同 request_key "
+                "必须携带与首次导入一致的产物内容）",
+                {
+                    "run_id": run_id,
+                    "import_fingerprint": source_fingerprint,
+                    "stored_fingerprint": stored,
+                },
+            )
+
+        async with get_sessionmaker()() as state_session:
+            state_row = (
+                await state_session.execute(
+                    text("SELECT state, outcome FROM test_runs WHERE id::text = :id"),
+                    {"id": run_id},
+                )
+            ).mappings().one()
+        if runs_mod.is_terminal(str(state_row["state"])):
+            # 已终态：证据不可变 —— 不复制、不 finalize，直接回读已登记证据。
+            artifact_count, sha256s = await _registered_evidence(run_id)
+            async with get_sessionmaker()() as view_session:
+                view = await _run_view(view_session, run_id)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "id": run_id,
+                    "display_id": view["display_id"],
+                    "state": str(state_row["state"]),
+                    "outcome": state_row["outcome"],
+                    "artifacts": artifact_count,
+                    "sha256": sha256s,
+                    "duplicate": True,
+                },
+            )
+        # 未终态 = 上次导入在 finalize 前中断：同内容重试在这里补完收敛。
 
     # 产物必须搬进受管目录：下载端点与 GET /report 都只按 settings.artifacts_dir
     # 反查 storage_key，登记一个外部绝对路径等于登记了永远读不到的行。
-    imported_dir = _import_artifacts_dir(run_id, path)
+    imported_dir = Path(settings.artifacts_dir) / run_id
+    if not imported_dir.is_dir():
+        # 目录已存在 = 上次复制已完整落盘（finalize 前中断的恢复），不再重拷；
+        # 缺失（含首次导入）才走"暂存 + 原子 rename"。
+        imported_dir = _import_artifacts_dir(run_id, path)
     result = await runtime_mod.finalize_run(
         run_id=run_id,
         state=runs_mod.STATE_COMPLETED,
@@ -1444,12 +1655,10 @@ async def import_run(
     )
     # 上面 commit 之后请求级事务已经关闭（get_session 用 session.begin() 包住），
     # 不能在同一个 session 上再发查询；视图改用一个新会话读。
-    from ..db import get_sessionmaker
-
     async with get_sessionmaker()() as view_session:
         view = await _run_view(view_session, run_id)
     return JSONResponse(
-        status_code=200 if not created["created"] else 201,
+        status_code=200 if duplicate else 201,
         content={
             "id": run_id,
             "display_id": view["display_id"],
@@ -1457,7 +1666,7 @@ async def import_run(
             "outcome": result.outcome,
             "artifacts": result.artifact_count,
             "sha256": result.sha256s,
-            "duplicate": not created["created"],
+            "duplicate": duplicate,
         },
     )
 

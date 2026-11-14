@@ -24,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..domain.gates import snapshot_from_rows
 from ..domain.metrics_view import missing_fields
 from ..domain.profiles import ProfileNormalizationError, normalize_profile
@@ -215,6 +216,7 @@ async def get_baseline(
 @router.post("/baselines", status_code=201)
 async def create_baseline(
     payload: dict[str, Any],
+    _client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """从一次已完成运行创建基线（request_key 幂等）。

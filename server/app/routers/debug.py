@@ -58,6 +58,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..domain import leases as leases_mod
 from ..errors import (
     ApiError,
@@ -68,7 +69,6 @@ from ..errors import (
     validation_error,
 )
 from ..runner import spawn as spawn_mod
-from .tasks import require_client_header
 
 logger = logging.getLogger(__name__)
 
@@ -833,6 +833,7 @@ async def _active_row(session: AsyncSession, session_id: str) -> dict[str, Any]:
 async def proxy_snapshot(
     session_id: str,
     request: Request,
+    _client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     row = await _active_row(session, session_id)
@@ -865,6 +866,7 @@ async def proxy_snapshot_tree(
 async def proxy_locators_validate(
     session_id: str,
     request: Request,
+    _client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     row = await _active_row(session, session_id)
@@ -1022,6 +1024,7 @@ async def list_templates(session_id: str | None = None, session: AsyncSession = 
 
 @router.post("/templates")
 async def create_template(request: Request, session_id: str | None = None,
+                          _client: str = Depends(require_client_header),
                           session: AsyncSession = Depends(get_session)) -> Response:
     """从验证通过的新快照登记模板版本（服务端强制，不依赖前端 disabled）。"""
     sid = await _template_session(session, session_id)
@@ -1069,6 +1072,7 @@ async def _match_crop(source: bytes, current: bytes, region: list[int], threshol
 
 @router.post("/templates/validate-crop")
 async def validate_crop(request: Request, session_id: str | None = None,
+                        _client: str = Depends(require_client_header),
                         session: AsyncSession = Depends(get_session)) -> Response:
     """用**新捕获的画面**验证框选：唯一命中才发放一次性登记凭证。
 
@@ -1122,6 +1126,7 @@ async def validate_crop(request: Request, session_id: str | None = None,
 
 @router.post("/templates/validate")
 async def validate_template(request: Request, session_id: str | None = None,
+                            _client: str = Depends(require_client_header),
                             session: AsyncSession = Depends(get_session)) -> Response:
     """IMAGE 定位验证：走 vendor 的专用端点 `/templates/validate`。
 
@@ -1154,6 +1159,7 @@ async def validate_template(request: Request, session_id: str | None = None,
 
 @router.put("/templates/{logical:path}")
 async def update_template(logical: str, request: Request, session_id: str | None = None,
+                          _client: str = Depends(require_client_header),
                           session: AsyncSession = Depends(get_session)) -> Response:
     """确认更新同名模板：同样必须先拿到框选验证凭证（更新也会生成新版本）。"""
     from urllib.parse import quote

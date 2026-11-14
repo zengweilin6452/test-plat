@@ -35,6 +35,7 @@ def client():
     os.environ["TESTDOCK_SCHEDULER"] = "0"
     reset_db_engine(TEST_DB)
     with TestClient(app, raise_server_exceptions=True) as client:
+        client.headers.update({"X-TestDock-Client": "web"})  # P1-04 写守卫
         yield client
     reset_db_engine(TEST_DB)
 

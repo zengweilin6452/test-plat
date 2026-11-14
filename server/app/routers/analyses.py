@@ -32,6 +32,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..domain.gates import (
     REASON_BASELINE_MISSING,
     REASON_GATE_POLICY_MISSING,
@@ -985,6 +986,7 @@ async def evaluate_run_original(
 async def create_gate_evaluation(
     run_id: str,
     payload: dict[str, Any],
+    _client: str = Depends(require_client_header),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """试算 = 新增判定行。**绝不 UPDATE original 行。**

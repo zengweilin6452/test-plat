@@ -63,6 +63,23 @@ def _expected_token(request: Request) -> str:
     )
 
 
+def _coerce_token(raw: Any) -> int | None:
+    """把 runner 上报的 fencing_token 整形成 int；其余形态按缺失处理（fail-closed）。
+
+    查询串 / JSON 里来的值可能是字符串或垃圾：显式拒绝比让 int() 抛
+    ValueError 变 500 更符合"无效身份不产生副作用"的语义。浮点一律拒绝
+    （int(7.9) == 7 会把垃圾值整形成合法 token）。
+    """
+    if isinstance(raw, bool) or raw is None or isinstance(raw, float):
+        return None
+    if isinstance(raw, int):
+        return raw
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 async def require_control_token(
     request: Request,
     token: str | None = Header(default=None, alias=CONTROL_TOKEN_HEADER),
@@ -100,6 +117,13 @@ async def ack_run(
     if runs_mod.is_terminal(str(row["state"])):
         # 已被取消或已收敛：告诉 runner 别跑了（它看到 already 会尽快退出）
         return {"ok": True, "already": True, "state": row["state"]}
+    fence = await leases_mod.verify_fence(
+        session, run_id=str(run_id), token=_coerce_token(body.get("fencing_token"))
+    )
+    if not fence.get("ok"):
+        # 派发时租约已建好、token 已随命令行下发；对不上说明这是一条旧
+        # dispatch 的残留进程，不得在新 run 的事件流里留下痕迹（P1-01）。
+        raise fence_mismatch(str(run_id), fence.get("provided"))
     pid = body.get("pid")
     await events_mod.append_event(
         session,
@@ -136,9 +160,14 @@ async def heartbeat_run(
     pid = body.get("pid")
     progress = body.get("progress")
     stage = body.get("stage")
-    token = body.get("fencing_token")
+    token = _coerce_token(body.get("fencing_token"))
 
     fence = await leases_mod.verify_fence(session, run_id=str(run_id), token=token)
+    if not fence.get("ok"):
+        # 失效身份（缺 token / 旧 token / 租约已转手）：不续租、不落心跳事件。
+        # 心跳事件是 reconciler 判活依据（reconciler.py _STALE_SQL），旧 runner
+        # 的心跳一旦落库，已过期的执行者会在平台眼里"一直活着"（P1-01）。
+        raise fence_mismatch(str(run_id), fence.get("provided"))
     # 取消读列而不是事件：受理事实必须持久且不被事件分页/清理截断（spec §9.3）
     cancel = bool(
         (
@@ -148,10 +177,9 @@ async def heartbeat_run(
             )
         ).scalar_one()
     )
-    if fence.get("ok"):
-        # extend_lease 内部用 DEFAULT_LEASE_SECONDS；带 token 时只续自己那条租约，
-        # 免得旧 runner 的心跳把新租约续上（原调用多传 lease_seconds，心跳恒 500）
-        await leases_mod.extend_lease(session, run_id=str(run_id), token=token)
+    # extend_lease 只续 token 精确匹配的那条租约；到这里 fence 已通过，
+    # 不会给别人的租约续命。
+    await leases_mod.extend_lease(session, run_id=str(run_id), token=token)
     await events_mod.append_event(
         session,
         project_id=str(row["project_id"]),
@@ -173,10 +201,17 @@ async def check_fence(
     token: str | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """写结果前确认 fencing_token 仍是当前租约的 token；不匹配 409 fence_mismatch。"""
-    result = await leases_mod.verify_fence(session, run_id=str(run_id), token=token)
+    """写结果前确认 fencing token 仍是当前租约的 token；缺失/不匹配 409。
+
+    响应不回显当前租约的 token：无 token 的探测只得到失配，拿不到
+    "下一次该伪装成什么"（P1-01）。成功路径返回的 token 与请求提供的
+    token 相同（等值回显，无新信息）。
+    """
+    result = await leases_mod.verify_fence(
+        session, run_id=str(run_id), token=_coerce_token(token)
+    )
     if not result.get("ok"):
-        raise fence_mismatch(str(run_id), result.get("expected"), result.get("provided"))
+        raise fence_mismatch(str(run_id), result.get("provided"))
     return {
         "ok": True,
         "token": result.get("expected"),
@@ -190,8 +225,18 @@ async def post_events(
     body: dict = Body(default_factory=dict),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """批量转发 runner stdout 的 JSON 事件（source_event_id 幂等去重）。"""
+    """批量转发 runner stdout 的 JSON 事件（source_event_id 幂等去重）。
+
+    事件流是运行证据的一部分：过期 runner 的日志不得混进新 runner 的 run
+    （P1-01），所以与其他写入端点一样先过 fence。runner 侧协议
+    （runner_pkg/testdock_runner/protocol.py）在载荷里带 fencing_token。
+    """
     row = await _run_row(session, run_id)
+    fence = await leases_mod.verify_fence(
+        session, run_id=str(run_id), token=_coerce_token(body.get("fencing_token"))
+    )
+    if not fence.get("ok"):
+        raise fence_mismatch(str(run_id), fence.get("provided"))
     items = body.get("events") or []
     if not isinstance(items, list):
         raise validation_error(["events 必须是数组"])
@@ -244,8 +289,9 @@ async def complete_run(
 ) -> dict:
     """成功收敛。fence 校验 -> finalize（产物 / 事件 / 状态 / 租约顺序固定）。"""
     row = await _run_row(session, run_id)
-    token = body.get("fencing_token")
+    token = _coerce_token(body.get("fencing_token"))
     if runs_mod.is_terminal(str(row["state"])):
+        # 终态幂等重试：不改变任何状态，保留 runner 重试语义（P1-01 验收）。
         return {
             "ok": True,
             "already": True,
@@ -254,7 +300,8 @@ async def complete_run(
         }
     fence = await leases_mod.verify_fence(session, run_id=str(run_id), token=token)
     if not fence.get("ok"):
-        raise fence_mismatch(str(run_id), fence.get("expected"), fence.get("provided"))
+        # 缺 token / 旧 token 一律拒绝：无效 runner 不得把别人的 run 收敛掉。
+        raise fence_mismatch(str(run_id), fence.get("provided"))
     await session.commit()
 
     from pathlib import Path
@@ -298,8 +345,9 @@ async def fail_run(
 ) -> dict:
     """失败收敛：state=errored / cancelled，outcome 必须为 NULL（DB CHECK 兜底）。"""
     row = await _run_row(session, run_id)
-    token = body.get("fencing_token")
+    token = _coerce_token(body.get("fencing_token"))
     if runs_mod.is_terminal(str(row["state"])):
+        # 终态幂等重试：不改变任何状态（与 complete 同一纪律）。
         return {
             "ok": True,
             "already": True,
@@ -311,10 +359,11 @@ async def fail_run(
         target = runs_mod.STATE_CANCELLED
     else:
         target = runs_mod.STATE_ERRORED
-    if token is not None:
-        fence = await leases_mod.verify_fence(session, run_id=str(run_id), token=token)
-        if not fence.get("ok"):
-            raise fence_mismatch(str(run_id), fence.get("expected"), fence.get("provided"))
+    # fence 不再对"token 缺失"网开一面：无 token 的 fail 与错 token 的 fail
+    # 同样能把别人的 run 打成 errored，必须一并拒绝（P1-01）。
+    fence = await leases_mod.verify_fence(session, run_id=str(run_id), token=token)
+    if not fence.get("ok"):
+        raise fence_mismatch(str(run_id), fence.get("provided"))
     await session.commit()
 
     from pathlib import Path
@@ -383,7 +432,7 @@ async def fence_debug(session_id: str, token: str | None = None,
                       session: AsyncSession = Depends(get_session)) -> dict:
     result = await _debug_fence(session, session_id, token)
     if not result["ok"]:
-        raise fence_mismatch(session_id, None, token)
+        raise fence_mismatch(session_id, _coerce_token(token))
     return result
 
 
@@ -394,7 +443,7 @@ async def close_debug(session_id: str, body: dict = Body(default_factory=dict),
     if result["state"] in ("closed", "lost"):
         return {"ok": True, "already": True}
     if not result["ok"]:
-        raise fence_mismatch(session_id, None, body.get("fencing_token"))
+        raise fence_mismatch(session_id, _coerce_token(body.get("fencing_token")))
     await session.rollback()
     from .debug import _close_session
     await _close_session(session_id, reason=str(body.get("reason") or "runner_exit"))
@@ -419,7 +468,7 @@ async def debug_session_ready(
         raise validation_error(["port 必须在 1–65535 之间"])
     fence = await _debug_fence(session, session_id, body.get("fencing_token"))
     if not fence["ok"]:
-        raise fence_mismatch(session_id, None, body.get("fencing_token"))
+        raise fence_mismatch(session_id, _coerce_token(body.get("fencing_token")))
     row = (
         await session.execute(
             text(

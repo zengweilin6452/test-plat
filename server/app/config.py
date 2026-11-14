@@ -18,6 +18,26 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 # Shared root configuration also feeds os.environ readers (runner and startup guards).
 load_dotenv(REPO_ROOT / ".env", override=False)
 
+#: 允许的服务绑定地址（P1-03）：首期没有登录认证，API / Web 只能绑定回环。
+#: 未实现认证、Origin 校验与 CSRF 之前，任何非回环绑定一律启动失败；
+#: 未来要支持局域网访问，必须先补齐身份认证，而不是放开这个名单。
+LOOPBACK_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def ensure_loopback_host(value: str) -> str:
+    """校验绑定地址是回环地址；不是就直接报错（fail-closed）。
+
+    返回归一化后的值。方括号形式（[::1]）与大小写（LocalHost）都接受。
+    """
+    normalized = str(value).strip().lower().strip("[]")
+    if normalized not in LOOPBACK_HOSTS:
+        raise ValueError(
+            f"绑定地址 {value!r} 不是回环地址。首期服务没有登录认证，"
+            "只允许绑定 127.0.0.1 / localhost / ::1；如需局域网访问，"
+            "必须先设计身份认证、Origin 校验与 CSRF 防护，不能仅开放 Host。"
+        )
+    return normalized
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="TESTDOCK_", env_file=REPO_ROOT / ".env", extra="ignore")
@@ -47,6 +67,13 @@ class Settings(BaseSettings):
     #: 产物保留天数（<=0 表示未配置保留策略，登记时不写 expires_at）。
     #: 配置后证据的 expired 状态按 expires_at 真实可达（工单 05）。
     artifact_retention_days: int = 0
+
+    @field_validator("host", mode="after")
+    @classmethod
+    def _loopback_only(cls, value: str) -> str:
+        # 应用自身的保护（P1-03）：错误配置在导入配置时即失败，
+        # 不依赖启动脚本记得做检查。
+        return ensure_loopback_host(value)
 
     @field_validator("data_dir", "runtime_dir", "vendor_dir", "adb_path", mode="after")
     @classmethod

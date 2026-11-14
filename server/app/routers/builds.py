@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
+from ..dependencies import require_client_header
 from ..schemas import (
     BuildCreateIn,
     BuildIdentityCheckOut,
@@ -26,7 +27,6 @@ from ..schemas import (
     IdentityCheckIn,
 )
 from ..services import builds as build_service
-from .tasks import require_client_header
 
 router = APIRouter(tags=["builds"])
 
