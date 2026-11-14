@@ -382,6 +382,15 @@ async def restore_entity(
                 {"project_id": parent["id"], "reason": "project_archived"},
             )
     table = "projects" if entity == "project" else "applications"
+    previous = (
+        await session.execute(
+            text(f"SELECT archived_at FROM {table} WHERE id::text = :id FOR UPDATE"),
+            {"id": entity_id},
+        )
+    ).mappings().first()
+    if previous is None:
+        raise not_found(entity, entity_id)
+    already = previous["archived_at"] is None
     updated = (
         await session.execute(
             text(
@@ -397,8 +406,7 @@ async def restore_entity(
         "id": str(updated["id"]),
         "name": updated["name"],
         "archived_at": updated["archived_at"],
-        # 恢复本就是未归档对象时 archived_at 为 NULL，语义等同 already
-        "already": updated["archived_at"] is None,
+        "already": already,
     }
 
 

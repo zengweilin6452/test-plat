@@ -370,6 +370,38 @@ def test_archive_blocks_active_runs_and_rejects_business_writes(client: TestClie
         drop_project(project_id)
 
 
+@pytest.mark.parametrize("entity", ["project", "application"])
+def test_restore_reports_previous_archive_state_and_preserves_identity(client, entity):
+    project = _new_project(client, "restore")
+    application = _new_app(client, project["id"])
+    original = project if entity == "project" else application
+    path = "projects" if entity == "project" else "applications"
+    url = f"/api/v1/{path}/{original['id']}"
+    try:
+        archived = client.post(url + "/archive", headers=CLIENT_HEADERS)
+        assert archived.status_code == 200, archived.text
+        assert archived.json()["archived_at"] is not None
+        for already in (False, True):
+            restored = client.post(url + "/restore", headers=CLIENT_HEADERS)
+            assert restored.status_code == 200, restored.text
+            assert restored.json() == {
+                "id": original["id"], "name": original["name"],
+                "archived_at": None, "already": already,
+            }
+        if entity == "application":
+            current = client.get(url).json()
+        else:
+            current = next(item for item in client.get("/api/v1/projects").json()["items"]
+                           if item["id"] == original["id"])
+        for field in ("id", "name", "code") if entity == "project" else (
+            "id", "name", "project_id", "platform", "identifier"
+        ):
+            assert current[field] == original[field]
+        assert current["archived_at"] is None
+    finally:
+        drop_project(project["id"])
+
+
 def test_project_scope_filters_are_served_by_api(client: TestClient) -> None:
     first = _new_project(client, "scope-a")
     second = _new_project(client, "scope-b")
