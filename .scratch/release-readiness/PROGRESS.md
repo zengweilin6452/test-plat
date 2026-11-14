@@ -18,11 +18,13 @@
   16f1771（joint ui_timeout_s）、596306e（PG 空格路径×2）。
 - 后端 665 项 0 失败；前端 90/90 + tsc + build；部署/升级/恢复实测通过。
 - 证据：evidence/02..08 + baseline/01 + evidence/09；STATUS.md 已更新为收口轮校准。
-- 文档提交 b216a2f（含证据与脚本，Edge profile 已排除）。
+- 文档提交 b3622f6（含证据与脚本，Edge profile 已排除；b216a2f 为 amend 前的悬空对象，不再引用）。
 
-## Next（待用户决策）
-- 推送已获授权（22:30）；github.com:443 暂不可达（api.github.com 正常、SSH 无密钥）。
-  网络恢复后执行 `git push origin master` → 远端 CI 复核转绿 → 09 升级为整体通过。
+## Next（2026-11-14 更新）
+- 推送已执行（2026-11-14，用户已授权）：网络恢复（fetch / gh API 实测可达）后 `git push origin master` 完成，
+  收口修复、11-09 的 toast/restore 修复（`d02212a`/`a50df4a`）与文档同步并入 origin/master。
+- 待远端 CI 复核结果；且 07 的 Windows 实际 DPI/高对比度须现场复验（2026-11-09 更正）。
+  两者解除后 09 与 STATUS.md 才升级为整体通过（dated 追记，不改写原文）。
 - 可选：打 tag（独立授权）；停部署实例 PG（55434）。
 
 ## Open questions
@@ -30,4 +32,4 @@
 
 ## Key facts
 - 真机 749622c9；隔离库 rr01（测试）/rr02（验收主库，后被恢复演练复制）；部署实例 PG 55434。
-- dev 环境 :8000/:5173/55432 未动。
+- dev 环境 :8000/:5173 未动；55432 于 2026-11-14 为复跑定向测试启动（隔离库 testdock_docsync1114）。

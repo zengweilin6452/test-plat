@@ -1,35 +1,41 @@
 # 工单状态索引（与实际情况对齐）
 
-> 2026-11-09 更正优先：release-readiness 07 为 ready-for-human，实际 Windows DPI/高对比度待验，25–26 用户故事不能标为完整通过；09 保持有缺口。下方 2026-11-08 的“32/32 通过、仅剩 CI”是已撤回的历史结论。toast 与恢复 already 缺陷本次在工作区修复，未提交。
+> 2026-11-09 更正优先：release-readiness 07 为 ready-for-human，实际 Windows DPI/高对比度待验，25–26 用户故事不能标为完整通过；09 保持有缺口。下方 2026-11-08 的“32/32 通过、仅剩 CI”是已撤回的历史结论。toast 与恢复 already 缺陷已于 2026-11-14 提交（`d02212a` / `a50df4a`，验证证据见 `evidence/acceptance-fixes-2026-11-09.md`）。
 
 > 2026-11-08 收口轮校正（release-readiness 九票执行完毕）。本文件仍是状态权威；
 > 上一版校准（2026-11-07）中被本轮事实取代的描述已更新。
+> 2026-11-14 同步：`git push origin master` 已执行（4 个修复提交 + 文档同步并入 origin/master）；
+> 推送/远端 CI 相关陈旧描述按当前事实更新，已被取代的重复缺口段删除。
 
 ## 总览
 
 | effort | 票数 | 实际状态 | 证据 |
 | --- | --- | --- | --- |
-| `release-readiness` | 9 | **01–08 resolved（本轮实测+复验）；09 有条件通过（唯一缺口=远程 CI 待推送复核）** | `.scratch/release-readiness/evidence/02..08`、`baseline/01-evidence-baseline.md`、`evidence/09-delivery-baseline.md` |
-| `prototype-alignment` | 25 | 19 票 resolved；4 票已实现但验收项未勾；2 票有明确未闭环项 | 已并入 HEAD；`acceptance.md`、`handoff-2026-10-29.md`、`server/tests/` |
+| `release-readiness` | 9 | **01–06/08 resolved；07 复核改 ready-for-human（Windows 实际 DPI/高对比度待现场验收）；09 有缺口（07 现场复验 + 远程 CI 复核，推送已于 2026-11-14 执行，见 09 §8）** | `.scratch/release-readiness/evidence/02..08`、`evidence/acceptance-fixes-2026-11-09.md`、`baseline/01-evidence-baseline.md`、`evidence/09-delivery-baseline.md` |
+| `prototype-alignment` | 25 | 19 票 resolved；3 票已实现但验收项未勾；3 票有明确未闭环项 | 已并入 HEAD；`acceptance.md`、`handoff-2026-10-29.md`、`server/tests/` |
 | `first-release-closure` | 10 | 10 票 resolved；真机/来源/像素证据齐（2026-11-01 §8–§10） | `acceptance.md` |
 | `product-formalization` | 12 | 7 票 resolved；5 票待验项已由 release-readiness 承接并关闭（03→06、08→02、10→07、11→08、12→09） | `implementation-report.md` + release-readiness 证据 |
 | `debug-direct-control` | 2 | 2 票 resolved | `acceptance.md` §11–§12 |
 
 ## release-readiness 收口结论（2026-11-08）
 
-- **32/32 用户故事已通过**（含 3 条「本轮实测+自动化复用」口径）；验收暴露并修复 5 个范围内缺陷：
+- **~~32/32 用户故事已通过~~**（2026-11-09 更正：撤回 25–26，实际 30/32 通过、2 条待 Windows 现场复验；
+  含 3 条「本轮实测+自动化复用」口径）；验收暴露并修复 5 个范围内缺陷：
   `3eff530`（CI ruff 死导入 + vendor charmap 编码）、`d3c2124`（运行 started_at/耗时 0s）、
   `16f1771`（joint 版本发布缺 ui_timeout_s）、`596306e`（便携 PG 含空格路径 ×2：ArgumentList 引号 + UTF-8 BOM）。
 - 真机验收：RUN-0001~0010（UI/性能/联动/取消/互斥/调试），设备串行全程租约干净。
 - 后端 665 项（0 失败/1 跳过）+ 定向 47 项；前端 90/90 + tsc + build。
-- **未闭合必需项**：远程 CI 在 origin/master 为红，本地修复已验证但**未推送**（推送需独立授权）；
-  远端转绿前交付结论为「有条件通过」。
+- **未闭合必需项（2026-11-09 更正后）**：① 07 的 Windows 实际 125% DPI / 高对比度现场复验；
+  ② 远程 CI 复核。2026-11-08 授权的推送当时因 github.com:443 不可达未执行；
+  **2026-11-14 网络恢复后 `git push origin master` 已执行**（收口修复、11-09 的 toast/restore 修复与
+  文档同步并入 origin/master）；①② 均解除前交付结论维持「有缺口」。
 
 ## 现存验证缺口（跨 effort，2026-11-08 更新）
 
 | 缺口 | 影响 | 解除条件 |
 | --- | --- | --- |
-| 本轮 4 个修复提交未推送 | 远端 CI 未复核；master 本地领先 origin 4 个提交 | 用户授权 push |
+| ~~本轮 4 个修复提交未推送~~ | 已解除：2026-11-14 推送执行完毕；剩余为远端 CI 复核 | 已授权并执行（2026-11-14） |
+| 07 现场 DPI/高对比度复验 | 用户故事 25–26 不标完整通过（2026-11-09 更正） | 真实 Windows 显示设置下现场验收 |
 | 无版本 tag | 构建身份靠 `TESTDOCK_BUILD_COMMIT`（可核对），tag 缺失不影响身份识别 | 打标签需独立授权 |
 | 历史 runner 消失根因 | 观察项（本轮 10 次真机运行未复现） | 复现后按规格决策 11 限口径调查 |
 | 多 worker 凭证共享 / 保留期 expired 态 | out-of-scope 维持 | 按首版边界 |
@@ -70,12 +76,6 @@
   - `11-portable-windows-deployment`：AC-13 未在真实另一含空格目录执行完整启停。
   - `12-integrated-acceptance`：整体验收未完成，不得仅凭自动化测试关闭。
 
-## 现存验证缺口（跨 effort）
-
-| 缺口 | 影响 | 解除条件 |
-| --- | --- | --- |
-| 无 git 远端 | `ci.yml` 永不运行，一切「CI 绿」都是本地等价校验 | 提供远端 URL 并 push |
-| 无版本 tag / 构建提交 | 运行实例身份只能靠进程启动时间推断 | 打 tag；`dev_up.ps1` 注入 `TESTDOCK_BUILD_COMMIT` |
-| 真机闭环 | UI/性能/联动/调试的真机结论只到自动化与契约层 | 占用真机并配置可信套件来源 |
-| 浏览器视觉验收 | 缩放、高对比度、长名称、焦点未实测 | 有桌面会话时补验 |
-| 换目录启停 | 正式安装路径可迁移性未实测 | 在另一含空格目录跑 `dev_up.ps1` / `dev_down.ps1` |
+> 原 2026-11-07 版「现存验证缺口（跨 effort）」表（无 git 远端、真机闭环、浏览器视觉验收、
+> 换目录启停等）已被 2026-11-08 收口轮事实全部取代（远端已配置、CI 已实跑、真机/桌面交互/含空格
+> 部署均实测通过），现行缺口以本文「release-readiness 收口结论」后的缺口表为准。
