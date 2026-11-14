@@ -21,6 +21,7 @@ from tests._p3_common import CLIENT_HEADERS, TEST_DB, requires_db, reset_db_engi
 from tests._p3_common import api_client as api_client  # noqa: PLW0127 - 夹具复用
 from tests._p3_common import make_run as make_run  # noqa: PLW0127 - 夹具复用
 from tests._p3_common import sync_engine as sync_engine  # noqa: PLW0127 - 夹具复用
+from tests._p3_common import p3_project as project  # noqa: F401 - fixture 复用
 
 pytestmark = requires_db
 
