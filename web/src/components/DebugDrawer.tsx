@@ -900,22 +900,30 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         setControlEnabled(false)
         setTouchDot(null)
         closeGestureSocket()
+        return
+      }
+      if (message?.kind === 'ended') {
+        // vendor 手势信道按设计一次手势一条连接：end/cancel 或 2s 无消息都会
+        // ended + 关闭（viewer app.py idle-timeout）。下一次 pointerdown 会
+        // 重新开信道（handleControlPointerDown → openGesture），这里本地静默
+        // 收尾，不走 onclose，也不退出操控——关连接不是故障。
+        closeGestureSocket()
       }
     }
-    // 异常关闭必须同步退出操控：否则画面正常、输入静默失效、还显示「操控中」。
-    // 本地主动关闭（closeGestureSocket）会先清 gestureWsRef，current !== ws → 静默。
+    // 只有手势进行中断连才值得提示：vendor 侧已尽力补 UP（_cleanup），
+    // 本地中止拖动即可；操控保持启用，下一次按下画面会自动重开手势信道。
+    // 正常生命周期（ended/idle-timeout）已在 onmessage 里静默关闭，不进这里。
     ws.onclose = (event) => {
       if (gestureWsRef.current !== ws) return
       gestureWsRef.current = null
-      pointerStartRef.current = null
-      setControlEnabled(false)
-      setTouchDot(null)
-      const code = typeof event?.code === 'number' ? event.code : 1006
-      setControlError(
-        code === 1000
-          ? '操控通道已关闭，请重新启用直接操控'
-          : '操控通道已断开（' + code + '），请重新启用直接操控',
-      )
+      if (pointerStartRef.current) {
+        pointerStartRef.current = null
+        setTouchDot(null)
+        const code = typeof event?.code === 'number' ? event.code : 1006
+        setControlError(
+          '手势进行中通道中断（' + code + '），该次拖动已中止；再次按下画面会自动重连手势通道',
+        )
+      }
     }
     ws.onerror = () => setControlError('操控通道连接失败，请重新启用直接操控')
   }, [closeGestureSocket])

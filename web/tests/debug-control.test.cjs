@@ -120,3 +120,30 @@ test('直接操控键位于设备画面正下方（在快照信息之前）', ()
   const meta = source.indexOf("'设备画面未冻结'")
   assert.ok(bar >= 0 && meta > bar, '返回/Home 必须在设备画面之后、快照信息之前')
 })
+
+test('手势信道正常收尾不误报故障（vendor ended/idle-timeout 是设计内生命周期）', () => {
+  const source = fs.readFileSync('src/components/DebugDrawer.tsx', 'utf8')
+  // onmessage 处理 vendor 的 ended：本地静默关闭，不弹错误、不退出操控
+  const endedAt = source.indexOf("message?.kind === 'ended'")
+  assert.ok(endedAt > 0, '必须处理 vendor ended 消息')
+  const endedBlock = source.slice(endedAt, endedAt + 400)
+  assert.ok(endedBlock.includes('closeGestureSocket()'), 'ended 后本地关闭信道')
+  assert.ok(!endedBlock.includes('setControlEnabled(false)'), 'ended 不得退出操控')
+  assert.ok(!endedBlock.includes('setControlError'), 'ended 不得弹错误提示')
+  // onclose：只在手势进行中断连时提示，且不得禁用操控
+  const oncloseAt = source.indexOf('ws.onclose = (event) => {')
+  assert.ok(oncloseAt > 0, '手势 WS 需要 onclose 处理')
+  const oncloseBody = source.slice(oncloseAt, source.indexOf('ws.onerror', oncloseAt))
+  assert.ok(
+    oncloseBody.includes('pointerStartRef.current'),
+    'onclose 只应处理手势进行中断连（pointerStartRef 存在）',
+  )
+  assert.ok(
+    !oncloseBody.includes('setControlEnabled(false)'),
+    'onclose 不得禁用操控：下一次 pointerdown 会自动重开信道',
+  )
+  // openGesture 必须在每次 pointerdown 调用（信道自愈的关键）
+  const pointerDown = source.indexOf('const handleControlPointerDown')
+  const pointerDownBody = source.slice(pointerDown, source.indexOf('const handleControlPointerMove'))
+  assert.ok(pointerDownBody.includes('openGesture()'), '每次 pointerdown 重开手势信道')
+})
