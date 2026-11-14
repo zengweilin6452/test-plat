@@ -178,19 +178,115 @@ export function locatorValueForNode(by: LocatorBy, node: SnapshotTreeNode | null
   }
 }
 
-/** 层级树节点：vendor 用 children 存下标，渲染前先按 index 建表 */
+/** 层级树节点：vendor 用 children 存下标，渲染前先按 index 建表。
+ *  parentOf 是键盘导航（左右键回到父节点）需要的 child→parent 反查表。 */
 export function buildTreeIndex(nodes: SnapshotTreeNode[]): {
   byIndex: Map<number, SnapshotTreeNode>
   roots: SnapshotTreeNode[]
+  parentOf: Map<number, number>
 } {
   const byIndex = new Map<number, SnapshotTreeNode>()
   for (const node of nodes) byIndex.set(node.index, node)
   const referenced = new Set<number>()
+  const parentOf = new Map<number, number>()
   for (const node of nodes) {
-    for (const child of node.children ?? []) referenced.add(child)
+    for (const child of node.children ?? []) {
+      referenced.add(child)
+      if (!parentOf.has(child)) parentOf.set(child, node.index)
+    }
   }
   const roots = nodes.filter((node) => !referenced.has(node.index))
-  return { byIndex, roots }
+  return { byIndex, roots, parentOf }
+}
+
+/**
+ * 树的受控展开集合：默认展开前两层（与原 TreeBranch depth<2 行为一致），
+ * 新快照采集后用它整体重置，展开状态不跨快照残留。
+ */
+export function initialOpenTreeSet(
+  roots: SnapshotTreeNode[],
+  byIndex: Map<number, SnapshotTreeNode>,
+): Set<number> {
+  const open = new Set<number>()
+  const walk = (node: SnapshotTreeNode, depth: number) => {
+    if (depth < 2) open.add(node.index)
+    for (const child of node.children ?? []) {
+      const kid = byIndex.get(child)
+      if (kid) walk(kid, depth + 1)
+    }
+  }
+  for (const root of roots) walk(root, 0)
+  return open
+}
+
+/**
+ * 当前展开状态下实际渲染的行（DOM 顺序）：与 TreeBranch 同规则——
+ * 无标识纯容器整行跳过、子树原位上移；收起的子树不产生行。
+ * 键盘导航（上下移动、roving tabindex）以这份列表为准。
+ */
+export function visibleTreeRows(
+  roots: SnapshotTreeNode[],
+  byIndex: Map<number, SnapshotTreeNode>,
+  open: Set<number>,
+): SnapshotTreeNode[] {
+  const rows: SnapshotTreeNode[] = []
+  const walk = (node: SnapshotTreeNode) => {
+    const kids = (node.children ?? [])
+      .map((index) => byIndex.get(index))
+      .filter((kid): kid is SnapshotTreeNode => Boolean(kid))
+    if (hasNodeIdentity(node)) rows.push(node)
+    if (!hasNodeIdentity(node) || open.has(node.index)) {
+      for (const kid of kids) walk(kid)
+    }
+  }
+  for (const root of roots) walk(root)
+  return rows
+}
+
+export type TreeNavKey = 'ArrowDown' | 'ArrowUp' | 'ArrowRight' | 'ArrowLeft'
+
+export interface TreeNavAction {
+  /** 焦点要移动到的节点 index；null 表示焦点不动（只翻转展开） */
+  focus: number | null
+  /** 需要翻转展开状态的节点 index；缺省表示不翻转 */
+  toggle?: number
+}
+
+/**
+ * WAI-ARIA tree 模式的方向键语义（在可见行列表上工作）：
+ * 上下移动焦点；右键展开收起节点、已展开则进入第一个子节点；
+ * 左键收起已展开节点、已收起则回到最近一个可见祖先。
+ */
+export function treeNavAction(
+  rows: SnapshotTreeNode[],
+  current: SnapshotTreeNode,
+  key: TreeNavKey,
+  open: Set<number>,
+  byIndex: Map<number, SnapshotTreeNode>,
+  parentOf: Map<number, number>,
+): TreeNavAction | null {
+  const position = rows.findIndex((row) => row.index === current.index)
+  if (position === -1) return null
+  if (key === 'ArrowDown') {
+    return { focus: rows[position + 1]?.index ?? null }
+  }
+  if (key === 'ArrowUp') {
+    return { focus: rows[position - 1]?.index ?? null }
+  }
+  const hasKids = (current.children ?? []).some((index) => byIndex.has(index))
+  const expanded = open.has(current.index)
+  if (key === 'ArrowRight') {
+    if (hasKids && !expanded) return { focus: null, toggle: current.index }
+    return { focus: rows[position + 1]?.index ?? null }
+  }
+  // ArrowLeft：收起自己，否则逐级向上找最近一个可见祖先
+  if (hasKids && expanded) return { focus: null, toggle: current.index }
+  let parent = parentOf.get(current.index)
+  while (parent !== undefined) {
+    if (rows.some((row) => row.index === parent)) return { focus: parent }
+    parent = parentOf.get(parent)
+  }
+  return { focus: null }
 }
 
 /**
@@ -291,10 +387,10 @@ export function controlAvailability(
 ): { enabled: boolean; reason: string | null } {
   if (!input.sessionActive) return { enabled: false, reason: '调试会话尚未激活' }
   if (input.inspectMode === 'image') {
-    return { enabled: false, reason: '图像模板框选模式下不可操控' }
+    return { enabled: false, reason: '图像框选模式下不可操控，先切回原生节点' }
   }
-  if (input.frozen) return { enabled: false, reason: '冻结快照时不可操控，先恢复预览' }
-  if (!input.wsOpen) return { enabled: false, reason: '实时画面未连接' }
+  if (input.frozen) return { enabled: false, reason: '检查快照中，恢复实时后可操控' }
+  if (!input.wsOpen) return { enabled: false, reason: '实时画面未连接，先点「重新连接」' }
   if (!input.hasFrame) return { enabled: false, reason: '画面尚未就绪' }
   if (input.busy) return { enabled: false, reason: '会话切换中' }
   return { enabled: true, reason: null }
@@ -360,4 +456,67 @@ export async function drawSnapshotImage(canvas: HTMLCanvasElement | null, blob: 
   } finally {
     URL.revokeObjectURL(url)
   }
+}
+
+// ------------------------------------------------------------ 画面视图状态（F1）
+export interface StageViewInput {
+  /** 冻结（检查快照）中 */
+  frozen: boolean
+  /** 会话终态（closed/lost）：媒体通道已无东西可连 */
+  sessionClosed: boolean
+  /** 预览通道（H.264 / JPEG WS）当前已连接 */
+  wsOpen: boolean
+  /** 画面上绘制过帧（frameSize 存在） */
+  hasFrame: boolean
+  /** 本次「转实时」以来真实绘制过新帧（JPEG 回退恢复时防止旧图冒充新帧） */
+  liveFrameSeen: boolean
+}
+
+export interface StageViewBadge {
+  tone: 'green' | 'blue' | 'amber' | 'red' | 'gray'
+  label: string
+  /** 画面内容可能过期（断开前的最后一帧/快照）：画面区需要覆盖提示 */
+  stale: boolean
+  staleNote: string | null
+}
+
+/**
+ * 画面徽标状态机：会话、连接、首帧与冻结共同决定显示标签，
+ * 断线后旧图一律不再标「实时画面」（审查 F1）。
+ */
+export function stageViewBadge(input: StageViewInput): StageViewBadge {
+  if (!input.hasFrame) return { tone: 'gray', label: '未连接', stale: false, staleNote: null }
+  if (input.sessionClosed) {
+    return input.frozen
+      ? { tone: 'red', label: '已断开 · 保留检查快照', stale: true, staleNote: '这是断开前的检查快照，不代表设备当前状态' }
+      : { tone: 'red', label: '已断开 · 显示最后一帧', stale: true, staleNote: '画面停留在断开前的最后一帧，不代表设备当前状态' }
+  }
+  if (input.frozen) {
+    return { tone: 'amber', label: '检查快照', stale: false, staleNote: null }
+  }
+  if (!input.wsOpen) {
+    return { tone: 'red', label: '已断开 · 显示最后一帧', stale: true, staleNote: '画面停留在断开前的最后一帧，不代表设备当前状态' }
+  }
+  if (!input.liveFrameSeen) {
+    return { tone: 'blue', label: '等待新帧…', stale: false, staleNote: null }
+  }
+  return { tone: 'green', label: '实时画面', stale: false, staleNote: null }
+}
+
+/**
+ * 选中节点的画面边框区域（审查 F5）：vendor bounds 是 [left, top, right, bottom]
+ * 设备像素，与快照/实时帧同一坐标系；越界或缺 bounds 时如实返回 null 不画框。
+ */
+export function nodeOverlayRegion(node: SnapshotTreeNode | null): Region | null {
+  if (!node) return null
+  const bounds = node.bounds
+  if (!Array.isArray(bounds) || bounds.length !== 4) return null
+  const [left, top, right, bottom] = bounds
+  if (![left, top, right, bottom].every((value) => typeof value === 'number' && Number.isFinite(value))) {
+    return null
+  }
+  const width = right - left
+  const height = bottom - top
+  if (width <= 0 || height <= 0) return null
+  return { x: left, y: top, w: width, h: height }
 }

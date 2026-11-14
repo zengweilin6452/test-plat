@@ -46,9 +46,9 @@ test('直接操控可用性：每种禁用都有明确原因', () => {
 
   const cases = [
     [{ sessionActive: false }, '调试会话尚未激活'],
-    [{ inspectMode: 'image' }, '图像模板框选模式下不可操控'],
-    [{ frozen: true }, '冻结快照时不可操控，先恢复预览'],
-    [{ wsOpen: false }, '实时画面未连接'],
+    [{ inspectMode: 'image' }, '图像框选模式下不可操控，先切回原生节点'],
+    [{ frozen: true }, '检查快照中，恢复实时后可操控'],
+    [{ wsOpen: false }, '实时画面未连接，先点「重新连接」'],
     [{ hasFrame: false }, '画面尚未就绪'],
     [{ busy: true }, '会话切换中'],
   ]
