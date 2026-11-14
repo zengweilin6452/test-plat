@@ -87,6 +87,11 @@ import {
   nodeBounds,
   LOCATOR_OPTIONS,
   editRegion,
+  initialOpenTreeSet,
+  nodeOverlayRegion,
+  stageViewBadge,
+  treeNavAction,
+  visibleTreeRows,
 } from './debug/debugModel'
 import { TreeBranch } from './debug/TreeBranch'
 export type { ControlAvailabilityInput } from './debug/debugModel'
@@ -103,10 +108,15 @@ export { hasNodeIdentity } from './debug/debugModel'
 export { locatorValueForNode } from './debug/debugModel'
 export { nodeLabel } from './debug/debugModel'
 export { normalizeStagePoint } from './debug/debugModel'
+export { initialOpenTreeSet } from './debug/debugModel'
+export { nodeOverlayRegion } from './debug/debugModel'
 export { preferredLocator } from './debug/debugModel'
 export { resolveCropVerification } from './debug/debugModel'
 export { shouldSendGestureMove } from './debug/debugModel'
+export { stageViewBadge } from './debug/debugModel'
 export { toWorkspaceTarget } from './debug/debugModel'
+export { treeNavAction } from './debug/debugModel'
+export { visibleTreeRows } from './debug/debugModel'
 
 
 interface DebugDrawerProps {
@@ -119,9 +129,12 @@ interface DebugDrawerProps {
   onClose: () => void
   /** 会话建立/释放时上抛，供模板页签等按会话隔离的调用方使用 */
   onSessionChange?: (sessionId: string | number | null) => void
+  /** 聚焦投屏：隐藏两侧检查面板，画面按视口高度放大（审查 F2）。状态由页面持有 */
+  focus?: boolean
+  onFocusChange?: (next: boolean) => void
 }
 
-export function DebugDrawer({ open, target, devices, onTargetChange, onClose, onSessionChange }: DebugDrawerProps) {
+export function DebugDrawer({ open, target, devices, onTargetChange, onClose, onSessionChange, focus = false, onFocusChange }: DebugDrawerProps) {
   const toast = useToast()
   const queryClient = useQueryClient()
 
@@ -168,6 +181,13 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   const [previewMode, setPreviewMode] = useState<'h264' | 'jpeg'>('h264')
   const [previewNote, setPreviewNote] = useState<string | null>(null)
   const [previewFps, setPreviewFps] = useState<number | null>(null)
+  /** 本次「转实时」以来是否真实绘制过新帧（F1：恢复/重连后旧图不冒充新帧） */
+  const [liveFrameSeen, setLiveFrameSeen] = useState(false)
+  /** 最近一帧距今秒数（被动提示，不判故障；持续断流需可控复现后再定） */
+  const [previewStaleSec, setPreviewStaleSec] = useState<number | null>(null)
+  /** 树的受控展开集合与 roving tabindex 焦点行（审查 F5） */
+  const [openNodes, setOpenNodes] = useState<Set<number>>(() => new Set())
+  const [treeFocus, setTreeFocus] = useState<number | null>(null)
 
   /** 直接操控：控制权在服务端，前端只反映 enabled；手势 WS 每次手势一条。 */
   const [controlEnabled, setControlEnabled] = useState(false)
@@ -188,6 +208,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   const frozenRef = useRef(false)
   const h264PlayerRef = useRef<H264PreviewHandle | null>(null)
   const previewFrameCountRef = useRef(0)
+  /** 最近一次真实绘制帧的时间戳（被动「N 秒未更新」提示用） */
+  const lastFrameAtRef = useRef<number | null>(null)
   const gestureWsRef = useRef<WebSocket | null>(null)
   const gestureQueueRef = useRef<string[]>([])
   const gestureSeqRef = useRef(0)
@@ -256,7 +278,12 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     setPreviewMode('h264')
     setPreviewNote(null)
     setPreviewFps(null)
+    setPreviewStaleSec(null)
+    setLiveFrameSeen(false)
+    lastFrameAtRef.current = null
     previewFrameCountRef.current = 0
+    setOpenNodes(new Set())
+    setTreeFocus(null)
     closeGestureSocket()
     setControlEnabled(false)
     setControlPending(false)
@@ -426,6 +453,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
           setFrameSize((prev) => (prev && prev.w === size.w && prev.h === size.h ? prev : size))
         }, () => frozenRef.current)
         previewFrameCountRef.current += 1
+        lastFrameAtRef.current = Date.now()
+        setLiveFrameSeen(true)
         return
       }
       if (kind === 'status') {
@@ -461,6 +490,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         wsRetriesRef.current += 1
         window.setTimeout(() => {
           setWsStatus('idle')
+          // 重连窗口里旧帧不得再标「实时画面」：等真正画出新帧再翻绿
+          setLiveFrameSeen(false)
           setWsAttempt((n) => n + 1)
         }, WS_RETRY_DELAY_MS)
         return
@@ -571,6 +602,10 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
       setTreeError(null)
       const list = Array.isArray(tree?.nodes) ? tree.nodes : []
       setNodes(list)
+      // 新快照重置展开状态（默认展开前两层）与键盘焦点行，不跨快照残留
+      const index = buildTreeIndex(list)
+      setOpenNodes(initialOpenTreeSet(index.roots, index.byIndex))
+      setTreeFocus(list[0]?.index ?? null)
       if (list.length === 0) toast.show('快照已采集，但层级树为空')
     },
     onError: (error) => {
@@ -612,6 +647,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     setPreviewNote(null)
     setWsStatus('idle')
     wsRetriesRef.current = 0
+    // 重连期间旧帧不再标「实时画面」；画出新帧后由帧回调翻回
+    setLiveFrameSeen(false)
     setWsAttempt((n) => n + 1)
   }, [])
 
@@ -647,6 +684,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     if (choice.mode === 'jpeg' && previewMode !== 'jpeg') {
       setPreviewMode('jpeg')
       setPreviewNote(choice.reason)
+      setLiveFrameSeen(false)
     }
   }, [open, session, previewMode])
 
@@ -674,6 +712,8 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
       },
       onFrame: (size) => {
         previewFrameCountRef.current += 1
+        lastFrameAtRef.current = Date.now()
+        setLiveFrameSeen(true)
         setFrameSize((prev) => (prev && prev.w === size.w && prev.h === size.h ? prev : size))
       },
       onError: (code, message) => {
@@ -682,6 +722,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
           setWsNotice('该会话的视频画面已在另一个页面打开；关闭那边的调试工作区后点「重新连接」。')
           setPreviewMode('jpeg')
           setPreviewFps(null)
+          setLiveFrameSeen(false)
           setWsStatus('closed')
           return
         }
@@ -696,12 +737,14 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
           setWsNotice('视频通道不可用（设备采集服务已失效）；请点「返回设备池」重新进入调试。')
           setPreviewMode('jpeg')
           setPreviewFps(null)
+          setLiveFrameSeen(false)
           setWsStatus('closed')
           return
         }
         setPreviewNote('H.264 不可用，已回退 JPEG（' + code + '：' + message + '）')
         setPreviewMode('jpeg')
         setPreviewFps(null)
+        setLiveFrameSeen(false)
         setWsStatus('closed')
       },
     })
@@ -718,6 +761,10 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     const timer = window.setInterval(() => {
       setPreviewFps(previewFrameCountRef.current)
       previewFrameCountRef.current = 0
+      // 被动信息：连接保持着但帧停了（画面可能未更新）。只提示不暂停——
+      // 静态画面是否持续发帧取决于真机编码器策略，需可控断流复现后再定。
+      const last = lastFrameAtRef.current
+      setPreviewStaleSec(last === null ? null : Math.max(0, Math.floor((Date.now() - last) / 1000)))
     }, 1000)
     return () => window.clearInterval(timer)
   }, [open, previewMode])
@@ -853,6 +900,29 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         setControlEnabled(false)
         setTouchDot(null)
         closeGestureSocket()
+        return
+      }
+      if (message?.kind === 'ended') {
+        // vendor 手势信道按设计一次手势一条连接：end/cancel 或 2s 无消息都会
+        // ended + 关闭（viewer app.py idle-timeout）。下一次 pointerdown 会
+        // 重新开信道（handleControlPointerDown → openGesture），这里本地静默
+        // 收尾，不走 onclose，也不退出操控——关连接不是故障。
+        closeGestureSocket()
+      }
+    }
+    // 只有手势进行中断连才值得提示：vendor 侧已尽力补 UP（_cleanup），
+    // 本地中止拖动即可；操控保持启用，下一次按下画面会自动重开手势信道。
+    // 正常生命周期（ended/idle-timeout）已在 onmessage 里静默关闭，不进这里。
+    ws.onclose = (event) => {
+      if (gestureWsRef.current !== ws) return
+      gestureWsRef.current = null
+      if (pointerStartRef.current) {
+        pointerStartRef.current = null
+        setTouchDot(null)
+        const code = typeof event?.code === 'number' ? event.code : 1006
+        setControlError(
+          '手势进行中通道中断（' + code + '），该次拖动已中止；再次按下画面会自动重连手势通道',
+        )
       }
     }
     ws.onerror = () => setControlError('操控通道连接失败，请重新启用直接操控')
@@ -1002,7 +1072,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
     mutationFn: () => {
       const id = sessionRef.current
       if (id === null) throw new Error('缺少调试会话')
-      if (!snapshotId) throw new Error('先「采集快照」，模板只能从快照裁剪')
+      if (!snapshotId) throw new Error('先「冻结并检查」，模板只能从快照裁剪')
       if (!region) throw new Error('先在画面上拖拽框选模板区域')
       if (!cropVerified || !cropVerification) throw new Error('请先验证当前框选区域，唯一匹配后才能登记')
       const logical = newLogical.trim()
@@ -1120,7 +1190,75 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
       }))
   }, [coordinateSize, matches, scores])
 
-  const wsText = wsStatus === 'open' ? '已连接' : wsStatus === 'connecting' ? '连接中' : '未连接'
+  /** F1：画面徽标状态机（会话/连接/首帧/冻结共同决定，断线后旧图不标实时） */
+  const stageView = useMemo(
+    () =>
+      stageViewBadge({
+        frozen,
+        sessionClosed,
+        wsOpen: wsStatus === 'open',
+        hasFrame: frameSize !== null,
+        liveFrameSeen,
+      }),
+    [frozen, sessionClosed, wsStatus, frameSize, liveFrameSeen],
+  )
+  /** F5：选中节点的画面边框（蓝框，与定位命中绿框/框选橙框语义区分） */
+  const selectedRegion = useMemo(
+    () => (frozen && selected ? nodeOverlayRegion(selected) : null),
+    [frozen, selected],
+  )
+  /** F5：当前展开状态下实际渲染的树行（键盘导航的基准顺序） */
+  const visibleRows = useMemo(
+    () => visibleTreeRows(tree.roots, tree.byIndex, openNodes),
+    [tree, openNodes],
+  )
+  /** 拾取节点：选中 + 填充定位候选 + roving tabindex 同步 */
+  const pickTreeNode = useCallback((node: SnapshotTreeNode) => {
+    setSelected(node)
+    setTreeFocus(node.index)
+    // 选中节点时把它的标识直接填进定位值，减少手输；
+    // resource-id 优先于 text（文案会变，id 更稳）
+    const preferred = preferredLocator(node)
+    if (preferred) {
+      setLocatorBy(preferred.by)
+      setLocator(preferred.value)
+    }
+  }, [])
+  /** 树行键盘事件：Enter 选中；方向键在可见行上导航（展开/折叠/回父级） */
+  const handleTreeKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>, node: SnapshotTreeNode) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        pickTreeNode(node)
+        return
+      }
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+      event.preventDefault()
+      const action = treeNavAction(visibleRows, node, event.key, openNodes, tree.byIndex, tree.parentOf)
+      if (!action) return
+      if (action.toggle !== undefined) {
+        setOpenNodes((prev) => {
+          const next = new Set(prev)
+          if (next.has(action.toggle!)) next.delete(action.toggle!)
+          else next.add(action.toggle!)
+          return next
+        })
+      }
+      if (action.focus !== null) {
+        setTreeFocus(action.focus)
+        const row = document.querySelector<HTMLElement>('[data-tree-index="' + action.focus + '"]')
+        row?.focus()
+      }
+    },
+    [pickTreeNode, visibleRows, openNodes, tree],
+  )
+
+  // F6 状态口径统一：已连接 / 连接中 / 已断开（idle 是还没开始连，仍叫未连接）
+  const wsText =
+    wsStatus === 'open' ? '已连接'
+      : wsStatus === 'connecting' ? '连接中'
+        : wsStatus === 'closed' ? '已断开'
+          : '未连接'
 
   /** 设备档案分辨率（原型 d.res）；vendor 实时流可能是缩放帧，不能拿它冒充分辨率 */
   const currentDevice = devices.find((device) => device.resource_key === target?.serial) ?? null
@@ -1147,10 +1285,10 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
   if (!open) return null
 
   return (
-    <div className="debug-workspace" aria-label={target ? target.label + ' · 调试' : '设备调试'}>
+    <div className={'debug-workspace' + (focus ? ' focus' : '')} aria-label={target ? target.label + ' · 调试' : '设备调试'}>
       {/* 原型 inspectorPage：定位方式切换器在 toolbar 之前，独立一行 */}
-      <div className="flex wrap mb" role="group" aria-label="定位方式">
-        {([['native', '原生节点'], ['image', '图像模板']] as const).map(([value, label]) => (
+      <div className="flex wrap mb" role="group" aria-label="调试模式">
+        {([['native', '原生节点'], ['image', '图像框选']] as const).map(([value, label]) => (
           <Button
             key={value}
             size="small"
@@ -1165,13 +1303,14 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
               }
             }}
           >
-            {label}
+            {/* 选中态用 ✓ 前缀做非颜色标识：强制颜色/高对比下不靠背景色也能辨认（审查 F7） */}
+            {inspectMode === value ? '✓ ' : ''}{label}
           </Button>
         ))}
         <span className="small muted">
           {inspectMode === 'native'
-            ? '冻结快照后点击树节点；定位结果来自 vendor 实时校验。'
-            : '图像模板从服务端保留的快照裁剪登记，匹配经 vendor TemplateStore 校验。'}
+            ? '冻结画面后点击树节点拾取元素；验证定位会实时采集画面校验。'
+            : '在冻结画面上框选区域并登记为模板；匹配验证由服务端校验。'}
         </span>
       </div>
 
@@ -1239,11 +1378,20 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         {controlEnabled ? <Badge tone="green" dot>操控中</Badge> : null}
         <span className="spacer" />
         <Button size="small" onClick={handleClose}>返回设备池</Button>
+        {/* 聚焦投屏：两侧检查面板收起、画面按视口高度放大（审查 F2）；快照与选中不丢失 */}
+        <Button
+          size="small"
+          aria-pressed={focus}
+          onClick={() => onFocusChange?.(!focus)}
+        >
+          {focus ? '✓ 展开检查' : '聚焦投屏'}
+        </Button>
         {frozen ? (
           <Button
             size="small"
             icon="play"
-            disabled={validateMutation.isPending || cropValidation.isPending || createTemplateMutation.isPending}
+            disabled={sessionClosed || validateMutation.isPending || cropValidation.isPending || createTemplateMutation.isPending}
+            title={sessionClosed ? '会话已结束，旧画面不再代表设备状态；请先重建会话' : undefined}
             onClick={() => {
               // socket 一直活着，恢复后下一帧就会覆盖 canvas
               clearInspection()
@@ -1251,11 +1399,13 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
               setSnapshotSize(null)
               setNodes(null)
               setTreeError(null)
+              // F1：恢复后旧图不再冒充新帧，画出新帧才翻回「实时画面」
+              setLiveFrameSeen(false)
               frozenRef.current = false
               setFrozen(false)
             }}
           >
-            恢复预览
+            恢复实时
           </Button>
         ) : (
           <Button
@@ -1266,22 +1416,47 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
             title={sessionActive ? '冻结当前画面并采集 UI 树' : '调试会话尚未激活'}
             onClick={() => snapshotMutation.mutate()}
           >
-            {snapshotMutation.isPending ? '采集中…' : '采集检查'}
+            {snapshotMutation.isPending ? '冻结中…' : '冻结并检查'}
           </Button>
         )}
       </div>
 
       <div className="debug-workspace-body">
         {sessionClosed ? (
+          // F4：终态只有一条主提示，恢复动作（重建会话）就在提示内；
+          // 关闭码/传输细节收进可展开详情，不再三条提示重复刷屏。
           <div className="mb">
             <Notice tone="red" title="调试会话已结束">
               {closeReasonText(closeReason)}点「重建会话」可就地重新开始，不必返回设备池。
+              <div className="flex" style={{ marginTop: 8 }}>
+                <Button
+                  size="small"
+                  kind="primary"
+                  onClick={() => void recreateSession()}
+                  disabled={createMutation.isPending}
+                >
+                  {createMutation.isPending ? '重建中…' : '重建会话'}
+                </Button>
+              </div>
+              {wsNotice || previewNote ? (
+                <details className="notice-details">
+                  <summary>连接与传输详情</summary>
+                  {wsNotice ? <div>媒体通道：{wsNotice}</div> : null}
+                  {previewNote ? <div>传输：{previewNote}</div> : null}
+                </details>
+              ) : null}
             </Notice>
           </div>
-        ) : null}
-        {wsNotice ? (
+        ) : wsNotice ? (
           <div className="mb">
-            <Notice tone="amber" title="调试会话">{wsNotice}</Notice>
+            <Notice tone="amber" title="调试会话">
+              {wsNotice}
+              {wsStatus !== 'open' ? (
+                <div className="flex" style={{ marginTop: 8 }}>
+                  <Button size="small" onClick={reconnectLive}>重新连接</Button>
+                </div>
+              ) : null}
+            </Notice>
           </div>
         ) : null}
         {closeError ? (
@@ -1294,7 +1469,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
             <Notice tone="amber" title="直接操控">{controlError}</Notice>
           </div>
         ) : null}
-        {previewMode === 'jpeg' && previewNote ? (
+        {!sessionClosed && previewMode === 'jpeg' && previewNote ? (
           <div className="mb">
             <Notice tone="amber" title="预览已回退 JPEG">{previewNote}</Notice>
           </div>
@@ -1317,16 +1492,18 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
           {/* 第 1 栏：手机外壳内的真机实时画面 */}
           <section className="phone-panel">
             <div className="between">
-              <Badge tone={frozen ? 'amber' : 'blue'} dot>{frozen ? '冻结快照' : '实时画面'}</Badge>
+              {/* F1：标签由会话/连接/首帧/冻结共同决定，断线后的旧图不再标「实时画面」 */}
+              <Badge tone={stageView.tone} dot>{stageView.label}</Badge>
               <span className="flex" style={{ gap: 8 }}>
                 <span className="small muted">
-                  {previewMode === 'h264'
-                    ? wsStatus === 'open'
-                      ? 'H.264 · ' + (previewFps ?? 0) + 'fps'
-                      : 'H.264 · ' + wsText
-                    : previewNote
-                      ? 'JPEG 回退'
-                      : wsText}
+                  {frozen
+                    ? '已暂停预览'
+                    : previewMode === 'h264'
+                      ? 'H.264 · ' + (wsStatus === 'open' ? (previewFps ?? 0) + 'fps' : wsText) +
+                        (wsStatus === 'open' && (previewStaleSec ?? 0) >= 5
+                          ? ' · 画面 ' + previewStaleSec + ' 秒未更新'
+                          : '')
+                      : 'JPEG · ' + wsText}
                 </span>
                 {sessionClosed ? (
                   // 终态会话的媒体通道已无东西可连：给重建入口而不是无效的「重新连接」
@@ -1355,6 +1532,10 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                 <div className="phone-camera" />
                 <div className="debug-frame" ref={stageRef} style={{ display: frameSize ? undefined : 'none' }}>
                   <canvas ref={canvasRef} aria-label="设备画面预览" />
+                  {/* F1：断线/终态后旧图明确标记过期，盖在画面上不挡操作 */}
+                  {stageView.stale && stageView.staleNote ? (
+                    <div className="debug-stage-stale" role="status">{stageView.staleNote}</div>
+                  ) : null}
                   {controlEnabled && touchDot ? (
                     <span
                       className="debug-touch-dot"
@@ -1373,6 +1554,20 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                       </span>
                     </div>
                   ))}
+                  {/* F5：当前选中节点的蓝框（不是定位验证结果） */}
+                  {selectedRegion && coordinateSize ? (
+                    <div
+                      className="debug-box node-pick"
+                      style={{
+                        left: (selectedRegion.x / coordinateSize.w) * 100 + '%',
+                        top: (selectedRegion.y / coordinateSize.h) * 100 + '%',
+                        width: (selectedRegion.w / coordinateSize.w) * 100 + '%',
+                        height: (selectedRegion.h / coordinateSize.h) * 100 + '%',
+                      }}
+                    >
+                      <span>选中</span>
+                    </div>
+                  ) : null}
                   {cropSelectionEnabled(inspectMode) && overlayRegion && coordinateSize ? (
                     <div
                       className="debug-box pick"
@@ -1401,31 +1596,32 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
               <span className="small muted">
                 {controlEnabled
                   ? '直接操控中 · 点击/拖动画面（单操作者）'
-                  : '直接操控未启用 · 先在工具栏点「直接操控」'}
+                  : controlState.reason ?? '直接操控未启用 · 点工具栏「直接操控」'}
               </span>
               <Button
                 size="small"
                 disabled={!controlEnabled}
-                title={controlEnabled ? undefined : '先启用直接操控'}
+                title={controlEnabled ? undefined : controlState.reason ?? '先启用直接操控'}
                 onClick={() => void handleControlKey('back')}
               >
-                返回键
+                返回
               </Button>
               <Button
                 size="small"
                 disabled={!controlEnabled}
-                title={controlEnabled ? undefined : '先启用直接操控'}
+                title={controlEnabled ? undefined : controlState.reason ?? '先启用直接操控'}
                 onClick={() => void handleControlKey('home')}
               >
-                Home
+                主页
               </Button>
             </div>
-            <div className="between small muted">
+            <div className="between small muted phone-meta-row">
               <span>{snapshotId ? '快照 ' + snapshotId : frozen ? '快照待采集' : '设备画面未冻结'}</span>
               <span>{deviceResolution}</span>
             </div>
             <div className="debug-kv" style={{ marginTop: 8 }}>
               <span>绿框 = 最近一次定位命中</span>
+              <span>蓝框 = 当前选中节点</span>
               <span>橙框 = 框选区域（用于新建模板）</span>
             </div>
             {detailError ? (
@@ -1460,17 +1656,19 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                         node={node}
                         depth={0}
                         byIndex={tree.byIndex}
+                        onPick={pickTreeNode}
+                        onKeyDown={handleTreeKeyDown}
                         selectedIndex={selected?.index ?? null}
-                        frozen={frozen}
-                        onPick={(picked) => {
-                          setSelected(picked)
-                          // 选中节点时把它的标识直接填进定位值，减少手输；
-                          // resource-id 优先于 text（文案会变，id 更稳）
-                          const preferred = preferredLocator(picked)
-                          if (preferred) {
-                            setLocatorBy(preferred.by)
-                            setLocator(preferred.value)
-                          }
+                        focusIndex={treeFocus ?? visibleRows[0]?.index ?? null}
+                        onFocusRow={setTreeFocus}
+                        openSet={openNodes}
+                        onToggle={(index) => {
+                          setOpenNodes((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(index)) next.delete(index)
+                            else next.add(index)
+                            return next
+                          })
                         }}
                       />
                     ))
@@ -1479,7 +1677,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                 <div className="tree-foot small muted">
                   {frozen && snapshotId
                     ? '已绑定同一次冻结快照，点击节点查看定位描述。'
-                    : '先点击「采集检查」，冻结画面与 UI 树。'}
+                    : '先点击「冻结并检查」，采集画面与 UI 树。'}
                 </div>
               </section>
 
@@ -1502,7 +1700,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                     <Empty
                       icon="search"
                       title="等待拾取"
-                      description={frozen ? '在层级树中点击节点，这里显示其属性与定位候选。' : '先点击「采集检查」冻结画面与 UI 树。'}
+                      description={frozen ? '在层级树中点击节点，这里显示其属性与定位候选。' : '先点击「冻结并检查」采集画面与 UI 树。'}
                     />
                   )}
 
@@ -1663,7 +1861,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
               <section className="panel panel-pad image-form">
                 <h2 style={{ fontSize: 14 }}>框选与保存模板</h2>
                 <p className="small muted">
-                  {snapshotId ? '在冻结画面上拖拽框选，或填写坐标。' : '先点击「采集检查」冻结画面。'}
+                  {snapshotId ? '在冻结画面上拖拽框选，或填写坐标。' : '先点击「冻结并检查」冻结画面。'}
                   坐标单位：设备像素，范围 {coordinateSize ? coordinateSize.w + ' × ' + coordinateSize.h : '—'}。
                 </p>
                 <div className="image-coords">
@@ -1686,7 +1884,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
                   <span>快照：{snapshotId ? snapshotId.slice(0, 12) : '未采集（模板只能从服务端保留的快照裁剪）'}</span>
                 </div>
                 <label className="field">
-                  <span>模板逻辑名（.png，POSIX 相对路径）</span>
+                  <span>模板文件名（.png，如 buttons/confirm.png）</span>
                   <input
                     value={newLogical}
                     onChange={(event) => setNewLogical(event.target.value)}
@@ -1847,7 +2045,7 @@ export function DebugDrawer({ open, target, devices, onTargetChange, onClose, on
         }
       >
         <p className="small muted">
-          点击/拖动左侧真机画面即可操作设备；冻结画面、切到图像模板模式或关闭会话会自动退出。
+          点击/拖动左侧真机画面即可操作设备；冻结画面、切到图像框选模式或关闭会话会自动退出。
           控制权约 5 秒无心跳自动释放。
         </p>
       </Dialog>

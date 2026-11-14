@@ -110,15 +110,15 @@ test('快照画面地址与会话/快照 id 对应', () => {
   )
 })
 
-test('刷新/恢复预览清临时状态，但模板清单只来自服务端（不本地删除）', () => {
+test('刷新/恢复实时清临时状态，但模板清单只来自服务端（不本地删除）', () => {
   const source = fs.readFileSync(
     require.resolve('../src/components/DebugDrawer.tsx'),
     'utf8',
   )
   // 刷新：先清临时选择/验证/颜色框，再从服务端重读已登记模板
   assert.match(source, /clearInspection\(\);\s*void templatesQuery\.refetch\(\)/)
-  // 恢复预览同样走 clearInspection（同一个清除路径）
-  assert.match(source, /clearInspection\(\)[\s\S]{0,400}恢复预览/)
+  // 恢复实时同样走 clearInspection（同一个清除路径）；按钮文案统一为「恢复实时」（审查 F6）
+  assert.match(source, /clearInspection\(\)[\s\S]{0,400}恢复实时/)
   // 已登记模板不在前端状态里：没有 setTemplates，也没有删除模板的请求
   assert.ok(!/setTemplates\(/.test(source), '模板清单必须直接来自服务端，不能本地维护/删除')
   assert.ok(!/deleteTemplate|method: 'DELETE'/.test(source), '前端不得删除已登记模板')

@@ -55,7 +55,8 @@ type UiTab = 'runs' | 'suites' | 'cases' | 'debug' | 'templates'
 const TABS: TabItem<UiTab>[] = [
   { value: 'suites', label: '测试套件' },
   { value: 'debug', label: '设备调试' },
-  { value: 'templates', label: '图像模板' },
+  // F6：与调试模式按钮「图像框选」区分开——这个页签是跨会话的模板清单
+  { value: 'templates', label: '模板库' },
 ]
 
 /**
@@ -150,6 +151,9 @@ export function UiPage() {
   useEffect(() => {
     if (tab === 'debug') setDebugEngaged(true)
   }, [tab])
+  // 聚焦投屏（审查 F2）：压缩页头、隐藏页签与检查面板，画面按视口高度放大。
+  // 状态在页面持有——聚焦还要压 DebugDrawer 之外的页头/上下文条。
+  const [debugFocus, setDebugFocus] = useState(false)
   // 套件 / 用例页签：选中的套件与版本（versionNo 为 null 表示看最新版本）
   const [suiteId, setSuiteId] = useState<string | null>(null)
   const [versionNo, setVersionNo] = useState<number | null>(null)
@@ -407,27 +411,52 @@ export function UiPage() {
 
   return (
     <>
-      <PageHeading
-        title="UI 自动化"
-        description="用例、套件与执行记录：断言结果可追溯到报告与现场证据"
-        actions={<PrimaryAction label="新建任务" icon="plus" onClick={() => { setRunSuite(null); setWizardOpen(true) }} />}
-      />
-      <ContextBar
-        scope={targetScope}
-        onScopeChange={setTargetScope}
-        extra={<span className="muted small">断言与现场证据均在后端留存</span>}
-      />
-
-      {planned ? (
-        <div className="mb">
-          <PlannedNotice scope={targetScope} />
+      {debugFocus ? (
+        // 聚焦投屏：页头压成一行，隐藏上下文条/规划提示等非操作必需内容（审查 F2/F3）
+        <div className="between mb debug-focus-head">
+          <h1>设备调试 · 聚焦投屏</h1>
+          <div className="flex">
+            <Button size="small" onClick={() => setDebugFocus(false)}>展开检查</Button>
+            <PrimaryAction label="新建任务" icon="plus" onClick={() => { setRunSuite(null); setWizardOpen(true) }} />
+          </div>
         </div>
+      ) : (
+        <>
+          <PageHeading
+            title="UI 自动化"
+            description="用例、套件与执行记录：断言结果可追溯到报告与现场证据"
+            actions={<PrimaryAction label="新建任务" icon="plus" onClick={() => { setRunSuite(null); setWizardOpen(true) }} />}
+          />
+          <ContextBar
+            scope={targetScope}
+            onScopeChange={setTargetScope}
+            extra={<span className="muted small">断言与现场证据均在后端留存</span>}
+          />
+
+          {planned ? (
+            <div className="mb">
+              <PlannedNotice scope={targetScope} />
+            </div>
+          ) : null}
+        </>
+      )}
+
+      {!debugFocus ? (
+        <Tabs
+          items={TABS}
+          active={tab === 'cases' || tab === 'runs' ? 'suites' : tab}
+          onChange={setTab}
+          ariaLabel="UI 自动化视图"
+          action={
+            // 「查看执行记录」并入页签行，不再独占一整行竖向空间（审查 F2）
+            <Button size="small" onClick={() => setTab(tab === 'runs' ? 'suites' : 'runs')}>
+              {tab === 'runs' ? '返回测试套件' : '查看执行记录'}
+            </Button>
+          }
+        />
       ) : null}
 
-      <div className="between mb"><Button size="small" onClick={() => setTab(tab === 'runs' ? 'suites' : 'runs')}>{tab === 'runs' ? '返回测试套件' : '查看执行记录'}</Button></div>
-      <Tabs items={TABS} active={tab === 'cases' || tab === 'runs' ? 'suites' : tab} onChange={setTab} ariaLabel="UI 自动化视图" />
-
-      {currentApp ? (
+      {currentApp && !debugFocus ? (
         <div className="mb">
           <Notice tone="blue" title={'当前工作区：' + currentApp.name}>
             运行与任务都锚定该应用（id {currentApp.id.slice(0, 8)}…）；清单已按此应用过滤。
@@ -671,9 +700,12 @@ export function UiPage() {
             }
             devices={readyDevices}
             onTargetChange={(target) => setDebugTarget(target)}
+            focus={debugFocus}
+            onFocusChange={setDebugFocus}
             onClose={() => {
               setDebugTarget(null)
               setDebugEngaged(false)
+              setDebugFocus(false)
               // 关闭会话后回到套件：停留在调试页签会立刻按 ready 设备重建会话
               setTab('suites')
             }}

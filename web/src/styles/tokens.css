@@ -214,7 +214,9 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
 .icon { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ── 上下文条 / 目标端选择器 ──────────────────────────── */
-.context-strip { display: flex; align-items: center; gap: var(--space-5); padding: 11px 15px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: var(--space-10); font-size: var(--fs-sm); }
+/* F3：允许提前折行，不依赖 760px 单一断点——剩余宽度不足时说明/历史对象
+   提示整行换行，而不是被挤成每行一两个字。 */
+.context-strip { display: flex; align-items: center; flex-wrap: wrap; row-gap: 9px; gap: var(--space-5); padding: 11px 15px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: var(--space-10); font-size: var(--fs-sm); }
 .context-strip select { min-width: 145px; }
 .context-strip .muted { font-size: var(--fs-xs); }
 .app-icon { width: 29px; height: 29px; border-radius: var(--radius-sm); background: #253b65; color: #fff; display: grid; place-items: center; }
@@ -686,6 +688,17 @@ dialog.toast.error { background: var(--red); }
 .debug-box > span { position: absolute; top: -19px; left: -2px; background: #34d399; color: #06231a; font-size: var(--fs-2xs); font-weight: 600; padding: 1px 5px; border-radius: 3px; white-space: nowrap; }
 .debug-box.pick { border-color: #f59e0b; border-style: dashed; }
 .debug-box.pick > span { background: #f59e0b; color: #2b1a00; }
+/* F5：当前选中节点——蓝框实线，与定位命中（绿）/框选（橙虚线）区分 */
+.debug-box.node-pick { border-color: var(--blue); border-style: solid; }
+.debug-box.node-pick > span { background: var(--blue); color: #fff; }
+/* F1：断线/终态后旧图不再标实时——画面上方盖一条过期提示，不挡操作 */
+.debug-stage-stale {
+  position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+  z-index: 2; max-width: calc(100% - 12px);
+  background: #25324fe6; color: #fff; font-size: var(--fs-xs);
+  padding: 3px 10px; border-radius: var(--radius-3xs); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
 
 .debug-tree { max-height: 400px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-4) var(--space-5); font-size: var(--fs-md); }
 .debug-tree .mono, .debug-tree .small, .debug-tree .muted { font-size: var(--fs-md); }
@@ -709,7 +722,8 @@ dialog.toast.error { background: var(--red); }
 .inspector .panel-head h2 { font-size: var(--fs-body); }
 .phone-panel { padding: 16px; background: #eef2f8; border-radius: 12px; border: 1px solid #dfe6f0; min-width: 0; }
 .phone-panel .phone-stage { background: transparent; border: 0; padding: 8px 0; min-height: 0; }
-.tree { padding: 8px 6px; font-family: Consolas, monospace; font-size: 10px; max-height: 420px; overflow: auto; }
+/* F5：树文字不低于 12px（原 10px 不达可读性下限） */
+.tree { padding: 8px 6px; font-family: Consolas, monospace; font-size: var(--fs-sm); max-height: 420px; overflow: auto; }
 .tree-row { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-radius: 5px; white-space: nowrap; border: 0; background: none; width: 100%; text-align: left; color: #7687a2; cursor: pointer; font: inherit; }
 .tree-row:hover { background: var(--hover-row); }
 .tree-row.level1 { padding-left: 20px; }
@@ -753,6 +767,55 @@ dialog.toast.error { background: var(--red); }
 .debug-touch-dot { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: rgba(66, 99, 235, .82); border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(66, 99, 235, .35); pointer-events: none; z-index: 3; }
 .debug-control-bar { display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; margin: 8px auto 0; }
 
+/* ── 聚焦投屏（审查 F2）：调试工作区独占的紧凑视图 ──
+   只收 DebugDrawer 自己的面板；页头压缩在 UiPage（.debug-focus-head）。
+   垂直预算：1366×768 不滚动——压缩 main 底距/页脚与行距（:has 定位到聚焦态）。 */
+.debug-focus-head h1 { font-size: 20px; letter-spacing: -.4px; }
+.debug-focus-head.mb { margin-bottom: 10px; }
+main:has(.debug-workspace.focus) { padding-bottom: 8px; }
+main:has(.debug-workspace.focus) .debug-pane-foot { margin-top: 8px; padding: 8px 0; }
+.debug-workspace.focus { padding-bottom: 6px; }
+.debug-workspace.focus .inspector { grid-template-columns: minmax(0, 1fr); }
+.debug-workspace.focus .inspector > section:nth-child(n+2) { display: none; }
+.debug-workspace.focus .mb { margin-bottom: 10px; }
+.debug-workspace.focus .toolbar { margin-bottom: 10px; }
+.debug-workspace.focus .debug-workspace-body { gap: 12px; }
+/* 手机外壳跟随画面尺寸，不再固定 226px 宽：画面按视口剩余高度等比放大 */
+.debug-workspace.focus .phone-stage .phone { width: fit-content; max-width: 100%; }
+.debug-workspace.focus .debug-frame canvas {
+  height: clamp(240px, calc(100vh - 470px), 1100px);
+  max-height: none;
+}
+/* 无帧占位同样按真实画面比例（496×1080）随高度自适应，外壳不塌缩 */
+.debug-workspace.focus .phone-stage .debug-stage-empty {
+  width: auto;
+  height: clamp(240px, calc(100vh - 470px), 1100px);
+  aspect-ratio: 496 / 1080;
+}
+/* 聚焦时隐藏次要信息行：快照号/分辨率与框选图例（工具栏与状态行已覆盖） */
+.debug-workspace.focus .phone-meta-row,
+.debug-workspace.focus .phone-panel .debug-kv { display: none; }
+
+/* F4：主提示内的可展开诊断详情（关闭码/传输细节不再刷成多条提示） */
+.notice-details { margin-top: 8px; font-size: var(--fs-xs); }
+.notice-details summary { cursor: pointer; }
+.notice-details > div { margin-top: 5px; overflow-wrap: anywhere; }
+
+/* ── F7：强制颜色（Windows 高对比）——选中态补非颜色标识与系统色 ── */
+@media (forced-colors: active) {
+  .btn[aria-pressed="true"] { border: 2px solid Highlight; font-weight: var(--fw-bold); }
+  .tab.active { border-bottom: 3px solid Highlight; }
+  .tree-row.selected { outline: 1px solid Highlight; }
+  .locator-option.active,
+  .scope-chip.selected,
+  .wizard-step[aria-current="step"],
+  .choice[aria-pressed="true"],
+  .db-table-btn[aria-pressed="true"] { border: 1px solid Highlight; }
+  .debug-box, .debug-box.pick, .debug-box.node-pick { border-color: Highlight; }
+  .debug-box > span, .debug-box.pick > span, .debug-box.node-pick > span { background: Highlight; color: HighlightText; }
+  .debug-stage-stale { background: Canvas; color: CanvasText; border: 1px solid CanvasText; }
+}
+
 /* ---- 正式化改造：工作空间/引导/管理表单与长名称（工单 01/02/08/10） ---- */
 .form-stack { display: grid; gap: 12px; align-content: start; }
 .form-stack .field > span { font-size: var(--fs-xs); color: var(--ink-soft); font-weight: var(--fw-medium); }
@@ -781,5 +844,4 @@ dialog.toast.error { background: var(--red); }
 @media (max-width: 760px) {
   .workspace-name, .breadcrumb-workspace, .context-project-name { max-width: 100px; }
   .mode-tag { font-size: var(--fs-2xs); padding: var(--space-1) 6px; }
-  .context-strip { flex-wrap: wrap; }
 }
