@@ -465,7 +465,7 @@ def test_import_duplicate_same_content_returns_original_without_recopy(
     """场景 A：同 request_key + 同内容 -> duplicate，不复制、不重登记、证据不变。"""
     from app.config import settings
     from app.domain import artifacts as artifacts_mod
-    from app.routers import runs as runs_mod
+    from app.services import run_import as run_import_service
 
     monkeypatch.setattr(settings, "data_dir", tmp_path / "data")
     source = _write_artifacts(tmp_path / "vendor-run", junit=JUNIT_PASSED, report=PERF_REPORT)
@@ -483,7 +483,8 @@ def test_import_duplicate_same_content_returns_original_without_recopy(
     def _no_copy(*args, **kwargs):
         raise AssertionError("重复导入不得重新复制文件")
 
-    monkeypatch.setattr(runs_mod.shutil, "copy2", _no_copy)
+    # P2-03：复制机制在 services/run_import.py，拦截目标随迁移
+    monkeypatch.setattr(run_import_service.shutil, "copy2", _no_copy)
 
     again = api_client.post(
         "/api/v1/runs/import",
